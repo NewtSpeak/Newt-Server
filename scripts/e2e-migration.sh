@@ -9,8 +9,9 @@
 #          → 双 PC 热切 → ack → 输出 mute_gap_ms）
 #
 # 验收点（docs 15 BM M4：叶死/根死静音窗口达标；任务卡三场景）：
-#   1. 叶死：kill -9 非 anchor 节点 → 该节点用户自动迁到存活节点、音频自动恢复
-#      （loadbot 不重启、无人工操作），mute_gap < 25s（判死 15s + 迁移数秒）
+#   1. 叶死：kill -9 非 anchor 节点 → BI.3 提前判死（级联邻居 EdgeDown 指控 +
+#      客户端 ice-failed 上报 + ≥1 次心跳丢失，docs 15 §5）→ 该节点用户自动迁到
+#      存活节点、音频自动恢复（loadbot 不重启、无人工操作），mute_gap < 10s
 #   2. Drain：admin drain → 用户秒级主动迁走，mute_gap < 5s
 #   3. 根死：kill -9 anchor → 新 anchor 选举 + epoch+1 + 原根用户迁移 →
 #      双方恢复互听；断言 DB lease 换根且 epoch+1
@@ -268,7 +269,9 @@ start_bot() { # start_bot <bot序号> <频道> <目标节点> <另一节点> <�
 }
 
 # =============================================================================
-# 场景 1：叶死迁移（docs 09 I.1 / 08 §7.2；判死 15s + 迁移数秒，mute_gap < 25s）
+# 场景 1：叶死迁移（docs 09 I.1 / 08 §7.2 / 15 §5 BI.3 提前判死）：
+# kill 后级联邻居 EdgeDown（~1s）+ bot 侧 ice-failed 上报（~即时）+ ≥1 次心跳
+# 丢失（≤5s）→ 提前判死（无需等满 15s）→ 迁移 1–2s，mute_gap 目标 < 10s。
 # =============================================================================
 echo ""
 echo "==> [场景 1] 叶死迁移：bot1@node1(anchor)、bot2@node2(叶)，kill -9 node2"
@@ -288,7 +291,11 @@ kill -9 "$SFU2_PID"
 
 GAP1=$(wait_migrated "$WORK/s1-bot2.out" 40) || { echo "!! bot2 未完成迁移"; tail -5 "$WORK/s1-bot2.log"; exit 1; }
 echo "    bot2 迁移完成，mute_gap_ms=${GAP1}（kill 后 $((($(now_ms) - KILL_MS)))ms）"
-[ "$GAP1" -ge 0 ] && [ "$GAP1" -lt 25000 ] || { echo "!! 叶死静音窗口 ${GAP1}ms ≥ 25000ms"; exit 1; }
+# BI.3 提前判死生效断言：静音窗口显著低于硬判死路径（15s 判死 + 迁移）。
+[ "$GAP1" -ge 0 ] && [ "$GAP1" -lt 10000 ] || { echo "!! 叶死静音窗口 ${GAP1}ms ≥ 10000ms（提前判死未生效？）"; exit 1; }
+grep -q '"event":"ice_failed_report"' "$WORK/s1-bot2.out" \
+  && echo "    bot2 已上报 ice-failed（BI.3 客户端侧信号）" \
+  || echo "    （注：bot2 未见 ice-failed 上报行，提前判死依赖 EdgeDown+self_ice 信号）"
 wait_user_on_node "$BOT2_ID" "$NODE1_ID" 10 "bot2 迁移落点"
 assert_recovery "$WORK/s1-bot2.out" "bot2（迁移方）"
 assert_recovery "$WORK/s1-bot1.out" "bot1（对端）"
@@ -377,7 +384,7 @@ echo "    [场景 3] PASS（mute_gap_ms=${GAP3}）"
 echo ""
 echo "=========================================="
 echo "M4 热迁移 E2E 全部通过："
-echo "  场景 1 叶死:   mute_gap_ms=${GAP1}（断言 < 25000）"
+echo "  场景 1 叶死:   mute_gap_ms=${GAP1}（断言 < 10000，BI.3 提前判死）"
 echo "  场景 2 Drain:  mute_gap_ms=${GAP2}（断言 < 5000）"
 echo "  场景 3 根死:   mute_gap_ms=${GAP3}（断言 < 25000）+ 切根 epoch ${EPOCH_BEFORE}→${EPOCH_AFTER}"
 echo "  迁移后 caps 重放（publish/subscribe 恢复）三场景均验证"

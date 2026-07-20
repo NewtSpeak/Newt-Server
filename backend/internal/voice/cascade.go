@@ -415,8 +415,12 @@ func (s *Service) handleEdgeDown(p eventbus.EdgeDownPayload) {
 	if err := s.pushCascadeState(lease); err != nil {
 		log.Printf("voice: 房间 %s EdgeDown 修复下发失败: %v", roomID, err)
 	}
-	// TODO(M3+): 同一边短时间内反复 EdgeDown（如网络分区）时，升级为
-	// 该叶节点用户 MIGRATE_LEAF 迁移（复用迁移引擎），本轮先依赖重拨与判死兜底。
+	// 分区升级（docs 09 §3.3）：同一叶边 60s 内 ≥3 次 EdgeDown（重拨修复无效）
+	// → 该叶节点上本房用户 MIGRATE_LEAF（reason=PARTITION）；升级后冷却防震荡。
+	flapKey := roomID.String() + "/" + parentID.String() + ">" + childID.String()
+	if s.edgeFlaps.record(flapKey, time.Now()) {
+		s.escalatePartition(lease.GuildID, roomID, childID)
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -137,17 +137,26 @@ func (b *Bridge) toInfo(node model.SfuNode) sfuctl.NodeInfo {
 		CascadeEndpoint: node.CascadeEndpoint,
 		NodeRTTMs:       node.NodeRTTMs,
 	}
-	if snapshot, ok := b.registry.Snapshot(node.ID); ok && snapshot.Online {
-		info.Online = true
-		capacity := snapshot.Capacity
-		if capacity.MaxUsers > 0 {
-			info.MaxUsers = capacity.MaxUsers
+	if node.LastSeenAt != nil {
+		info.LastSeenAt = *node.LastSeenAt
+	}
+	if snapshot, ok := b.registry.Snapshot(node.ID); ok {
+		// 心跳新鲜度以内存注册表为准（DB last_seen_at 有 30s 落库节流，仅作重启兜底）。
+		if !snapshot.LastSeen.IsZero() {
+			info.LastSeenAt = snapshot.LastSeen
 		}
-		info.CurrentUsers = capacity.CurrentUsers
-		info.CPUPercent = capacity.CPUPct
-		info.MemPercent = capacity.MemPct
-		info.BandwidthOutMbps = capacity.BandwidthOutMbps
-		info.ScreenTracks = capacity.ScreenTracks
+		if snapshot.Online {
+			info.Online = true
+			capacity := snapshot.Capacity
+			if capacity.MaxUsers > 0 {
+				info.MaxUsers = capacity.MaxUsers
+			}
+			info.CurrentUsers = capacity.CurrentUsers
+			info.CPUPercent = capacity.CPUPct
+			info.MemPercent = capacity.MemPct
+			info.BandwidthOutMbps = capacity.BandwidthOutMbps
+			info.ScreenTracks = capacity.ScreenTracks
+		}
 	}
 	return info
 }

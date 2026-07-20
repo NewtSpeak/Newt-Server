@@ -305,6 +305,40 @@ func (h *handlers) cancelApply(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// removeFromQueue DELETE /channels/:channelID/stage/queue/:userID
+//（Owl-Desktop docs 10 FR-15「移出队列」按钮）：管理员将他人移出麦序队列。
+// 需 STAGE_MANAGE_QUEUE 或 STAGE_BRING_UP；移除本人请走 DELETE /stage/apply。
+func (h *handlers) removeFromQueue(c *gin.Context) {
+	scope, ok := h.voiceChannelScope(c)
+	if !ok {
+		return
+	}
+	if !rbac.Has(scope.bits, rbac.StageManageQueue) && !rbac.Has(scope.bits, rbac.StageBringUp) {
+		fail(c, http.StatusForbidden, "FORBIDDEN", "无队列管理权限")
+		return
+	}
+	targetID, err := uuid.Parse(c.Param("userID"))
+	if err != nil {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "user_id 非法")
+		return
+	}
+	db := h.svc.db
+	unlock := h.svc.lockChannel(scope.channel.ID)
+	defer unlock()
+	result := db.Where("channel_id = ? AND user_id = ?", scope.channel.ID, targetID).Delete(&model.StageQueueEntry{})
+	if result.Error != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "移出队列失败")
+		return
+	}
+	if result.RowsAffected == 0 {
+		fail(c, http.StatusNotFound, "NOT_IN_QUEUE", "目标用户不在队列中")
+		return
+	}
+	h.svc.publishQueueUpdate(db, scope.channel.GuildID, scope.channel.ID)
+	h.svc.publishVoiceState(db, scope.channel.GuildID, scope.channel.ID, targetID)
+	c.Status(http.StatusNoContent)
+}
+
 // getQueue GET /channels/:channelID/stage/queue：全员可见简表（docs 11 AE.1）；
 // 具备队列管理相关节点者附带扩展字段。
 func (h *handlers) getQueue(c *gin.Context) {

@@ -48,10 +48,15 @@ type RefreshToken struct {
 	SessionID uuid.UUID `gorm:"type:uuid;not null;default:gen_random_uuid();index"`
 	// SessionCreatedAt 会话链首次登录时间（轮换时继承）；行自身的 CreatedAt 即该会话
 	// 最近一次签发/轮换时间，会话列表以此作为「最近使用」展示。
-	SessionCreatedAt time.Time  `gorm:"not null;default:now()"`
-	ExpiresAt        time.Time  `gorm:"not null;index"`
-	RevokedAt        *time.Time `gorm:"index"`
-	CreatedAt        time.Time
+	SessionCreatedAt time.Time `gorm:"not null;default:now()"`
+	// 会话设备元数据（Owl-Desktop docs 01 FR-27）：登录时从 User-Agent/RemoteAddr 采集，
+	// refresh 轮换时继承；会话列表据此展示「设备 · 平台 · IP」。历史数据为空串。
+	DeviceName string     `gorm:"size:128;not null;default:''"`
+	Platform   string     `gorm:"size:32;not null;default:''"`
+	IPAddress  string     `gorm:"size:64;not null;default:''"`
+	ExpiresAt  time.Time  `gorm:"not null;index"`
+	RevokedAt  *time.Time `gorm:"index"`
+	CreatedAt  time.Time
 }
 
 // UserSettings 服务端存储的用户设置 JSON 文档（Owl-Desktop docs 16 §7-1）。
@@ -69,8 +74,18 @@ type Guild struct {
 	// Description 服务器简介（设置页概览可编辑，Owl-Desktop docs 02 FR-13）。
 	Description string    `gorm:"size:1024;not null;default:''" json:"description"`
 	OwnerUserID uuid.UUID `gorm:"type:uuid;not null;index" json:"owner_user_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// IconURL / BannerURL 服务器图标与横幅（Owl-Desktop docs 02 FR-13/§8-9）：
+	// 走 /public-assets/profile 公开路径（与用户头像同存储约定），空串表示未设置。
+	IconURL   string    `gorm:"size:512;not null;default:''" json:"icon_url"`
+	BannerURL string    `gorm:"size:512;not null;default:''" json:"banner_url"`
+	// RestrictionBadgeVisible 「受限徽章」服级开关（Owl-Desktop docs 08 AM.4/§8-6）：
+	// 关闭后客户端不在成员列表渲染受限标识（服务端仍照常下发脱敏 RESTRICTION 事件）。
+	RestrictionBadgeVisible bool `gorm:"not null;default:true" json:"restriction_badge_visible"`
+	// RestrictionReasonRequired Restriction 创建是否强制填写 reason
+	//（Owl-Desktop docs 08 AI.2/§8-9：系统管可按服配置，默认强制）。
+	RestrictionReasonRequired bool      `gorm:"not null;default:true" json:"restriction_reason_required"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
 }
 
 type Member struct {
@@ -90,7 +105,17 @@ type Role struct {
 	IsEveryone  bool      `gorm:"not null;default:false" json:"is_everyone"`
 	// Style 角色名样式（customization 专项定义 schema）：纯色/线性/多色/径向渐变等，
 	// 存为 JSON 字符串；空对象表示无自定义样式。前端按此渲染用户名。
-	Style     string    `gorm:"type:jsonb;not null;default:'{}'" json:"style"`
+	Style string `gorm:"type:jsonb;not null;default:'{}'" json:"style"`
+	// Color 角色主色（Owl-Desktop docs 04 §8：#RRGGBB 十六进制，空串=默认色）；
+	// 与 Style 并存：Color 为基础色（成员列表分组/用户名着色），Style 为高级渐变样式。
+	Color string `gorm:"size:16;not null;default:''" json:"color"`
+	// Hoist 是否在成员列表单独分组显示（Owl-Desktop docs 02 FR-22 / 04 §8）。
+	Hoist bool `gorm:"not null;default:false" json:"hoist"`
+	// Mentionable 是否允许任何人 @提及该角色（Owl-Desktop docs 04 §8）。
+	Mentionable bool `gorm:"not null;default:false" json:"mentionable"`
+	// Managed 内置角色标记（建服自动创建的「管理员」角色，见 internal/guildseed）：
+	// 不可删除、permissions 锁定；客户端据此渲染锁定态（锁图标、禁用删除按钮）。
+	Managed   bool      `gorm:"not null;default:false" json:"managed"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -103,8 +128,9 @@ type MemberRole struct {
 type ChannelType string
 
 const (
-	ChannelText  ChannelType = "TEXT"
-	ChannelVoice ChannelType = "VOICE"
+	ChannelText     ChannelType = "TEXT"
+	ChannelVoice    ChannelType = "VOICE"
+	ChannelCategory ChannelType = "CATEGORY"
 )
 
 type Channel struct {
@@ -116,9 +142,18 @@ type Channel struct {
 	Topic string `gorm:"size:1024;not null;default:''" json:"topic"`
 	// Position 频道排序序号（拖拽批量排序，Owl-Desktop docs 03 FR-12）；
 	// 历史数据默认 0，列表排序按 position ASC, created_at ASC 兜底稳定。
-	Position  int       `gorm:"not null;default:0" json:"position"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Position int `gorm:"not null;default:0" json:"position"`
+	// ParentID 所属分类频道 ID（Owl-Desktop docs 03 FR-01/FR-03/FR-13）：
+	// 仅 TEXT/VOICE 频道可设，指向本服 CATEGORY 频道；分类被删除时子频道上浮（置空）。
+	ParentID *uuid.UUID `gorm:"type:uuid;index" json:"parent_id"`
+	// UserLimit 语音频道人数上限（Owl-Desktop docs 09 FR-40）：0=不限（仍受全局硬顶
+	// 200 约束）；1–99 为频道级可配上限，满员后普通用户 join 拒绝 CHANNEL_FULL。
+	UserLimit int `gorm:"not null;default:0" json:"user_limit"`
+	// RateLimitPerUser 文本频道慢速模式（Owl-Desktop docs 03 §8-9/05 FR-08）：
+	// 每用户两条消息之间的最小间隔秒数，0=关闭；上限 21600（6 小时，对标 Discord）。
+	RateLimitPerUser int       `gorm:"not null;default:0" json:"rate_limit_per_user"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type OverwriteType string

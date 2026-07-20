@@ -28,6 +28,7 @@ import {
   listMySessions,
   patchMyProfile,
   revokeMySession,
+  revokeOtherSessions,
   uploadMyProfileImage,
   type RegistrationStatus,
   type User,
@@ -198,9 +199,18 @@ function PasswordCard() {
   )
 }
 
-/** 登录会话管理：列出全部活跃会话（后台/用户端），可单个吊销 */
+const PLATFORM_LABELS: Record<string, string> = {
+  windows: "Windows",
+  macos: "macOS",
+  linux: "Linux",
+  android: "Android",
+  ios: "iOS",
+}
+
+/** 登录会话管理：列出全部活跃会话（含设备/平台/IP 元数据），可单个吊销或一键登出其他设备 */
 function SessionsCard() {
   const sessions = useAsyncData(() => listMySessions(), [])
+  const [revokingOthers, setRevokingOthers] = useState(false)
 
   async function onRevoke(sessionID: string, current: boolean) {
     if (current && !window.confirm("这是当前会话，吊销后你将被登出。确定继续？")) return
@@ -213,6 +223,23 @@ function SessionsCard() {
     }
   }
 
+  async function onRevokeOthers() {
+    if (!window.confirm("确定登出所有其他设备？其他端需重新登录。")) return
+    setRevokingOthers(true)
+    try {
+      const result = await revokeOtherSessions()
+      toast.success(`已登出 ${result.revoked} 个其他会话`)
+      sessions.reload(true)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "操作失败")
+    } finally {
+      setRevokingOthers(false)
+    }
+  }
+
+  const list = sessions.data ?? []
+  const others = list.filter(session => !session.current).length
+
   return (
     <Card>
       <CardHeader>
@@ -220,36 +247,53 @@ function SessionsCard() {
           <MonitorSmartphoneIcon className="size-4" />
           登录会话
         </CardTitle>
-        <CardDescription>全部活跃登录（后台管理 + 用户端）；吊销后对应端需重新登录。</CardDescription>
+        <CardDescription>全部活跃登录（后台管理 + 用户端），含设备与 IP 信息；吊销后对应端需重新登录。</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {sessions.status === "loading" && <LoadingState rows={3} />}
         {sessions.status === "error" && <ErrorState message={sessions.error} onRetry={() => sessions.reload()} />}
         {sessions.status === "success" &&
-          (sessions.data ?? []).map(session => (
-            <div key={session.id} className="flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm">
-              <Badge variant={session.audience === "admin" ? "default" : "secondary"}>
-                {session.audience === "admin" ? "后台" : "用户端"}
-              </Badge>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-muted-foreground">
-                  登录于 {new Date(session.created_at).toLocaleString()} · 最近使用{" "}
-                  {new Date(session.last_used_at).toLocaleString()}
-                </p>
+          list.map(session => {
+            const device = [
+              session.device_name,
+              session.platform && session.platform !== "unknown" ? PLATFORM_LABELS[session.platform] ?? session.platform : "",
+              session.ip_address,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+            return (
+              <div key={session.id} className="flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm">
+                <Badge variant={session.audience === "admin" ? "default" : "secondary"}>
+                  {session.audience === "admin" ? "后台" : "用户端"}
+                </Badge>
+                <div className="min-w-0 flex-1">
+                  {device && <p className="truncate text-xs font-medium">{device}</p>}
+                  <p className="truncate text-xs text-muted-foreground">
+                    登录于 {new Date(session.created_at).toLocaleString()} · 最近使用{" "}
+                    {new Date(session.last_used_at).toLocaleString()}
+                  </p>
+                </div>
+                {session.current && <Badge variant="outline">当前会话</Badge>}
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="吊销会话"
+                  onClick={() => onRevoke(session.id, session.current)}
+                >
+                  <XIcon />
+                </Button>
               </div>
-              {session.current && <Badge variant="outline">当前会话</Badge>}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                aria-label="吊销会话"
-                onClick={() => onRevoke(session.id, session.current)}
-              >
-                <XIcon />
-              </Button>
-            </div>
-          ))}
-        {sessions.status === "success" && (sessions.data ?? []).length === 0 && (
+            )
+          })}
+        {sessions.status === "success" && list.length === 0 && (
           <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">暂无活跃会话</p>
+        )}
+        {sessions.status === "success" && others > 0 && (
+          <div className="flex justify-end pt-1">
+            <Button variant="outline" size="sm" onClick={onRevokeOthers} disabled={revokingOthers}>
+              {revokingOthers ? "处理中…" : `登出所有其他设备（${others}）`}
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>

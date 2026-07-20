@@ -196,6 +196,20 @@ func (s *service) publishQueueUpdate(db *gorm.DB, guildID, channelID uuid.UUID) 
 
 func (s *service) publishInstanceUpdate(cfg model.StageChannelConfig) {
 	guildID, channelID := cfg.GuildID, cfg.ChannelID
+	// PATCH voice-stage 可改协管名单与频道屏幕并发上限：载荷补齐两项，
+	// 客户端无需回源 GET /voice-stage 即可全量更新本地配置（实时同步专项）。
+	coModIDs := []string{}
+	var coMods []model.StageCoModerator
+	if err := s.db.Where("channel_id = ?", channelID).Find(&coMods).Error; err == nil {
+		for _, mod := range coMods {
+			coModIDs = append(coModIDs, mod.UserID.String())
+		}
+	}
+	maxScreens := -1 // -1 = 未独立配置（跟随默认），与 GET /voice-stage 语义一致
+	var quota model.ScreenChannelQuota
+	if err := s.db.First(&quota, "channel_id = ?", channelID).Error; err == nil {
+		maxScreens = quota.MaxConcurrentScreens
+	}
 	s.bus.Publish(eventbus.Event{
 		Type:      eventbus.EventStageInstanceUpdate,
 		GuildID:   &guildID,
@@ -207,6 +221,8 @@ func (s *service) publishInstanceUpdate(cfg model.StageChannelConfig) {
 			"max_speakers":             cfg.MaxSpeakers,
 			"request_to_speak_enabled": cfg.RequestToSpeakEnabled,
 			"allow_co_mod_change_mode": cfg.AllowCoModChangeMode,
+			"co_moderator_ids":         coModIDs,
+			"max_concurrent_screens":   maxScreens,
 		},
 	})
 }

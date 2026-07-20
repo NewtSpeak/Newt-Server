@@ -19,6 +19,7 @@ import {
 import { Input } from "~/components/ui/input"
 import { Label } from "~/components/ui/label"
 import { useAsyncData } from "~/hooks/use-async-data"
+import { useGatewayEvent } from "~/hooks/use-gateway"
 import { useGuildID } from "~/hooks/use-guild-id"
 import { banUser, listBans, listMembers, memberName, unbanUser, type Ban, type GuildMember } from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
@@ -30,6 +31,10 @@ export default function BansPage() {
 
   const bans = useAsyncData<Ban[]>(guildID ? () => listBans(guildID) : null, [guildID])
   const members = useAsyncData<GuildMember[]>(guildID ? () => listMembers(guildID) : null, [guildID])
+
+  // 实时同步：他端/后台的封禁与解封即时反映到列表；成员进出同步刷新可封禁候选。
+  useGatewayEvent(["GUILD_BAN_ADD", "GUILD_BAN_REMOVE"], () => bans.reload(true))
+  useGatewayEvent(["GUILD_MEMBER_ADD", "GUILD_MEMBER_REMOVE"], () => members.reload(true))
 
   const [banOpen, setBanOpen] = useState(false)
   const [banning, setBanning] = useState(false)

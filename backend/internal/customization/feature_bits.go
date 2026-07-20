@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/perms"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
@@ -99,5 +100,15 @@ func (h *api) patchRoleFeatureBits(c *gin.Context) {
 	h.audit(ctx, user, "customization.role_feature_bits_update", "role", role.ID.String(), map[string]any{
 		"manage_bots": view.ManageBots, "manage_badges": view.ManageBadges, "manage_customization": view.ManageCustomization,
 	})
+	// 权限位（52–54）实际变化：广播 GUILD_ROLE_UPDATE 让客户端刷新权限投影与灰置 UI。
+	if h.deps.Bus != nil {
+		role.Permissions = int64(uint64(mask))
+		guildID := ctx.Guild.ID
+		h.deps.Bus.Publish(eventbus.Event{
+			Type:    eventbus.EventGuildRoleUpdate,
+			GuildID: &guildID,
+			Payload: eventbus.NewGuildRolePayload(role),
+		})
+	}
 	c.JSON(http.StatusOK, view)
 }

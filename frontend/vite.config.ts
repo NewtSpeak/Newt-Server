@@ -13,6 +13,16 @@ export default defineConfig({
         target: "http://127.0.0.1:8080",
         changeOrigin: true,
       },
+      "/gapi": {
+        target: "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
+      // 公开静态资产（用户头像 / 服务器图标 / banner）：后端返回的
+      // /public-assets/... 相对路径需在 dev 下代理到后端才能同源加载。
+      "/public-assets": {
+        target: "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
       "/healthz": {
         target: "http://127.0.0.1:8080",
         changeOrigin: true,

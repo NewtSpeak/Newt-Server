@@ -2,6 +2,7 @@ package guildapi
 
 import (
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,9 +15,31 @@ import (
 	"gorm.io/gorm"
 )
 
+// getGuild GET /guilds/{gid}：服务器详情（成员可见，Owl-Desktop docs 02 §8-1）。
+// 附带 member_count 便于客户端展示与 banners（多 banner 列表，position 升序）；
+// 非成员一律 404（防扫频）。
+func (h *api) getGuild(c *gin.Context) {
+	ctx, _, ok := h.guildCtx(c)
+	if !ok {
+		return
+	}
+	var memberCount int64
+	h.deps.DB.Model(&model.Member{}).Where("guild_id = ?", ctx.Guild.ID).Count(&memberCount)
+	banners, _ := loadGuildBanners(h.deps.DB, ctx.Guild.ID)
+	c.JSON(http.StatusOK, gin.H{
+		"guild":        ctx.Guild,
+		"member_count": memberCount,
+		"banners":      banners,
+	})
+}
+
 type updateGuildRequest struct {
 	Name        *string `json:"name" binding:"omitempty,min=2,max=100"`
 	Description *string `json:"description" binding:"omitempty,max=1024"`
+	// RestrictionBadgeVisible 受限徽章服级开关（docs 08 AM.4，需 MANAGE_GUILD）。
+	RestrictionBadgeVisible *bool `json:"restriction_badge_visible"`
+	// RestrictionReasonRequired reason 强制开关（docs 08 AI.2，仅系统管理员可改）。
+	RestrictionReasonRequired *bool `json:"restriction_reason_required"`
 }
 
 // updateGuild PATCH /guilds/{gid}（需 MANAGE_GUILD）→ GUILD_UPDATE 全服广播。
@@ -43,6 +66,18 @@ func (h *api) updateGuild(c *gin.Context) {
 	if input.Description != nil {
 		guild.Description = strings.TrimSpace(*input.Description)
 		updates["description"] = guild.Description
+	}
+	if input.RestrictionBadgeVisible != nil {
+		guild.RestrictionBadgeVisible = *input.RestrictionBadgeVisible
+		updates["restriction_badge_visible"] = guild.RestrictionBadgeVisible
+	}
+	if input.RestrictionReasonRequired != nil {
+		if !ctx.SystemAdmin {
+			fail(c, http.StatusForbidden, "SYSTEM_ADMIN_ONLY", "仅系统管理员可修改 reason 强制策略")
+			return
+		}
+		guild.RestrictionReasonRequired = *input.RestrictionReasonRequired
+		updates["restriction_reason_required"] = guild.RestrictionReasonRequired
 	}
 	if len(updates) == 0 {
 		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "没有可更新的字段")
@@ -97,6 +132,9 @@ func (h *api) deleteGuild(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取成员失败")
 		return
 	}
+	// 删除前收集 banner 公开资产 URL，提交成功后清理磁盘文件（best-effort）。
+	var bannerURLs []string
+	_ = h.deps.DB.Model(&model.GuildBanner{}).Where("guild_id = ?", guildID).Pluck("url", &bannerURLs).Error
 	// 语音联动：断开本服全部语音会话（SFU 踢出 + VOICE_STATE_UPDATE）。
 	voice.DisconnectGuildUsers(guildID, "GUILD_DELETE")
 	err := h.deps.DB.Transaction(func(tx *gorm.DB) error {
@@ -111,7 +149,7 @@ func (h *api) deleteGuild(c *gin.Context) {
 		}
 		for _, target := range []any{
 			&model.VoiceState{}, &model.Channel{}, &model.Member{}, &model.Role{},
-			&model.Invite{}, &model.GuildBan{}, &model.Restriction{},
+			&model.Invite{}, &model.GuildBan{}, &model.Restriction{}, &model.GuildBanner{},
 		} {
 			if err := tx.Where("guild_id = ?", guildID).Delete(target).Error; err != nil {
 				return err
@@ -122,6 +160,11 @@ func (h *api) deleteGuild(c *gin.Context) {
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "删除服务器失败")
 		return
+	}
+	// banner 磁盘文件清理（元数据已随事务删除，文件删除幂等）。
+	assetDir := filepath.Join(h.deps.Cfg.DataDir, "profile")
+	for _, url := range bannerURLs {
+		removeGuildAssetFile(assetDir, url)
 	}
 	h.audit(ctx, user, "guild.delete", "guild", guildID.String(), map[string]any{
 		"name": ctx.Guild.Name, "member_count": len(memberUserIDs),

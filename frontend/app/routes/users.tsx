@@ -5,14 +5,18 @@ import {
   BotIcon,
   CheckCircle2Icon,
   KeyRoundIcon,
+  PlusIcon,
   SearchIcon,
   ShieldCheckIcon,
   ShieldMinusIcon,
   ShieldPlusIcon,
+  TicketIcon,
+  Trash2Icon,
   Users2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { CopyButton } from "~/components/copy-button"
 import { PageHeader } from "~/components/page-header"
 import { SimpleSelect } from "~/components/simple-select"
 import { EmptyState, ErrorState, LoadingState } from "~/components/states"
@@ -32,15 +36,20 @@ import { Input } from "~/components/ui/input"
 import { Switch } from "~/components/ui/switch"
 import { useAsyncData } from "~/hooks/use-async-data"
 import {
+  createRegistrationInvite,
   disablePlatformUser,
   enablePlatformUser,
   getRegistrationSetting,
   listPlatformUsers,
+  listRegistrationInvites,
   patchPlatformUserSystemAdmin,
   putRegistrationSetting,
   resetPlatformUserPassword,
+  revokeRegistrationInvite,
   type PlatformUser,
   type PlatformUserFilter,
+  type RegistrationInvite,
+  type RegistrationInviteStatus,
 } from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
 
@@ -98,8 +107,9 @@ export default function PlatformUsersPage() {
     <main className="flex flex-1 flex-col gap-6 py-4 md:py-6">
       <PageHeader title="平台用户" description="全平台账号目录：禁用/解禁、重置密码、系统管理员授予与注册开关。" />
 
-      <section className="px-4 lg:px-6">
+      <section className="flex flex-col gap-4 px-4 lg:px-6">
         <RegistrationCard />
+        <RegistrationInviteCard />
       </section>
 
       <section className="flex flex-col gap-4 px-4 lg:px-6">
@@ -281,6 +291,125 @@ function RegistrationCard() {
         {setting.data && (
           <Badge variant="outline">{setting.data.source === "db" ? "控制台配置" : "环境变量默认"}</Badge>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const INVITE_TTL_OPTIONS = [
+  { value: "1800", label: "30 分钟" },
+  { value: "86400", label: "1 天" },
+  { value: "604800", label: "7 天" },
+  { value: "2592000", label: "30 天" },
+  { value: "0", label: "永久有效" },
+]
+
+const INVITE_MAX_USES_OPTIONS = [
+  { value: "1", label: "一次性" },
+  { value: "5", label: "5 次" },
+  { value: "10", label: "10 次" },
+  { value: "25", label: "25 次" },
+  { value: "0", label: "不限次数" },
+]
+
+const INVITE_STATUS_META: Record<RegistrationInviteStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  active: { label: "有效", variant: "default" },
+  expired: { label: "已过期", variant: "secondary" },
+  exhausted: { label: "已用尽", variant: "secondary" },
+  revoked: { label: "已撤销", variant: "destructive" },
+}
+
+/** 注册邀请链接：关闭公开注册时凭码放行注册；生成/复制/撤销均在此卡片完成 */
+function RegistrationInviteCard() {
+  const invites = useAsyncData<RegistrationInvite[]>(() => listRegistrationInvites(), [])
+  const [ttl, setTtl] = useState("604800")
+  const [maxUses, setMaxUses] = useState("1")
+  const [creating, setCreating] = useState(false)
+
+  async function onCreate() {
+    setCreating(true)
+    try {
+      await createRegistrationInvite(Number(ttl) || undefined, Number(maxUses) || undefined)
+      toast.success("注册邀请已生成")
+      invites.reload(true)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "注册邀请生成失败")
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function onRevoke(invite: RegistrationInvite) {
+    if (!window.confirm(`确定撤销注册邀请 ${invite.code}？该链接将立即失效。`)) return
+    try {
+      await revokeRegistrationInvite(invite.id)
+      toast.success("注册邀请已撤销")
+      invites.reload(true)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "注册邀请撤销失败")
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <TicketIcon className="size-4" />
+          注册邀请链接
+        </CardTitle>
+        <CardDescription>
+          凭邀请码注册不受注册开关限制：关闭公开注册后，可向受邀者发放链接或深链完成注册；支持有效期与使用次数限制。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <SimpleSelect ariaLabel="有效期" value={ttl} onChange={setTtl} options={INVITE_TTL_OPTIONS} className="w-32" />
+          <SimpleSelect
+            ariaLabel="使用次数"
+            value={maxUses}
+            onChange={setMaxUses}
+            options={INVITE_MAX_USES_OPTIONS}
+            className="w-32"
+          />
+          <Button size="sm" onClick={onCreate} disabled={creating}>
+            <PlusIcon data-icon="inline-start" />
+            {creating ? "生成中…" : "生成邀请"}
+          </Button>
+        </div>
+        {invites.status === "loading" && <LoadingState rows={3} />}
+        {invites.status === "error" && <ErrorState message={invites.error} onRetry={() => invites.reload()} />}
+        {invites.status === "success" && (invites.data?.length ?? 0) === 0 && (
+          <EmptyState icon={TicketIcon} title="暂无注册邀请" description="生成邀请后即可复制注册链接分发给受邀者。" className="py-8" />
+        )}
+        {invites.status === "success" &&
+          invites.data?.map((invite, index) => {
+            const meta = INVITE_STATUS_META[invite.status] ?? INVITE_STATUS_META.active
+            return (
+              <div
+                key={invite.id}
+                style={{ "--stagger-index": index } as React.CSSProperties}
+                className="anim-item flex flex-wrap items-center gap-3 rounded-xl border px-4 py-2.5"
+              >
+                <code className="font-mono text-sm font-medium">{invite.code}</code>
+                <Badge variant={meta.variant}>{meta.label}</Badge>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {invite.max_uses > 0 ? `剩余 ${Math.max(0, invite.max_uses - invite.uses)} / ${invite.max_uses} 次` : `已用 ${invite.uses} 次 · 不限`}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {invite.expires_at ? `${new Date(invite.expires_at).toLocaleString()} 过期` : "永不过期"}
+                </span>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <CopyButton text={invite.share_url} label="复制链接" />
+                  <CopyButton text={invite.deep_link} label="复制深链" />
+                  {invite.status === "active" && (
+                    <Button variant="ghost" size="icon-sm" aria-label="撤销注册邀请" onClick={() => onRevoke(invite)}>
+                      <Trash2Icon />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
       </CardContent>
     </Card>
   )

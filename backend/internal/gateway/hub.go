@@ -128,14 +128,48 @@ func (h *hub) sweep(now time.Time) {
 	}
 }
 
+// closeUserSessions 强制断开某用户的全部 Gateway 会话（账号禁用/密码重置/注销）：
+// 立即关闭连接（4010）并从注册表移除会话，令其不可 RESUME（access token 虽未过期，
+// 但会话已吊销，客户端必须重新登录/IDENTIFY——届时认证自然失败）。
+func (h *hub) closeUserSessions(userID uuid.UUID) {
+	h.mu.Lock()
+	var revoked []*session
+	if set, ok := h.byUser[userID]; ok {
+		for sess := range set {
+			h.unregisterLocked(sess)
+			revoked = append(revoked, sess)
+		}
+	}
+	h.mu.Unlock()
+	for _, sess := range revoked {
+		sess.mu.Lock()
+		target := sess.conn
+		sess.conn = nil
+		sess.mu.Unlock()
+		if target != nil {
+			target.shutdown(closeSessionRevoked, "会话已被吊销，请重新登录", h.writeTimeout)
+		}
+		if h.presence != nil {
+			h.presence.Disconnect(sess.user.ID, sess.id)
+		}
+	}
+}
+
 // dispatch 事件总线回调（Register 时 Subscribe 一次），路由规则：
-//  1. 内部事件（internal.*）绝不下发客户端；
+//  1. 内部事件（internal.*）绝不下发客户端；internal.SESSION_REVOKE 例外——
+//     在本层消费：强制断开目标用户全部会话（账号禁用/密码重置/注销联动）；
 //  2. UserIDs 非空 → 定向推送（Restriction 当事人必推走此路径，docs 12 §6.3/§7）；
 //  3. 否则 GuildID 非空 → 广播给该服全部在线成员；若 ChannelID 也非空，
 //     再按频道可见性逐用户过滤（不可见者不推，docs 06 议题 8）。
 //
 // 事件在会话层逐条分配递增序列号 s 并写入回放缓冲（断线期间也持续累积，供 RESUME 补发）。
 func (h *hub) dispatch(event eventbus.Event) {
+	if event.Type == eventbus.InternalSessionRevoke {
+		for _, userID := range event.UserIDs {
+			h.closeUserSessions(userID)
+		}
+		return
+	}
 	if eventbus.IsInternal(event.Type) {
 		return
 	}

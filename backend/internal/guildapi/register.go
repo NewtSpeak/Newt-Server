@@ -23,13 +23,25 @@ func Register(group *gin.RouterGroup, deps appdeps.Deps) error {
 
 	guilds := authed.Group("/guilds/:guildID")
 	// 服务器生命周期。
+	guilds.GET("", h.getGuild)
 	guilds.PATCH("", h.updateGuild)
 	guilds.DELETE("", h.deleteGuild)
 	guilds.POST("/transfer-ownership", h.transferOwnership)
+	// 服务器图标 / 横幅（Owl-Desktop docs 02 FR-13/§8-9）。
+	guilds.POST("/icon", h.uploadGuildIcon)
+	guilds.DELETE("/icon", h.deleteGuildIcon)
+	guilds.POST("/banner", h.uploadGuildBanner)
+	guilds.DELETE("/banner", h.deleteGuildBanner)
+	// 服务器多 banner 列表（服务器外观专项）：成员可读，增删/排序需 MANAGE_GUILD。
+	guilds.GET("/banners", h.listGuildBanners)
+	guilds.POST("/banners", h.addGuildBanner)
+	guilds.PATCH("/banners", h.reorderGuildBanners)
+	guilds.DELETE("/banners/:bannerID", h.removeGuildBanner)
 
 	// 角色。
 	guilds.GET("/roles", h.listRoles)
 	guilds.POST("/roles", h.createRole)
+	guilds.PATCH("/roles", h.reorderRoles)
 	guilds.PATCH("/roles/:roleID", h.updateRole)
 	guilds.DELETE("/roles/:roleID", h.deleteRole)
 	guilds.PUT("/members/:memberID/roles/:roleID", h.assignRole)

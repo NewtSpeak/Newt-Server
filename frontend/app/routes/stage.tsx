@@ -7,6 +7,7 @@ import {
   TriangleAlertIcon,
   Users2Icon,
   Volume2Icon,
+  XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -30,6 +31,7 @@ import {
   patchVoiceStage,
   stageBringDown,
   stageBringUp,
+  stageRemoveFromQueue,
   type Channel,
   type StageQueueEntry,
   type VoiceChannelMode,
@@ -99,6 +101,18 @@ export default function StagePage() {
       states.reload(true)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "抱下失败")
+    }
+  }
+
+  async function onRemoveFromQueue(userID: string, name: string) {
+    if (!activeChannel) return
+    if (!window.confirm(`确定将「${name}」移出申请队列？对方可重新申请。`)) return
+    try {
+      await stageRemoveFromQueue(activeChannel, userID)
+      toast.success(`已将「${name}」移出队列`)
+      queue.reload(true)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "移出队列失败")
     }
   }
 
@@ -300,6 +314,14 @@ export default function StagePage() {
                       <Button size="sm" onClick={() => onBringUp(entry.user_id, name)} disabled={full}>
                         <ArrowUpFromLineIcon data-icon="inline-start" />
                         {full ? "台上已满" : "抱上"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`将 ${name} 移出队列`}
+                        onClick={() => onRemoveFromQueue(entry.user_id, name)}
+                      >
+                        <XIcon />
                       </Button>
                     </div>
                   )

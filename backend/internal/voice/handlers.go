@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"time"
 
@@ -126,12 +127,22 @@ func (s *Service) handleJoin(c *gin.Context) {
 		fail(c, http.StatusForbidden, "CHANNEL_FULL", "语音频道已满员")
 		return
 	}
+	// 频道级可配人数上限（docs 09 FR-40：0=不限；持 MOVE_MEMBERS 或 MANAGE_CHANNELS
+	// 的管理员可超限进入，对标 Discord）。
+	if channel.UserLimit > 0 && occupied >= int64(channel.UserLimit) &&
+		!rbac.Has(bits, rbac.MoveMembers) && !rbac.Has(bits, rbac.ManageChannels) {
+		fail(c, http.StatusForbidden, "CHANNEL_FULL", "语音频道已达人数上限")
+		return
+	}
 
 	vs, exists, err := s.loadVoiceState(input.GuildID, user.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取语音状态失败")
 		return
 	}
+	// 进服首次出现（docs 12 5A.1 FIRST_GUILD_JOIN 场景判定）：该服从未有过
+	// VoiceState 行 = 从未连过麦。必须在建行/leave 编排之前捕获。
+	firstEverJoin := !exists
 	// 同 guild 同时仅一个语音频道：已在任何频道先内部 leave（docs 05 §6；
 	// 重进同频道也先摘旧会话，避免调度换点后旧节点残留参与者）。
 	var previousChannelID *uuid.UUID
@@ -187,11 +198,10 @@ func (s *Service) handleJoin(c *gin.Context) {
 		return
 	}
 
-	// 入场语音包（docs 07 5A.1）：仅在「从未连麦 → 进入语音频道」时触发，
-	// 切换频道（move）不触发，避免每次切频都播放。
-	if !move && previousChannelID == nil {
-		message.PlayVoicePack(s.db, s.bus, input.GuildID, input.ChannelID, user.ID)
-	}
+	// 入场语音包（docs 12 / 07 5A.1）：触发场景/频道开关/选包授权/服务端频控
+	// 全部在 PlayVoicePack 内裁决——FIRST_GUILD_JOIN 仅进服首次（firstEverJoin），
+	// CHANNEL_JOIN 每次进入允许播放的频道（60s 频控防切频刷屏）。
+	message.PlayVoicePack(s.db, s.bus, input.GuildID, input.ChannelID, user.ID, firstEverJoin)
 
 	// advertise_wss_url 为规范字段（节点心跳/Register 上报的客户端 WSS 信令端点）；
 	// sfu_endpoint 为同值兼容别名。
@@ -245,6 +255,42 @@ func (s *Service) handleLeave(c *gin.Context) {
 // POST /voice/refresh-token（docs 05 §4：重算 caps，新 jti/exp）
 // ---------------------------------------------------------------------------
 
+// errRefreshDuringMigration 迁移早期（目标未定）不可续签：新 token 即将随
+// VOICE_SERVER_UPDATE 下发，客户端等待即可。
+var errRefreshDuringMigration = errors.New("迁移进行中，等待 VOICE_SERVER_UPDATE")
+
+// refreshTokenBinding 决定 refresh-token 应绑定的节点（迁移窗口 bug 修复）。
+//
+// 迁移 PREPARE 完成后 VoiceState.voice_session_id 已换成新会话 sid，但 node_id
+// 要到 CLEANUP 才落到目标节点——此窗口内按旧 node 签发会产出「旧节点 + 新 sid」
+// 的无效组合（旧节点上的会话持旧 sid，新 sid 在目标节点，15 BJ.2）。
+//
+// 取舍（方案 A：按 job 的 to_node 签发）：
+//   - CONNECT/CUTOVER/CLEANUP（to_node 已定且新 sid 已入 VoiceState）→ 按 to_node
+//     签发：刷新的 token 服务于新会话（客户端双 PC 中即将/已经切过去的那个），
+//     旧节点上的旧会话本就将在 CLEANUP 摘除，无需续签；
+//   - QUEUED/PREPARE（目标未定或新 token 尚未生成）→ 返回 errRefreshDuringMigration，
+//     客户端等 VOICE_SERVER_UPDATE（自带绑定新节点的全新 token），避免签出注定
+//     作废的 token。选 A 而非「一律报错」：CONNECT 窗口可达数秒，期间刷新仍应可用。
+//
+// 纯函数（单测锚点）：job 为 nil 表示无在途迁移。
+func refreshTokenBinding(vs model.VoiceState, job *model.VoiceMigrationJob) (uuid.UUID, error) {
+	if job == nil {
+		return *vs.NodeID, nil
+	}
+	switch job.State {
+	case model.MigrationStateConnect, model.MigrationStateCutover, model.MigrationStateCleanup:
+		if job.ToNodeID != nil {
+			return *job.ToNodeID, nil
+		}
+		return uuid.Nil, errRefreshDuringMigration
+	case model.MigrationStateQueued, model.MigrationStatePrepare, model.MigrationStateFailed:
+		return uuid.Nil, errRefreshDuringMigration
+	}
+	// 终态（DONE/CANCELED）不应出现在 activeJob 结果里；防御性按当前节点签发。
+	return *vs.NodeID, nil
+}
+
 func (s *Service) handleRefreshToken(c *gin.Context) {
 	user := s.currentUser(c)
 	var input guildScopedRequest
@@ -258,6 +304,17 @@ func (s *Service) handleRefreshToken(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "NOT_IN_VOICE", "当前不在语音频道内")
 		return
 	}
+	// 迁移窗口（M4 遗留 bug 修复）：在途迁移时不可按旧 node 盲目签发。
+	var activeJob *model.VoiceMigrationJob
+	if job, ok := s.engine.activeJob(input.GuildID, user.ID); ok {
+		activeJob = &job
+	}
+	nodeID, err := refreshTokenBinding(vs, activeJob)
+	if err != nil {
+		// 425 Too Early 语义：客户端稍候依赖 VOICE_SERVER_UPDATE 携带的新 token。
+		fail(c, http.StatusTooEarly, "MIGRATION_IN_PROGRESS", "语音会话迁移中，请等待 VOICE_SERVER_UPDATE 下发新连接信息")
+		return
+	}
 	caps, err := s.capsFor(input.GuildID, *vs.ChannelID, user.ID, vs.ServerMute)
 	if err != nil {
 		// caps 已无 join → 走踢出流程（docs 05 §4）。
@@ -265,10 +322,11 @@ func (s *Service) handleRefreshToken(c *gin.Context) {
 		fail(c, http.StatusForbidden, "MISSING_PERMISSIONS", "已无权停留在该语音频道")
 		return
 	}
-	// 续会保持同一 sid（会话不变），仅换新 jti/exp（docs 05 §4、协议 §2.3 在位更新）。
+	// 续会保持同一 sid（会话不变），仅换新 jti/exp（docs 05 §4、协议 §2.3 在位更新）；
+	// 迁移窗口内 sid 已是新会话，节点绑定同步指向目标节点（见 refreshTokenBinding）。
 	token, expiresAt, err := s.tokens.Sign(mediatoken.Claims{
 		UID: user.ID.String(), GID: input.GuildID.String(), CID: vs.ChannelID.String(),
-		NID: vs.NodeID.String(), RID: vs.ChannelID.String(), SID: vs.VoiceSessionID.String(),
+		NID: nodeID.String(), RID: vs.ChannelID.String(), SID: vs.VoiceSessionID.String(),
 		Caps: caps, Bot: user.IsBot,
 		Hidden: StealthPredicate(input.GuildID, user.ID),
 		Audit:  AuditPredicate(input.GuildID, *vs.ChannelID),
@@ -277,7 +335,7 @@ func (s *Service) handleRefreshToken(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "TOKEN_ERROR", "签发 Media Token 失败")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"token": token, "caps": caps, "expires_at": expiresAt.Unix()})
+	c.JSON(http.StatusOK, gin.H{"token": token, "caps": caps, "expires_at": expiresAt.Unix(), "node_id": nodeID})
 }
 
 // ---------------------------------------------------------------------------
@@ -332,6 +390,9 @@ type rttReportRequest struct {
 	Samples []struct {
 		NodeID uuid.UUID `json:"node_id" binding:"required"`
 		RTTMs  float64   `json:"rtt_ms" binding:"required"`
+		// MeasuredAt 客户端探测时刻（可选，docs 13 §7.2）：缺省按服务端收到时刻计；
+		// 提供时按其入库（超前于当前时间或早于样本 TTL 的值按当前时刻兜底）。
+		MeasuredAt *time.Time `json:"measured_at"`
 	} `json:"samples" binding:"required"`
 }
 
@@ -347,7 +408,11 @@ func (s *Service) handleRTTReport(c *gin.Context) {
 		if sample.RTTMs <= 0 {
 			continue
 		}
-		s.rtt.Report(user.ID, sample.NodeID, sample.RTTMs, now)
+		measuredAt := now
+		if sample.MeasuredAt != nil && !sample.MeasuredAt.After(now) && now.Sub(*sample.MeasuredAt) < s.sched.RTTSampleTTL {
+			measuredAt = *sample.MeasuredAt
+		}
+		s.rtt.Report(user.ID, sample.NodeID, sample.RTTMs, measuredAt)
 		stored++
 	}
 	c.JSON(http.StatusOK, gin.H{"stored": stored, "ttl_seconds": int(s.sched.RTTSampleTTL.Seconds())})
@@ -443,6 +508,114 @@ func (s *Service) handleAdminDisconnect(c *gin.Context) {
 		Detail: map[string]any{"channel_id": channelID.String()},
 	})
 	c.JSON(http.StatusOK, gin.H{"disconnected": true})
+}
+
+// ---------------------------------------------------------------------------
+// POST /guilds/:guildID/voice/move（docs 09 FR-29 管理员移动成员）
+// ---------------------------------------------------------------------------
+
+type moveRequest struct {
+	UserID    uuid.UUID `json:"user_id" binding:"required"`
+	ChannelID uuid.UUID `json:"channel_id" binding:"required"`
+}
+
+// handleAdminMove 管理员将成员移动到另一语音频道（需 MOVE_MEMBERS + 层级；
+// 目标频道须为本服语音频道且未满员，被移动者须对其有 CONNECT——管理员移动
+// 不能绕过目标本人的频道权限）。实现为服务端信令驱动的客户端重连：
+// 先断开旧会话（reason=ADMIN_MOVE），再对被移动者定向发 VOICE_MOVE，
+// 客户端按正常 join 流程接入目标频道（docs 09「被移动方按 join 响应自动重连」）。
+func (s *Service) handleAdminMove(c *gin.Context) {
+	actor := s.currentUser(c)
+	guildID, err := uuid.Parse(c.Param("guildID"))
+	if err != nil {
+		fail(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "资源不存在或不可见")
+		return
+	}
+	var input moveRequest
+	if !bind(c, &input) {
+		return
+	}
+	ctx, err := perms.LoadGuild(s.db, actor, guildID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "资源不存在或不可见")
+		return
+	}
+	if !ctx.Has(rbac.MoveMembers) {
+		fail(c, http.StatusForbidden, "MISSING_PERMISSIONS", "需要 MOVE_MEMBERS 权限")
+		return
+	}
+	if !s.actorOutranks(ctx, input.UserID) {
+		fail(c, http.StatusForbidden, "ROLE_HIERARCHY", "角色层级不足，无法操作该成员")
+		return
+	}
+	// 目标频道校验：本服语音频道 + 被移动者本人具备 CONNECT（按目标身份计算）。
+	var target model.User
+	if err := s.db.First(&target, "id = ?", input.UserID).Error; err != nil {
+		fail(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "目标用户不存在")
+		return
+	}
+	target.SystemAdmin = false
+	targetCtx, err := perms.LoadGuild(s.db, target, guildID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "目标用户不是本服成员")
+		return
+	}
+	channel, bits, err := targetCtx.ChannelPerms(s.db, input.ChannelID)
+	if err != nil || channel.Type != model.ChannelVoice {
+		fail(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "目标频道不存在或不是语音频道")
+		return
+	}
+	if !rbac.Has(bits, rbac.Connect) {
+		fail(c, http.StatusForbidden, "TARGET_CANNOT_CONNECT", "目标用户对该频道无 CONNECT 权限")
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vs, exists, err := s.loadVoiceState(guildID, input.UserID)
+	if err != nil || !exists || vs.ChannelID == nil {
+		fail(c, http.StatusNotFound, "NOT_IN_VOICE", "目标用户不在语音频道内")
+		return
+	}
+	fromChannelID := *vs.ChannelID
+	if fromChannelID == channel.ID {
+		c.JSON(http.StatusOK, gin.H{"moved": false, "reason": "ALREADY_IN_CHANNEL"})
+		return
+	}
+	// 目标频道容量（硬顶 + 频道级上限；管理员移动同样不超硬顶）。
+	var occupied int64
+	if err := s.db.Model(&model.VoiceState{}).
+		Where("channel_id = ? AND user_id <> ?", channel.ID, input.UserID).
+		Count(&occupied).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "查询频道人数失败")
+		return
+	}
+	if occupied >= channelHardCap || (channel.UserLimit > 0 && occupied >= int64(channel.UserLimit)) {
+		fail(c, http.StatusForbidden, "CHANNEL_FULL", "目标频道已满员")
+		return
+	}
+	if err := s.internalLeave(&vs, "ADMIN", "ADMIN_MOVE"); err != nil {
+		fail(c, http.StatusInternalServerError, "MOVE_FAILED", "移动成员失败")
+		return
+	}
+	audit.Log(s.db, audit.Entry{
+		ActorID: &actor.ID, ActorType: actorType(actor, ctx), GuildID: &guildID,
+		Action: "voice.admin_move", TargetType: "user", TargetID: input.UserID.String(),
+		Detail: map[string]any{"from_channel_id": fromChannelID.String(), "to_channel_id": channel.ID.String()},
+	})
+	if s.bus != nil {
+		s.bus.Publish(eventbus.Event{
+			Type: eventbus.EventVoiceMove, GuildID: &guildID,
+			UserIDs: []uuid.UUID{input.UserID},
+			Payload: gin.H{
+				"guild_id":        guildID,
+				"from_channel_id": fromChannelID,
+				"to_channel_id":   channel.ID,
+				"moved_by":        actor.ID,
+			},
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"moved": true, "to_channel_id": channel.ID})
 }
 
 // ---------------------------------------------------------------------------

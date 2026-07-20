@@ -101,6 +101,69 @@ func (s *service) deleteReaction(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// listReactionUsers GET /channels/{id}/messages/{mid}/reactions/{emoji}
+//（Owl-Desktop docs 05 FR-26：hover 反应胶囊查看反应者列表）。
+// 需 READ_MESSAGE_HISTORY；?limit=1..100（默认 100），按反应时间升序。
+func (s *service) listReactionUsers(c *gin.Context) {
+	channelID, ok := parseUUIDParam(c, "channelID")
+	if !ok {
+		return
+	}
+	messageID, ok := parseMessageIDParam(c)
+	if !ok {
+		return
+	}
+	_, channel, bits, ok := s.channelAccess(c, channelID)
+	if !ok {
+		return
+	}
+	if !rbac.Has(bits, rbac.ReadMessageHistory) {
+		notFound(c)
+		return
+	}
+	emoji := c.Param("emoji")
+	if err := validateEmoji(emoji); err != nil {
+		fail(c, http.StatusBadRequest, "INVALID_EMOJI", err.Error())
+		return
+	}
+	message, err := s.loadLiveMessage(channel.ID, messageID)
+	if err != nil {
+		notFound(c)
+		return
+	}
+	limit := 100
+	if raw := c.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			fail(c, http.StatusBadRequest, "INVALID_LIMIT", "limit 需为 1-100 的整数")
+			return
+		}
+		if parsed < limit {
+			limit = parsed
+		}
+	}
+	type reactorRow struct {
+		UserID      uuid.UUID `json:"user_id"`
+		Username    string    `json:"username"`
+		DisplayName string    `json:"display_name"`
+		AvatarURL   string    `json:"avatar_url"`
+		CreatedAt   time.Time `json:"reacted_at"`
+	}
+	var rows []reactorRow
+	err = s.db.Raw(`SELECT r.user_id, u.username, u.display_name, u.avatar_url, r.created_at
+		FROM message_reactions r JOIN users u ON u.id = r.user_id
+		WHERE r.message_id = ? AND r.emoji = ?
+		ORDER BY r.created_at ASC LIMIT ?`, message.ID, emoji, limit).Scan(&rows).Error
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取反应者失败")
+		return
+	}
+	if rows == nil {
+		rows = []reactorRow{}
+	}
+	c.JSON(http.StatusOK, gin.H{"emoji": emoji, "users": rows})
+}
+
 func (s *service) publishReactionEvent(eventType string, message model.Message, userID uuid.UUID, emoji string) {
 	s.bus.Publish(eventbus.Event{
 		Type:      eventType,

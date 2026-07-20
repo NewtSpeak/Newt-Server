@@ -33,6 +33,10 @@ type NodeInfo struct {
 	CascadeEndpoint string `json:"cascade_endpoint"`
 	// NodeRTTMs 节点间 RTT 上报（key 为对端 node_id 字符串），级联/调度参考。
 	NodeRTTMs map[string]float64 `json:"node_rtt_ms"`
+	// LastSeenAt 最近一次心跳/注册时刻（内存注册表实时值优先，DB 快照兜底；
+	// 零值表示无心跳记录）。供提前判死组合规则判断「心跳超过 N 个周期未到」
+	//（docs 15 BI.2/BI.3），不下发客户端。
+	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
 }
 
 // Edge 级联边（docs 08 §4.2 / 15 BG.2）。

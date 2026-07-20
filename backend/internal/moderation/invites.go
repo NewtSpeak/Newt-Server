@@ -83,8 +83,10 @@ func (h *api) createInvite(c *gin.Context) {
 	fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "创建邀请失败")
 }
 
-// ResolveActiveInvite 按短码解析邀请并校验有效性（join/预览共用）：
-//   - 不存在或已过期：返回 (zero, StatusNotFound)（不泄露信息）；
+// ResolveActiveInvite 按短码解析邀请并校验有效性（join/预览/凭码注册共用）：
+//   - 不存在：返回 (zero, StatusNotFound)（不泄露信息）；
+//   - 已过期：返回 (invite, StatusNotFound)——状态码与不存在一致（防泄露），
+//     但返回已加载的记录（ID 非零），需要区分两者的调用方（如 signup）可据此判断；
 //   - 已用尽（max_uses>0 且 uses≥max_uses）：返回 (invite, StatusGone)；
 //   - 有效：返回 (invite, 0)。
 func ResolveActiveInvite(db *gorm.DB, code string) (model.Invite, int) {

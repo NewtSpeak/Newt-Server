@@ -266,9 +266,12 @@ func (a *API) issueTokensForSession(c *gin.Context, status int, user model.User,
 		return
 	}
 	refreshExpiry := time.Now().UTC().Add(a.refreshTokenTTL)
+	// 会话设备元数据（docs 01 FR-27）：登录/轮换请求即来自该设备，按当前请求采集。
+	device, platform := security.DeviceInfo(c.GetHeader("User-Agent"))
 	stored := model.RefreshToken{
 		ID: uuid.New(), UserID: user.ID, TokenHash: refreshHash, Audience: security.AudienceAdmin,
 		SessionID: sessionID, SessionCreatedAt: sessionCreatedAt, ExpiresAt: refreshExpiry,
+		DeviceName: device, Platform: platform, IPAddress: c.ClientIP(),
 	}
 	if err := a.db.Create(&stored).Error; err != nil {
 		fail(c, 500, "DATABASE_ERROR", "保存刷新令牌失败")

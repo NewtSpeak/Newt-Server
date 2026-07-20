@@ -113,11 +113,13 @@ func (h *api) updateRoleStyle(c *gin.Context) {
 		"before": json.RawMessage(before), "after": json.RawMessage(normalized),
 	})
 	if h.deps.Bus != nil {
+		// 角色样式属于角色实体的变更：发 GUILD_ROLE_UPDATE（model.Role 内嵌 style），
+		// 与 guildapi 的角色更新事件契约一致，客户端标准处理器可直接消费。
 		guildID := ctx.Guild.ID
 		h.deps.Bus.Publish(eventbus.Event{
-			Type:    eventbus.EventGuildMemberUpdate,
+			Type:    eventbus.EventGuildRoleUpdate,
 			GuildID: &guildID,
-			Payload: gin.H{"guild_id": guildID, "role_id": role.ID, "style": json.RawMessage(normalized)},
+			Payload: eventbus.NewGuildRolePayload(role),
 		})
 	}
 	c.JSON(http.StatusOK, role)

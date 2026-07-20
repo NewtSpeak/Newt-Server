@@ -118,25 +118,37 @@ func (s *service) uploadLimitBytes(guildID uuid.UUID) int64 {
 // attachmentView 消息响应中的附件元数据，download_url 为短时签名 URL（AT.7），
 // preview 标注预览白名单类型（AT.5），空表示仅可下载。
 type attachmentView struct {
-	ID          uuid.UUID `json:"id"`
-	Filename    string    `json:"filename"`
-	MIME        string    `json:"mime"`
-	Size        int64     `json:"size"`
-	Preview     string    `json:"preview,omitempty"`
-	DownloadURL string    `json:"download_url"`
+	ID       uuid.UUID `json:"id"`
+	Filename string    `json:"filename"`
+	MIME     string    `json:"mime"`
+	Size     int64     `json:"size"`
+	// Width/Height 图片像素尺寸（docs 07 §8-5，非图片为 0 省略）。
+	Width       int    `json:"width,omitempty"`
+	Height      int    `json:"height,omitempty"`
+	Preview     string `json:"preview,omitempty"`
+	DownloadURL string `json:"download_url"`
 }
 
-// messageView 消息响应体：消息本体 + 作者用户名 + 附件元数据列表。
+// reactionSummary 消息响应中的反应聚合（Owl-Desktop docs 05 FR-26）：
+// 每种 emoji 一条，count 为总数，me 标记调用者是否已反应（渲染高亮）。
+type reactionSummary struct {
+	Emoji string `json:"emoji"`
+	Count int    `json:"count"`
+	Me    bool   `json:"me"`
+}
+
+// messageView 消息响应体：消息本体 + 作者用户名 + 附件元数据列表 + 反应聚合。
 // AuthorUsername 由 messageViews 批量联查补充，避免客户端逐条查作者（N+1）；
 // 后台与用户端两个前缀共用同一增强。
 // Card 为卡片消息载荷（bot 专项）：原样 JSON 透传，客户端按 schema 渲染；
 // AuthorIsBot 标记作者为机器人（客户端渲染 BOT 徽标）。
 type messageView struct {
 	model.Message
-	AuthorUsername string           `json:"author_username"`
-	AuthorIsBot    bool             `json:"author_is_bot,omitempty"`
-	Card           json.RawMessage  `json:"card,omitempty"`
-	Attachments    []attachmentView `json:"attachments"`
+	AuthorUsername string            `json:"author_username"`
+	AuthorIsBot    bool              `json:"author_is_bot,omitempty"`
+	Card           json.RawMessage   `json:"card,omitempty"`
+	Attachments    []attachmentView  `json:"attachments"`
+	Reactions      []reactionSummary `json:"reactions"`
 }
 
 func (s *service) attachmentViews(attachments []model.Attachment, now time.Time) []attachmentView {
@@ -147,6 +159,8 @@ func (s *service) attachmentViews(attachments []model.Attachment, now time.Time)
 			Filename:    attachment.Filename,
 			MIME:        attachment.MIME,
 			Size:        attachment.Size,
+			Width:       attachment.Width,
+			Height:      attachment.Height,
 			Preview:     previewKind(attachment.MIME),
 			DownloadURL: buildDownloadURL(s.urlPrefix, s.cfg.JWTSecret, attachment.ID, now),
 		})
@@ -154,8 +168,9 @@ func (s *service) attachmentViews(attachments []model.Attachment, now time.Time)
 	return views
 }
 
-// messageViews 批量组装消息视图（一次性查出全部附件与作者用户名，避免 N+1）。
-func (s *service) messageViews(messages []model.Message) ([]messageView, error) {
+// messageViews 批量组装消息视图（一次性查出全部附件、作者用户名与反应聚合，
+// 避免 N+1）。viewer 可选：传入时反应聚合的 me 字段按该用户计算（docs 05 FR-26）。
+func (s *service) messageViews(messages []model.Message, viewer ...uuid.UUID) ([]messageView, error) {
 	now := time.Now().UTC()
 	views := make([]messageView, 0, len(messages))
 	if len(messages) == 0 {
@@ -190,10 +205,53 @@ func (s *service) messageViews(messages []model.Message) ([]messageView, error) 
 		usernames[author.ID] = author.Username
 		botFlags[author.ID] = author.IsBot
 	}
+	// 反应聚合：一次分组统计全部消息的 emoji 计数；viewer 提供时再查出其已反应集合。
+	viewerID := uuid.Nil
+	if len(viewer) > 0 {
+		viewerID = viewer[0]
+	}
+	type reactionCountRow struct {
+		MessageID int64
+		Emoji     string
+		Count     int
+	}
+	var countRows []reactionCountRow
+	if err := s.db.Model(&model.MessageReaction{}).
+		Select("message_id, emoji, COUNT(*) AS count").
+		Where("message_id IN ?", ids).
+		Group("message_id, emoji").Order("MIN(created_at) ASC").
+		Scan(&countRows).Error; err != nil {
+		return nil, err
+	}
+	mine := make(map[int64]map[string]bool)
+	if viewerID != uuid.Nil && len(countRows) > 0 {
+		var myRows []model.MessageReaction
+		if err := s.db.Select("message_id", "emoji").
+			Where("message_id IN ? AND user_id = ?", ids, viewerID).
+			Find(&myRows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range myRows {
+			if mine[row.MessageID] == nil {
+				mine[row.MessageID] = map[string]bool{}
+			}
+			mine[row.MessageID][row.Emoji] = true
+		}
+	}
+	reactionGroups := make(map[int64][]reactionSummary)
+	for _, row := range countRows {
+		reactionGroups[row.MessageID] = append(reactionGroups[row.MessageID], reactionSummary{
+			Emoji: row.Emoji, Count: row.Count, Me: mine[row.MessageID][row.Emoji],
+		})
+	}
 	for _, message := range messages {
 		var card json.RawMessage
 		if message.Card != nil && *message.Card != "" {
 			card = json.RawMessage(*message.Card)
+		}
+		reactions := reactionGroups[message.ID]
+		if reactions == nil {
+			reactions = []reactionSummary{}
 		}
 		views = append(views, messageView{
 			Message:        message,
@@ -201,13 +259,14 @@ func (s *service) messageViews(messages []model.Message) ([]messageView, error) 
 			AuthorIsBot:    botFlags[message.AuthorID],
 			Card:           card,
 			Attachments:    s.attachmentViews(grouped[message.ID], now),
+			Reactions:      reactions,
 		})
 	}
 	return views, nil
 }
 
-func (s *service) messageViewOne(message model.Message) (messageView, error) {
-	views, err := s.messageViews([]model.Message{message})
+func (s *service) messageViewOne(message model.Message, viewer ...uuid.UUID) (messageView, error) {
+	views, err := s.messageViews([]model.Message{message}, viewer...)
 	if err != nil {
 		return messageView{}, err
 	}

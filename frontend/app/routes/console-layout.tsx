@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from "react-router"
 import { AppSidebar } from "~/components/app-sidebar"
 import { SiteHeader } from "~/components/site-header"
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar"
+import { useGatewayEvent } from "~/hooks/use-gateway"
 import { api, getSession, logout, type Guild, type User } from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
 import { gsap, MOTION, MOTION_OK, useGSAP } from "~/lib/gsap"
@@ -32,6 +33,28 @@ export default function ConsoleLayout() {
         else setError(reason instanceof Error ? reason.message : "后台加载失败")
       })
   }, [navigate])
+
+  // 服务器结构实时同步：GUILD_UPDATE 事件载荷内嵌完整 guild 实体，本地就地合并；
+  // GUILD_CREATE / GUILD_DELETE 重拉列表兜底（成员关系变化本地无法推导）。
+  // guilds 经 ConsoleContext 下发全部页面，名称/图标/治理开关等基本信息随事件即时更新。
+  useGatewayEvent("GUILD_UPDATE", payload => {
+    const data = payload as { guild?: Guild; banners?: Guild["banners"] } | undefined
+    const guild = data?.guild
+    if (!guild?.id) return
+    setGuilds(current =>
+      current.map(item =>
+        item.id === guild.id
+          ? // banners 仅在 banner 增删/排序事件中携带（最新全量），有则整体替换
+            { ...item, ...guild, banners: data?.banners ?? item.banners }
+          : item
+      )
+    )
+  })
+  useGatewayEvent(["GUILD_CREATE", "GUILD_DELETE"], () => {
+    void api<Guild[]>("/guilds")
+      .then(next => setGuilds(next ?? []))
+      .catch(() => undefined)
+  })
 
   // 侧边栏切换页面时的内容区过渡（GSAP + 尊重 prefers-reduced-motion）
   useGSAP(

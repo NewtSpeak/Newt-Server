@@ -1,6 +1,18 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
-import { AlertTriangleIcon, CrownIcon, DatabaseIcon, Settings2Icon, UploadIcon, Volume2Icon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CrownIcon,
+  DatabaseIcon,
+  ImageIcon,
+  ImagesIcon,
+  Settings2Icon,
+  Trash2Icon,
+  UploadIcon,
+  Volume2Icon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { SimpleSelect } from "~/components/simple-select"
@@ -19,16 +31,23 @@ import { Label } from "~/components/ui/label"
 import { Switch } from "~/components/ui/switch"
 import { useAsyncData } from "~/hooks/use-async-data"
 import {
+  addGuildBanner,
   deleteGuild,
+  deleteGuildBanner,
+  deleteGuildImage,
   getGuildVoicePack,
   getMessageRetention,
   getUploadLimit,
+  listGuildBanners,
   patchGuildVoicePack,
   patchMessageRetention,
   patchUploadLimit,
+  reorderGuildBanners,
   transferGuildOwnership,
   updateGuild,
+  uploadGuildImage,
   type Guild,
+  type GuildBanner,
   type MemberDisplay,
 } from "~/lib/api"
 
@@ -51,12 +70,287 @@ export function SettingsTab({
     <div className="flex flex-col gap-5">
       <OverviewCard guild={guild} onChanged={onChanged} />
       <div className="grid gap-5 lg:grid-cols-2">
+        <BrandingCard guild={guild} onChanged={onChanged} />
+        <ModerationPolicyCard guild={guild} isSystemAdmin={isSystemAdmin} onChanged={onChanged} />
+      </div>
+      <BannersCard guildID={guild.id} onChanged={onChanged} />
+      <div className="grid gap-5 lg:grid-cols-2">
         <RetentionCard guildID={guild.id} />
         {isSystemAdmin && <UploadLimitCard guildID={guild.id} />}
       </div>
       <VoicePackCard guildID={guild.id} />
       <DangerZoneCard guild={guild} members={members} onChanged={onChanged} />
     </div>
+  )
+}
+
+/** 服务器图标与横幅上传（docs 02 FR-13/§8-9，需 MANAGE_GUILD） */
+function BrandingCard({ guild, onChanged }: { guild: Guild; onChanged: () => void }) {
+  const iconInput = useRef<HTMLInputElement>(null)
+  const bannerInput = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState<"icon" | "banner" | null>(null)
+
+  async function onUpload(kind: "icon" | "banner", file: File | undefined) {
+    if (!file) return
+    setBusy(kind)
+    try {
+      await uploadGuildImage(guild.id, kind, file)
+      toast.success(kind === "icon" ? "服务器图标已更新" : "服务器横幅已更新")
+      onChanged()
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "上传失败")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onRemove(kind: "icon" | "banner") {
+    setBusy(kind)
+    try {
+      await deleteGuildImage(guild.id, kind)
+      toast.success(kind === "icon" ? "服务器图标已移除" : "服务器横幅已移除")
+      onChanged()
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "移除失败")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const rows: { kind: "icon" | "banner"; label: string; url?: string; input: typeof iconInput }[] = [
+    { kind: "icon", label: "服务器图标", url: guild.icon_url, input: iconInput },
+    { kind: "banner", label: "服务器横幅", url: guild.banner_url, input: bannerInput },
+  ]
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ImageIcon className="size-4" />
+          图标与横幅
+        </CardTitle>
+        <CardDescription>PNG/JPEG/WebP/GIF，单张不超过 8MB；图标显示在服务器栏，横幅显示在邀请页与频道顶部。</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {rows.map(row => (
+          <div key={row.kind} className="flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3">
+            {row.url ? (
+              <img
+                src={row.url}
+                alt={row.label}
+                className={row.kind === "icon" ? "size-10 rounded-full border object-cover" : "h-10 w-24 rounded-md border object-cover"}
+              />
+            ) : (
+              <div className={`grid place-items-center border border-dashed text-[10px] text-muted-foreground ${row.kind === "icon" ? "size-10 rounded-full" : "h-10 w-24 rounded-md"}`}>
+                未设置
+              </div>
+            )}
+            <p className="min-w-0 flex-1 text-sm font-medium">{row.label}</p>
+            <input
+              ref={row.input}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={event => {
+                void onUpload(row.kind, event.target.files?.[0])
+                event.target.value = ""
+              }}
+            />
+            <Button variant="outline" size="sm" disabled={busy === row.kind} onClick={() => row.input.current?.click()}>
+              {busy === row.kind ? "处理中…" : "上传"}
+            </Button>
+            {row.url && (
+              <Button variant="ghost" size="sm" disabled={busy === row.kind} onClick={() => onRemove(row.kind)}>
+                移除
+              </Button>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * 服务器多 banner 图库（docs 协议/服务器外观资产.md）：上传（追加末尾）、
+ * 删除、上下移重排序（全量有序 ID 数组提交）。详情页头部按 position 轮播展示。
+ */
+function BannersCard({ guildID, onChanged }: { guildID: string; onChanged: () => void }) {
+  const data = useAsyncData(() => listGuildBanners(guildID), [guildID])
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+
+  const banners = data.data?.banners ?? []
+  const limit = data.data?.limit ?? 10
+
+  async function run(action: () => Promise<unknown>, successText: string) {
+    setBusy(true)
+    try {
+      await action()
+      toast.success(successText)
+      data.reload(true)
+      onChanged()
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "操作失败")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function onMove(index: number, delta: -1 | 1) {
+    const target = index + delta
+    if (target < 0 || target >= banners.length) return
+    const ids = banners.map(banner => banner.id)
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    void run(() => reorderGuildBanners(guildID, ids), "banner 顺序已保存")
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ImagesIcon className="size-4" />
+          Banner 图库
+        </CardTitle>
+        <CardDescription>
+          详情页顶部按顺序轮播展示（第 1 张为封面）；PNG/JPEG/WebP/GIF，单张不超过 8MB，最多 {limit} 张。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {banners.length === 0 && data.status === "success" && (
+          <p className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+            还没有 banner，上传第一张作为服务器封面。
+          </p>
+        )}
+        {banners.map((banner: GuildBanner, index: number) => (
+          <div key={banner.id} className="flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3">
+            <img src={banner.url} alt={`banner ${index + 1}`} className="h-12 w-28 rounded-md border object-cover" />
+            <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+              第 <span className="tabular-nums">{index + 1}</span> 张{index === 0 && "（封面）"}
+            </p>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="上移"
+                disabled={busy || index === 0}
+                onClick={() => onMove(index, -1)}
+              >
+                <ArrowUpIcon />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="下移"
+                disabled={busy || index === banners.length - 1}
+                onClick={() => onMove(index, 1)}
+              >
+                <ArrowDownIcon />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="删除该 banner"
+                className="text-destructive hover:text-destructive"
+                disabled={busy}
+                onClick={() => run(() => deleteGuildBanner(guildID, banner.id), "banner 已删除")}
+              >
+                <Trash2Icon />
+              </Button>
+            </div>
+          </div>
+        ))}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={event => {
+            const file = event.target.files?.[0]
+            if (file) void run(() => addGuildBanner(guildID, file), "banner 已上传")
+            event.target.value = ""
+          }}
+        />
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {banners.length} / {limit}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || banners.length >= limit || data.status !== "success"}
+            onClick={() => fileInput.current?.click()}
+          >
+            <UploadIcon data-icon="inline-start" />
+            {busy ? "处理中…" : "上传 banner"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** 治理策略：受限徽章展示开关（MANAGE_GUILD）与 reason 强制开关（系统管理员） */
+function ModerationPolicyCard({
+  guild,
+  isSystemAdmin,
+  onChanged,
+}: {
+  guild: Guild
+  isSystemAdmin: boolean
+  onChanged: () => void
+}) {
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+
+  async function onToggle(key: "restriction_badge_visible" | "restriction_reason_required", value: boolean) {
+    setBusyKey(key)
+    try {
+      await updateGuild(guild.id, { [key]: value })
+      toast.success("治理策略已保存")
+      onChanged()
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "保存失败")
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Settings2Icon className="size-4" />
+          治理策略
+        </CardTitle>
+        <CardDescription>受限徽章与 Restriction reason 政策（docs 08 AM.4 / AI.2）。</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <label className="flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm">
+          <Switch
+            checked={guild.restriction_badge_visible ?? true}
+            disabled={busyKey !== null}
+            onCheckedChange={next => onToggle("restriction_badge_visible", Boolean(next))}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block leading-5">成员列表显示「受限」徽章</span>
+            <span className="block text-xs leading-4 text-muted-foreground">关闭后客户端不渲染受限标识（脱敏事件仍照常下发）。</span>
+          </span>
+        </label>
+        <label className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm ${isSystemAdmin ? "" : "opacity-60"}`}>
+          <Switch
+            checked={guild.restriction_reason_required ?? true}
+            disabled={!isSystemAdmin || busyKey !== null}
+            onCheckedChange={next => onToggle("restriction_reason_required", Boolean(next))}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block leading-5">创建限制必须填写原因</span>
+            <span className="block text-xs leading-4 text-muted-foreground">仅系统管理员可修改；关闭后 reason 变为可选。</span>
+          </span>
+        </label>
+      </CardContent>
+    </Card>
   )
 }
 

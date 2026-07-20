@@ -2,6 +2,8 @@ package message
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -109,6 +111,8 @@ func (s *service) patchGuildVoicePack(c *gin.Context) {
 		Action: "voicepack.guild_config", TargetType: "guild", TargetID: ctx.Guild.ID.String(),
 		Detail: map[string]any{"enabled": config.Enabled, "scope": config.Scope, "trigger": config.Trigger},
 	})
+	// 实时同步：成员端即时得知语音包开关/触发模式/范围变化。
+	s.publishGuildConfigUpdate(ctx.Guild.ID, "voice_pack", config)
 	c.JSON(http.StatusOK, config)
 }
 
@@ -160,56 +164,157 @@ func (s *service) putChannelVoicePack(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
+	// Allowed 列带 default:true：GORM struct Create 会跳过零值 false 导致「关不掉」，
+	// 故先 DoNothing upsert 保证行存在，再用显式 Update 强制写入布尔值。
 	config := model.ChannelVoicePackConfig{ChannelID: channel.ID, GuildID: ctx.Guild.ID, Allowed: input.Allowed}
 	if err := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "channel_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"allowed", "updated_at"}),
+		DoNothing: true,
 	}).Create(&config).Error; err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存频道语音包开关失败")
 		return
 	}
+	if err := s.db.Model(&model.ChannelVoicePackConfig{}).Where("channel_id = ?", channel.ID).
+		Update("allowed", input.Allowed).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存频道语音包开关失败")
+		return
+	}
+	config.Allowed = input.Allowed
 	actor := s.currentUser(c)
 	audit.Log(s.db, audit.Entry{
 		ActorID: &actor.ID, GuildID: &ctx.Guild.ID,
 		Action: "voicepack.channel_toggle", TargetType: "channel", TargetID: channel.ID.String(),
 		Detail: map[string]any{"allowed": input.Allowed},
 	})
+	// 实时同步：带 ChannelID 按可见性过滤下发（频道级配置不外泄）。
+	s.publishChannelConfigUpdate(ctx.Guild.ID, channel.ID, "voice_pack", config)
 	c.JSON(http.StatusOK, config)
 }
 
-// VoicePackPlayPayload EventVoicePackPlay 的载荷：客户端收到后拉取 audio_url 本地播放（5A.3）。
+// VoicePackScene 触发场景（docs 12 FR-01 / 5A.1）：进服首次出现 / 进指定语音频道。
+type VoicePackScene string
+
+const (
+	VoicePackSceneFirstJoin   VoicePackScene = "FIRST_JOIN"
+	VoicePackSceneChannelJoin VoicePackScene = "CHANNEL_JOIN"
+)
+
+// VoicePackPlayPayload EventVoicePackPlay 的载荷（docs 12 §6.1 schema 定稿）：
+// 客户端收到后拉取 audio_url 本地混音播放（5A.3，不经 SFU）。
+// PackID 为用户选中的语音包 ID；回退服级默认 audio_url 时为空。
 type VoicePackPlayPayload struct {
 	GuildID   uuid.UUID            `json:"guild_id"`
 	ChannelID uuid.UUID            `json:"channel_id"`
 	UserID    uuid.UUID            `json:"user_id"`
+	PackID    *uuid.UUID           `json:"pack_id,omitempty"`
 	AudioURL  string               `json:"audio_url"`
+	Scene     VoicePackScene       `json:"scene"`
 	Scope     model.VoicePackScope `json:"scope"`
+	EventAt   time.Time            `json:"event_at"`
 }
 
-// PlayVoicePack 供语音模块在用户进房且触发条件满足时调用（触发时机判定由调用方负责，
-// 参考 GuildVoicePackConfig.Trigger）。本函数完成配置裁决（服级开关 + 频道级开关）并
-// 发布 EventVoicePackPlay；返回是否实际发布。
-//   - Scope=SAME_CHANNEL：事件带 ChannelID，Gateway 按频道在房用户下发；
-//   - Scope=GUILD_ONLINE：事件不带 ChannelID，Gateway 按服在线广播（可见性过滤仍生效）。
-func PlayVoicePack(db *gorm.DB, bus *eventbus.Bus, guildID, channelID, userID uuid.UUID) bool {
-	var config model.GuildVoicePackConfig
-	if err := db.First(&config, "guild_id = ?", guildID).Error; err != nil || !config.Enabled || config.AudioURL == "" {
+// voicePackCooldownWindow 服务端频控窗口（docs 12 US-7 双层频控的服务端层）：
+// 同一用户在同一 guild 60s 内至多触发一次，冷却内不发事件。
+// 与客户端 60s 本地冷却（FR-17）对齐。
+const voicePackCooldownWindow = 60 * time.Second
+
+// voicePackCooldown 内存频控表：guild|user → 最近触发时刻。惰性清理过期项。
+type voicePackCooldown struct {
+	mu   sync.Mutex
+	last map[[2]uuid.UUID]time.Time
+}
+
+// allow 冷却外返回 true 并记账；冷却内返回 false。
+func (c *voicePackCooldown) allow(guildID, userID uuid.UUID, now time.Time) bool {
+	key := [2]uuid.UUID{guildID, userID}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.last == nil {
+		c.last = map[[2]uuid.UUID]time.Time{}
+	}
+	if at, ok := c.last[key]; ok && now.Sub(at) < voicePackCooldownWindow {
 		return false
+	}
+	for k, at := range c.last {
+		if now.Sub(at) >= voicePackCooldownWindow {
+			delete(c.last, k)
+		}
+	}
+	c.last[key] = now
+	return true
+}
+
+// playCooldown 进程级频控单例（服务端权威频控，客户端频控为防御性叠加）。
+var playCooldown = &voicePackCooldown{}
+
+// resolveVoicePackAudio 决定本次播放的音频（docs 12 FR-12 越权回退）：
+//  1. 用户在该服选中的包：包仍存在、启用且授权仍有效（RARE 失去身份组即失效）→ 用选中包；
+//  2. 否则回退服级默认 audio_url（GuildVoicePackConfig.AudioURL）；两者皆空 → 不播。
+func resolveVoicePackAudio(db *gorm.DB, config model.GuildVoicePackConfig, guildID, userID uuid.UUID) (packID *uuid.UUID, audioURL string) {
+	var selection model.VoicePackSelection
+	if err := db.First(&selection, "guild_id = ? AND user_id = ?", guildID, userID).Error; err == nil {
+		var pack model.VoicePack
+		if err := db.First(&pack, "id = ? AND guild_id = ?", selection.PackID, guildID).Error; err == nil &&
+			pack.Enabled && pack.AudioURL != "" && packAuthorized(db, pack, userID) {
+			return &pack.ID, pack.AudioURL
+		}
+	}
+	return nil, config.AudioURL
+}
+
+// PlayVoicePack 供语音模块在用户进入语音频道时调用；本函数完成全部触发裁决并发布
+// EventVoicePackPlay，返回是否实际发布。firstEverJoin 表示该用户在该服从未连过麦
+//（VoiceState 行不存在，由调用方在进房前判定）。
+//
+// 裁决顺序（docs 12 §5.1）：
+//  1. 服级开关（GuildVoicePackConfig.Enabled）；
+//  2. 触发场景（5A.1）：FIRST_GUILD_JOIN 仅进服首次；CHANNEL_JOIN 每次进入允许播放的
+//     语音频道都触发（受服务端频控约束，无「每次切频都放」的无频控形态）；
+//  3. 频道级开关（5A.1b，无记录默认允许）；
+//  4. 服务端频控：同一用户同一 guild 60s 冷却；
+//  5. 音频裁决：优先用户选中的包（授权仍有效），回退服级默认 audio_url，皆空不播。
+//
+// 事件范围（5A.2）：两种 Scope 的事件都带 ChannelID——Gateway 按 VIEW_CHANNEL
+// 可见性过滤，防止对隐藏频道无权限的成员经载荷 channel_id/user_id 得知
+//「谁进入了哪个隐藏频道」。SAME_CHANNEL 与 GUILD_ONLINE 的差别由客户端按
+// 载荷 scope 字段裁决（同频道在房 vs 全服可听），服务端受众上界一致为
+//「对该频道可见的在线成员」。
+func PlayVoicePack(db *gorm.DB, bus *eventbus.Bus, guildID, channelID, userID uuid.UUID, firstEverJoin bool) bool {
+	var config model.GuildVoicePackConfig
+	if err := db.First(&config, "guild_id = ?", guildID).Error; err != nil || !config.Enabled {
+		return false
+	}
+	var scene VoicePackScene
+	switch config.Trigger {
+	case model.VoicePackChannelJoin:
+		scene = VoicePackSceneChannelJoin
+	default: // FIRST_GUILD_JOIN（默认）：仅进服首次出现触发（5A.1）。
+		if !firstEverJoin {
+			return false
+		}
+		scene = VoicePackSceneFirstJoin
 	}
 	var channelConfig model.ChannelVoicePackConfig
 	if err := db.First(&channelConfig, "channel_id = ?", channelID).Error; err == nil && !channelConfig.Allowed {
 		return false
 	}
+	now := time.Now().UTC()
+	if !playCooldown.allow(guildID, userID, now) {
+		return false
+	}
+	packID, audioURL := resolveVoicePackAudio(db, config, guildID, userID)
+	if audioURL == "" {
+		return false
+	}
 	event := eventbus.Event{
-		Type:    eventbus.EventVoicePackPlay,
-		GuildID: &guildID,
+		Type:      eventbus.EventVoicePackPlay,
+		GuildID:   &guildID,
+		ChannelID: &channelID, // 恒带频道 ID：hub 按 VIEW_CHANNEL 过滤，堵住隐藏频道泄露
 		Payload: VoicePackPlayPayload{
 			GuildID: guildID, ChannelID: channelID, UserID: userID,
-			AudioURL: config.AudioURL, Scope: config.Scope,
+			PackID: packID, AudioURL: audioURL, Scene: scene,
+			Scope: config.Scope, EventAt: now,
 		},
-	}
-	if config.Scope == model.VoicePackSameChannel {
-		event.ChannelID = &channelID
 	}
 	bus.Publish(event)
 	return true

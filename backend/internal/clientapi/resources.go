@@ -3,16 +3,18 @@ package clientapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/audit"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
+	"github.com/owlspeak/owl-server/backend/internal/guildapi"
+	"github.com/owlspeak/owl-server/backend/internal/guildseed"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/moderation"
 	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
 	"gorm.io/gorm"
 )
@@ -66,6 +68,8 @@ func (h *api) guildCtx(c *gin.Context) (*perms.GuildContext, model.User, bool) {
 
 // myGuilds GET /gapi/v1/users/@me/guilds：我加入的服务器列表。
 // 只按成员关系过滤，系统管理员也看不到未加入的服务器（用户端普通用户语义）。
+// 每条附带 banners（多 banner 列表，服务器外观专项）；banner 图片 URL 为
+// /public-assets 公开路径（平面中立前缀，与用户头像同约定），不涉及后台前缀。
 func (h *api) myGuilds(c *gin.Context) {
 	user := currentUser(c)
 	var guilds []model.Guild
@@ -76,7 +80,7 @@ func (h *api) myGuilds(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取服务器列表失败")
 		return
 	}
-	c.JSON(http.StatusOK, guilds)
+	c.JSON(http.StatusOK, guildapi.WithBanners(h.deps.DB, guilds))
 }
 
 type createGuildRequest struct {
@@ -84,8 +88,9 @@ type createGuildRequest struct {
 }
 
 // createGuild POST /gapi/v1/guilds：用户创建服务器。
-// 事务逻辑与后台 createGuild 一致（服务器 + 所有者成员 + @everyone 角色），
-// 为避免与 httpapi 包耦合此处独立实现，两侧需保持同步演进。
+// 事务逻辑与后台 createGuild 一致（服务器 + 所有者成员 + 默认角色种子），
+// 为避免与 httpapi 包耦合此处独立实现，两侧需保持同步演进；
+// 默认角色（@everyone + 内置管理员）收敛在 guildseed.SeedDefaultRoles。
 func (h *api) createGuild(c *gin.Context) {
 	var input createGuildRequest
 	if !bind(c, &input) {
@@ -102,8 +107,7 @@ func (h *api) createGuild(c *gin.Context) {
 		if err := tx.Create(&member).Error; err != nil {
 			return err
 		}
-		everyone := model.Role{ID: uuid.New(), GuildID: guild.ID, Name: "@everyone", Permissions: int64(uint64(rbac.DefaultEveryone)), Position: 0, IsEveryone: true}
-		return tx.Create(&everyone).Error
+		return guildseed.SeedDefaultRoles(tx, guild.ID)
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "创建服务器失败")
@@ -137,6 +141,8 @@ type memberSummary struct {
 }
 
 // listMembers GET /gapi/v1/guilds/{gid}/members：服务器成员列表（需本人是成员）。
+// 支持游标分页（Owl-Desktop docs 02 FR-24/FR-25 大服懒加载）：
+// ?limit=1..1000（缺省=全量，兼容旧客户端）、?after=<member_id>（按 created_at,id 游标）。
 func (h *api) listMembers(c *gin.Context) {
 	ctx, _, ok := h.guildCtx(c)
 	if !ok {
@@ -147,8 +153,41 @@ func (h *api) listMembers(c *gin.Context) {
 		model.Member
 		Username string
 	}
+	limit := 0
+	if raw := c.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "limit 需为 1–1000 的整数")
+			return
+		}
+		if parsed > 1000 {
+			parsed = 1000
+		}
+		limit = parsed
+	}
+	query := `SELECT members.*, users.username FROM members JOIN users ON users.id = members.user_id WHERE members.guild_id = ?`
+	args := []any{guild.ID}
+	if raw := c.Query("after"); raw != "" {
+		afterID, err := uuid.Parse(raw)
+		if err != nil {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "after 需为成员 ID")
+			return
+		}
+		var anchor model.Member
+		if err := h.deps.DB.First(&anchor, "id = ? AND guild_id = ?", afterID, guild.ID).Error; err != nil {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "after 游标成员不存在")
+			return
+		}
+		query += ` AND (members.created_at, members.id) > (?, ?)`
+		args = append(args, anchor.CreatedAt, anchor.ID)
+	}
+	query += ` ORDER BY members.created_at ASC, members.id ASC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 	var rows []row
-	err := h.deps.DB.Raw(`SELECT members.*, users.username FROM members JOIN users ON users.id = members.user_id WHERE members.guild_id = ? ORDER BY members.created_at ASC`, guild.ID).Scan(&rows).Error
+	err := h.deps.DB.Raw(query, args...).Scan(&rows).Error
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取成员失败")
 		return

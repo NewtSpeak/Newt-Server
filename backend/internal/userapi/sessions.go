@@ -61,6 +61,10 @@ type sessionView struct {
 	LastUsedAt time.Time `json:"last_used_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	Current    bool      `json:"current"` // 是否为发起本次请求的会话
+	// 设备元数据（docs 01 FR-27）：登录/最近轮换时采集；历史会话为空串。
+	DeviceName string `json:"device_name"`
+	Platform   string `json:"platform"`
+	IPAddress  string `json:"ip_address"`
 }
 
 // listSessions GET /users/@me/sessions（docs 01 FR-27）：列出全部活跃登录会话
@@ -87,9 +91,28 @@ func (h *api) listSessions(c *gin.Context) {
 			ID: token.SessionID, Audience: token.Audience,
 			CreatedAt: token.SessionCreatedAt, LastUsedAt: token.CreatedAt,
 			ExpiresAt: token.ExpiresAt, Current: token.SessionID == current,
+			DeviceName: token.DeviceName, Platform: token.Platform, IPAddress: token.IPAddress,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
+}
+
+// revokeOtherSessions DELETE /users/@me/sessions：登出所有其他设备
+//（docs 01 FR-27「登出所有其他设备」按钮）。保留当前会话链，吊销其余全部
+// 未吊销 refresh token（两个受众一并吊销）。返回吊销的会话数。
+func (h *api) revokeOtherSessions(c *gin.Context) {
+	user := h.deps.CurrentUser(c)
+	now := time.Now().UTC()
+	revoke := h.deps.DB.Model(&model.RefreshToken{}).Where("user_id = ? AND revoked_at IS NULL", user.ID)
+	if sid := h.currentSessionID(c); sid != uuid.Nil {
+		revoke = revoke.Where("session_id <> ?", sid)
+	}
+	result := revoke.Update("revoked_at", now)
+	if result.Error != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "吊销其他会话失败")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"revoked": result.RowsAffected})
 }
 
 // revokeSession DELETE /users/@me/sessions/:id：吊销指定会话链的全部未吊销 token。

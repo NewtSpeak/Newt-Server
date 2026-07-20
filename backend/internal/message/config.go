@@ -66,6 +66,11 @@ func (s *service) patchUploadLimit(c *gin.Context) {
 		Action: "message.upload_limit", TargetType: "guild", TargetID: guild.ID.String(),
 		Detail: map[string]any{"upload_limit_bytes": input.UploadLimitBytes},
 	})
+	// 实时同步：在线成员的上传前置校验（GET /guilds/{gid}/upload-limit 缓存）立即失效。
+	s.publishGuildConfigUpdate(guild.ID, "upload_limit", gin.H{
+		"upload_limit_bytes": config.UploadLimitBytes,
+		"effective_bytes":    s.uploadLimitBytes(guild.ID),
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"guild_id":           guild.ID,
 		"upload_limit_bytes": config.UploadLimitBytes,
@@ -122,5 +127,6 @@ func (s *service) patchRetention(c *gin.Context) {
 		Action: "message.retention", TargetType: "guild", TargetID: ctx.Guild.ID.String(),
 		Detail: map[string]any{"retention_days": input.RetentionDays},
 	})
+	s.publishGuildConfigUpdate(ctx.Guild.ID, "message_retention", gin.H{"retention_days": config.RetentionDays})
 	c.JSON(http.StatusOK, gin.H{"guild_id": ctx.Guild.ID, "retention_days": config.RetentionDays})
 }

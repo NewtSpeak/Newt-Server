@@ -84,6 +84,7 @@ func (h *api) createBadge(c *gin.Context) {
 		return
 	}
 	h.audit(ctx, user, "customization.badge_create", "badge", badge.ID.String(), map[string]any{"name": badge.Name})
+	h.publishBadgeUpdate(ctx.Guild.ID, badge.ID, &badge, false)
 	c.JSON(http.StatusCreated, badge)
 }
 
@@ -113,6 +114,7 @@ func (h *api) updateBadge(c *gin.Context) {
 		return
 	}
 	h.audit(ctx, user, "customization.badge_update", "badge", badge.ID.String(), map[string]any{"name": badge.Name})
+	h.publishBadgeUpdate(ctx.Guild.ID, badge.ID, &badge, false)
 	c.JSON(http.StatusOK, badge)
 }
 
@@ -136,7 +138,25 @@ func (h *api) deleteBadge(c *gin.Context) {
 		return
 	}
 	h.audit(ctx, user, "customization.badge_delete", "badge", badge.ID.String(), map[string]any{"name": badge.Name})
+	// 删除连带清理全部授予记录：广播 deleted=true，持有者客户端即时移除该徽章展示。
+	h.publishBadgeUpdate(ctx.Guild.ID, badge.ID, nil, true)
 	c.Status(http.StatusNoContent)
+}
+
+// publishBadgeUpdate 徽章定义变更事件（创建/编辑/删除）：guild 广播。
+func (h *api) publishBadgeUpdate(guildID, badgeID uuid.UUID, badge *model.Badge, deleted bool) {
+	if h.deps.Bus == nil {
+		return
+	}
+	payload := gin.H{"guild_id": guildID, "badge_id": badgeID, "deleted": deleted, "event_at": time.Now().UTC()}
+	if badge != nil {
+		payload["badge"] = badge
+	}
+	h.deps.Bus.Publish(eventbus.Event{
+		Type:    eventbus.EventBadgeUpdate,
+		GuildID: &guildID,
+		Payload: payload,
+	})
 }
 
 type grantBadgeRequest struct {

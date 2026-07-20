@@ -47,6 +47,14 @@ func main() {
 			slog.Error("observability 关闭失败", "error", err)
 		}
 	}()
+	// Prometheus /metrics（docs 09 §11 迁移观测等）：METRICS_ADDRESS 非空时启动，
+	// 仅应绑定内网/本机地址。
+	metricsShutdown := observability.StartMetricsServer(cfg.MetricsAddress)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = metricsShutdown(ctx)
+	}()
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)

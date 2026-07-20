@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 
+	"github.com/owlspeak/owl-server/backend/internal/guildseed"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -24,6 +25,10 @@ func Open(databaseURL string) (*gorm.DB, error) {
 	}
 	if err := ensureFirstUserSystemAdmin(db); err != nil {
 		return nil, fmt.Errorf("初始化系统管理员: %w", err)
+	}
+	// 存量回填：给内置管理员角色上线前创建的 guild 补建 managed 管理员角色（幂等）。
+	if err := guildseed.EnsureManagedAdminRoles(db); err != nil {
+		return nil, fmt.Errorf("回填内置管理员角色: %w", err)
 	}
 	return db, nil
 }

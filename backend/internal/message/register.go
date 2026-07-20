@@ -58,20 +58,39 @@ func (s *service) mountUserRoutes(public, authed *gin.RouterGroup) {
 	authed.PATCH("/channels/:channelID/messages/:messageID", s.editMessage)
 	authed.DELETE("/channels/:channelID/messages/:messageID", s.deleteMessage)
 	authed.GET("/channels/:channelID/messages/:messageID/edits", s.listEdits)
-	// 未读同步（docs 15 §7-1）：已读 ack 推进 + read state REST 兜底。
+	// 未读同步（docs 15 §7-1）：已读 ack 推进（路径版 / 体内版）+ 全服已读 + REST 兜底。
 	authed.POST("/channels/:channelID/messages/:messageID/ack", s.ackMessage)
+	authed.POST("/channels/:channelID/ack", s.ackChannel)
+	authed.POST("/guilds/:guildID/ack", s.ackGuild)
 	authed.GET("/users/@me/read-states", s.listMyReadStates)
-	// 表情反应（AV）。
+	// 表情反应（AV）；反应者列表（docs 05 FR-26，gin 静态段 @me 优先于本参数路由）。
 	authed.PUT("/channels/:channelID/messages/:messageID/reactions/:emoji/@me", s.putReaction)
 	authed.DELETE("/channels/:channelID/messages/:messageID/reactions/:emoji/@me", s.deleteReaction)
-	// 附件二段式上传（AT）。
+	authed.GET("/channels/:channelID/messages/:messageID/reactions/:emoji", s.listReactionUsers)
+	// 附件二段式上传（AT）；服级上限成员可读（docs 07 FR-06 前置校验数据源）。
 	authed.POST("/channels/:channelID/attachments/presign", s.presignAttachment)
 	authed.PUT("/attachments/:attachmentID/content", s.uploadAttachmentContent)
+	authed.GET("/guilds/:guildID/upload-limit", s.getUploadLimitForMember)
 	// 全系统搜索（AU）。
 	authed.GET("/search/messages", s.searchMessages)
 	// 入场语音包只读（5A）：客户端需要知道是否播放。
 	authed.GET("/guilds/:guildID/voice-pack", s.getGuildVoicePack)
 	authed.GET("/guilds/:guildID/channels/:channelID/voice-pack", s.getChannelVoicePack)
+	// 语音包完整模型（docs 12）：包 CRUD/音频上传（handler 内校验 MANAGE_GUILD）
+	// 与用户选包，双平面同挂（服管在桌面客户端管理自己的服务器）。
+	// gin 静态段 @me 优先于参数段 :packID，两者可共存。
+	authed.GET("/guilds/:guildID/voice-packs", s.listVoicePacks)
+	authed.POST("/guilds/:guildID/voice-packs", s.createVoicePack)
+	authed.PATCH("/guilds/:guildID/voice-packs/:packID", s.patchVoicePack)
+	authed.DELETE("/guilds/:guildID/voice-packs/:packID", s.deleteVoicePack)
+	authed.POST("/guilds/:guildID/voice-packs/:packID/audio", s.uploadVoicePackAudio)
+	authed.PUT("/guilds/:guildID/voice-packs/:packID/select", s.selectVoicePack)
+	authed.GET("/guilds/:guildID/voice-packs/@me", s.getMyVoicePackSelection)
+	authed.DELETE("/guilds/:guildID/voice-packs/@me", s.clearMyVoicePackSelection)
+	// 入场语音包配置写入口（5A.4/5A.1b）：handler 内校验 MANAGE_GUILD / MANAGE_CHANNELS，
+	// 双平面同挂——服管/频道管理员在桌面客户端即可配置（docs 03 FR-35）。
+	authed.PATCH("/guilds/:guildID/voice-pack", s.patchGuildVoicePack)
+	authed.PUT("/guilds/:guildID/channels/:channelID/voice-pack", s.putChannelVoicePack)
 }
 
 // mountBackend 后台平面全部路由：用户级端点 + 管理端点；auth 为后台认证中间件。
@@ -83,9 +102,6 @@ func (s *service) mountBackend(v1 *gin.RouterGroup, auth gin.HandlerFunc) {
 	authed.PATCH("/admin/guilds/:guildID/upload-limit", s.patchUploadLimit)
 	authed.GET("/guilds/:guildID/message-retention", s.getRetention)
 	authed.PATCH("/guilds/:guildID/message-retention", s.patchRetention)
-	// 入场语音包配置管理（5A）——仅后台前缀。
-	authed.PATCH("/guilds/:guildID/voice-pack", s.patchGuildVoicePack)
-	authed.PUT("/guilds/:guildID/channels/:channelID/voice-pack", s.putChannelVoicePack)
 }
 
 // Register 挂载后台前缀（/api/v1）的消息/附件/搜索 REST API，

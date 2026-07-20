@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,7 +22,10 @@ import (
 // PG FTS 使用 'simple' 配置的已知局限：simple 仅按空格/标点分词且不做词干化，
 // 英文可正常按词命中；中文整句无空格时会被当成单个词素，只有整段完全一致才能命中，
 // 无法做到真正的中文分词检索（需 pg_jieba/zhparser 扩展或外部引擎，二期处理）。
-// 为缓解该局限，查询侧同时叠加 ILIKE 子串匹配作为兜底，保证中文子串可命中。
+// 一期缓解（见 bigram.go）：入库时额外维护 content_bigrams tsvector（中文连续
+// 字符两两切片、英文按词），查询词同样 bigram 化后经 GIN 索引 @@ 匹配，
+// 中文多字词组即可命中；ILIKE 子串匹配继续保留作精确兜底（覆盖单字查询与
+// 索引异步窗口期）。
 
 // SearchIndex 消息检索抽象。索引更新为异步（AU.6 秒级可接受）。
 type SearchIndex interface {
@@ -30,7 +34,8 @@ type SearchIndex interface {
 	// RemoveMessage 消息删除后将其移出索引（软删出索引）。
 	RemoveMessage(id int64)
 	// Search 在给定的可见频道集合内检索；ChannelIDs 即 ACL 过滤条件，必须非空。
-	Search(query SearchQuery) ([]model.Message, error)
+	// 返回当前页结果与命中总数（total，供客户端展示「共 N 条」与分页，docs 06 FR-15）。
+	Search(query SearchQuery) ([]model.Message, int64, error)
 }
 
 // SearchQuery 检索条件（AU.4）。
@@ -63,6 +68,7 @@ func newPGSearchIndex(db *gorm.DB) (*pgSearchIndex, error) {
 		return nil, err
 	}
 	go index.worker()
+	index.startBackfill()
 	return index, nil
 }
 
@@ -71,6 +77,8 @@ func (p *pgSearchIndex) ensureSchema() error {
 	statements := []string{
 		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS content_tsv tsvector`,
 		`CREATE INDEX IF NOT EXISTS idx_message_content_tsv ON messages USING GIN (content_tsv)`,
+		`ALTER TABLE messages ADD COLUMN IF NOT EXISTS content_bigrams tsvector`,
+		`CREATE INDEX IF NOT EXISTS idx_message_content_bigrams ON messages USING GIN (content_bigrams)`,
 	}
 	for _, statement := range statements {
 		if err := p.db.Exec(statement).Error; err != nil {
@@ -85,15 +93,75 @@ func (p *pgSearchIndex) worker() {
 	for op := range p.queue {
 		var err error
 		if op.remove {
-			err = p.db.Exec(`UPDATE messages SET content_tsv = NULL WHERE id = ?`, op.id).Error
+			err = p.db.Exec(`UPDATE messages SET content_tsv = NULL, content_bigrams = NULL WHERE id = ?`, op.id).Error
 		} else {
-			err = p.db.Exec(
-				`UPDATE messages SET content_tsv = to_tsvector('simple', coalesce(content, '')) WHERE id = ? AND deleted_at IS NULL`,
-				op.id,
-			).Error
+			err = p.indexOne(op.id)
 		}
 		if err != nil {
 			log.Printf("message: 更新搜索索引失败 id=%d err=%v", op.id, err)
+		}
+	}
+}
+
+// indexOne 重建单条消息的两列索引：bigram 切片在应用侧计算，需先取回正文。
+func (p *pgSearchIndex) indexOne(id int64) error {
+	var row struct{ Content string }
+	result := p.db.Raw(`SELECT content FROM messages WHERE id = ? AND deleted_at IS NULL`, id).Scan(&row)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil // 已删或不存在：无需索引
+	}
+	return p.db.Exec(
+		`UPDATE messages SET content_tsv = to_tsvector('simple', ?), content_bigrams = to_tsvector('simple', ?) WHERE id = ? AND deleted_at IS NULL`,
+		row.Content, bigramTokens(row.Content), id,
+	).Error
+}
+
+// searchBackfillOnce 存量回填进程内只启动一次（后台/用户端两个平面各构造一个
+// 索引实例，靠它去重）。
+var searchBackfillOnce sync.Once
+
+// startBackfill 启动后台幂等回填 goroutine（存量消息补 content_bigrams）。
+func (p *pgSearchIndex) startBackfill() {
+	searchBackfillOnce.Do(func() {
+		go func() {
+			if err := RebuildSearchBigrams(p.db); err != nil {
+				log.Printf("message: 存量搜索索引回填失败: %v", err)
+			}
+		}()
+	})
+}
+
+// RebuildSearchBigrams 分批回填 content_bigrams 为 NULL 的存量消息（顺带补齐
+// content_tsv），幂等可重复执行；供启动后台任务与测试调用。多实例并发执行时
+// 更新彼此幂等，无需互斥。
+func RebuildSearchBigrams(db *gorm.DB) error {
+	const batchSize = 500
+	for {
+		var rows []struct {
+			ID      int64
+			Content string
+		}
+		err := db.Raw(
+			`SELECT id, content FROM messages WHERE content_bigrams IS NULL AND deleted_at IS NULL ORDER BY id LIMIT ?`,
+			batchSize,
+		).Scan(&rows).Error
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			err := db.Exec(
+				`UPDATE messages SET content_tsv = to_tsvector('simple', ?), content_bigrams = to_tsvector('simple', ?) WHERE id = ? AND deleted_at IS NULL`,
+				row.Content, bigramTokens(row.Content), row.ID,
+			).Error
+			if err != nil {
+				return err
+			}
+		}
+		if len(rows) < batchSize {
+			return nil
 		}
 	}
 }
@@ -109,18 +177,25 @@ func (p *pgSearchIndex) enqueue(op indexOp) {
 func (p *pgSearchIndex) IndexMessage(id int64)  { p.enqueue(indexOp{id: id}) }
 func (p *pgSearchIndex) RemoveMessage(id int64) { p.enqueue(indexOp{id: id, remove: true}) }
 
-// Search 执行检索：tsvector 匹配 OR ILIKE 子串兜底（中文局限缓解），叠加 ACL 与过滤条件。
-func (p *pgSearchIndex) Search(query SearchQuery) ([]model.Message, error) {
+// Search 执行检索：整词 tsvector 匹配 OR bigram 匹配（中文词组经 GIN 索引命中，
+// 多词查询 AND 语义、无需相邻）OR ILIKE 子串兜底（单字查询与索引异步窗口期），
+// 叠加 ACL 与过滤条件。先 COUNT 命中总数再取当前页（docs 06 FR-15「共 N 条结果」）。
+// 排序保持 id DESC：before/after 为消息 ID 游标，要求单调序，不能混入相关度排序。
+func (p *pgSearchIndex) Search(query SearchQuery) ([]model.Message, int64, error) {
 	if len(query.ChannelIDs) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	tx := p.db.Model(&model.Message{}).
 		Where("deleted_at IS NULL").
 		Where("channel_id IN ?", query.ChannelIDs).
-		Where("(content_tsv @@ plainto_tsquery('simple', ?) OR content ILIKE ?)",
-			query.Text, "%"+escapeLike(query.Text)+"%")
+		Where("(content_tsv @@ plainto_tsquery('simple', ?) OR content_bigrams @@ plainto_tsquery('simple', ?) OR content ILIKE ?)",
+			query.Text, bigramTokens(query.Text), "%"+escapeLike(query.Text)+"%")
 	if query.AuthorID != nil {
 		tx = tx.Where("author_id = ?", *query.AuthorID)
+	}
+	var total int64
+	if err := tx.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
 	if query.BeforeID != nil {
 		tx = tx.Where("id < ?", *query.BeforeID)
@@ -130,7 +205,7 @@ func (p *pgSearchIndex) Search(query SearchQuery) ([]model.Message, error) {
 	}
 	var messages []model.Message
 	err := tx.Order("id DESC").Limit(query.Limit).Find(&messages).Error
-	return messages, err
+	return messages, total, err
 }
 
 // escapeLike 转义 LIKE 元字符，避免用户输入被当成通配符。
@@ -152,7 +227,12 @@ func escapeLike(input string) string {
 func (s *service) searchMessages(c *gin.Context) {
 	user := s.currentUser(c)
 	if !s.searchLimit.Allow(user.ID) {
-		fail(c, http.StatusTooManyRequests, "SEARCH_RATE_LIMITED", "搜索过于频繁，请稍后再试")
+		// retry_after 供客户端倒计时（docs 06 FR-14）；令牌桶 1 QPS，1 秒后即有新配额。
+		c.Header("Retry-After", "1")
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error":       gin.H{"code": "SEARCH_RATE_LIMITED", "message": "搜索过于频繁，请稍后再试"},
+			"retry_after": 1,
+		})
 		return
 	}
 	text := c.Query("q")
@@ -200,17 +280,17 @@ func (s *service) searchMessages(c *gin.Context) {
 		return
 	}
 	query.ChannelIDs = channelIDs
-	messages, err := s.index.Search(query)
+	messages, total, err := s.index.Search(query)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "SEARCH_ERROR", "搜索执行失败")
 		return
 	}
-	views, err := s.messageViews(messages)
+	views, err := s.messageViews(messages, user.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取附件失败")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"messages": views})
+	c.JSON(http.StatusOK, gin.H{"messages": views, "total": total})
 }
 
 // visibleChannelIDs 计算搜索范围内调用者可见的频道 ID 集合。

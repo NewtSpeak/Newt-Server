@@ -3,6 +3,10 @@ package message
 import (
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"  // 图片尺寸探测解码器
+	_ "image/jpeg" // 同上
+	_ "image/png"  // 同上
 	"net/http"
 	"net/url"
 	"strconv"
@@ -135,14 +139,24 @@ func (s *service) uploadAttachmentContent(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "SIZE_MISMATCH", "上传内容与声明大小不一致")
 		return
 	}
+	// 图片尺寸探测（docs 07 §8-5：客户端占位比例）：仅 image/*，失败静默跳过。
+	width, height := 0, 0
+	if strings.HasPrefix(attachment.MIME, "image/") {
+		if reader, err := s.storage.Open(attachment.ObjectKey); err == nil {
+			if config, _, err := image.DecodeConfig(reader); err == nil {
+				width, height = config.Width, config.Height
+			}
+			_ = reader.Close()
+		}
+	}
 	// 令牌一次性：成功后立即作废。
 	err = s.db.Model(&model.Attachment{}).Where("id = ? AND uploaded = false", attachment.ID).
-		Updates(map[string]any{"uploaded": true, "upload_token_hash": ""}).Error
+		Updates(map[string]any{"uploaded": true, "upload_token_hash": "", "width": width, "height": height}).Error
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "更新附件状态失败")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"attachment_id": attachment.ID, "size": written, "uploaded": true})
+	c.JSON(http.StatusOK, gin.H{"attachment_id": attachment.ID, "size": written, "uploaded": true, "width": width, "height": height})
 }
 
 // downloadAttachment GET /api/v1/attachments/{id}?sig=&exp=（AT.7）。

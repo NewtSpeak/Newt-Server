@@ -11,8 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
+	"github.com/owlspeak/owl-server/backend/internal/guildapi"
+	"github.com/owlspeak/owl-server/backend/internal/guildseed"
 	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
 	"gorm.io/gorm"
 )
@@ -45,8 +46,8 @@ func (a *API) createGuild(c *gin.Context) {
 		if err := tx.Create(&member).Error; err != nil {
 			return err
 		}
-		everyone := model.Role{ID: uuid.New(), GuildID: guild.ID, Name: "@everyone", Permissions: databaseMask(rbac.DefaultEveryone), Position: 0, IsEveryone: true}
-		return tx.Create(&everyone).Error
+		// 默认角色种子（@everyone + 内置管理员）与用户端建服共用同一实现。
+		return guildseed.SeedDefaultRoles(tx, guild.ID)
 	})
 	if err != nil {
 		fail(c, 500, "DATABASE_ERROR", "创建服务器失败")
@@ -63,11 +64,11 @@ func (a *API) createGuild(c *gin.Context) {
 }
 
 // listGuilds godoc
-// @Summary 列出当前用户加入的服务器
+// @Summary 列出当前用户加入的服务器（含 icon_url 与 banners 列表）
 // @Tags RBAC
 // @Security BearerAuth
 // @Produce json
-// @Success 200 {array} model.Guild
+// @Success 200 {array} guildapi.GuildWithBanners
 // @Router /guilds [get]
 func (a *API) listGuilds(c *gin.Context) {
 	user := currentUser(c)
@@ -80,7 +81,8 @@ func (a *API) listGuilds(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取服务器列表失败")
 		return
 	}
-	c.JSON(http.StatusOK, guilds)
+	// 附带每服 banner 列表（服务器外观专项）：Guild 字段平铺不变，新增 banners 键。
+	c.JSON(http.StatusOK, guildapi.WithBanners(a.db, guilds))
 }
 
 // guildForUser 加载服务器并校验当前用户可见性（成员或系统管理员）；不可见统一 404。

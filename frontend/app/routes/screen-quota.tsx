@@ -168,7 +168,9 @@ export default function ScreenQuotaPage() {
                     disabled={!user.system_admin}
                     className="w-32 tabular-nums"
                   />
-                  <p className="text-xs text-muted-foreground">每频道另有默认 2 路上限，实际允许 = min(频道剩余, 服有效剩余)。</p>
+                  <p className="text-xs text-muted-foreground">
+                    每频道另有默认 2 路上限（可在「服务器详情 → 频道 → 舞台配置」按频道调整），实际允许 = min(频道剩余, 服有效剩余)。
+                  </p>
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5">
                   <div>

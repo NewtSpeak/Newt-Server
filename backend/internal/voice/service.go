@@ -36,6 +36,15 @@ type Service struct {
 	engine *migrationEngine
 	// iceFailedAt 客户端 ICE 失败上报节流（user → 最近上报时刻；mu 保护）。
 	iceFailedAt map[uuid.UUID]time.Time
+	// overload 过载自动迁移检测器（docs 09 I.3–I.5，默认关）；
+	// overloadNodes 为指标源（生产 = sfuctl.Dir().AllNodes()，单测可注入假快照）。
+	overload      *overloadDetector
+	overloadNodes func() ([]sfuctl.NodeInfo, error)
+	// edgeFlaps 级联边 EdgeDown 抖动跟踪：短窗反复断边升级分区迁移（docs 09 §3.3）。
+	edgeFlaps *edgeFlapTracker
+	// iceFailures ICE 失败上报滑动窗口与双信号提前判死记账
+	//（icefailure.go；自带锁，零值可用）。
+	iceFailures iceFailureStore
 
 	mu sync.Mutex
 }

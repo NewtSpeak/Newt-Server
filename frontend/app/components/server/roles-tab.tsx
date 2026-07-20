@@ -55,6 +55,9 @@ export function RolesTab({
   const [draftMask, setDraftMask] = useState(0)
   const [draftName, setDraftName] = useState("")
   const [draftPosition, setDraftPosition] = useState(0)
+  const [draftColor, setDraftColor] = useState("")
+  const [draftHoist, setDraftHoist] = useState(false)
+  const [draftMentionable, setDraftMentionable] = useState(false)
   const [saving, setSaving] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -64,18 +67,33 @@ export function RolesTab({
       setDraftMask(selected.permissions)
       setDraftName(selected.name)
       setDraftPosition(selected.position)
+      setDraftColor(selected.color ?? "")
+      setDraftHoist(Boolean(selected.hoist))
+      setDraftMentionable(Boolean(selected.mentionable))
     }
-  }, [selected?.id, selected?.permissions, selected?.name, selected?.position])
+  }, [selected?.id, selected?.permissions, selected?.name, selected?.position, selected?.color, selected?.hoist, selected?.mentionable])
 
   const dirty =
     selected !== null &&
-    (draftMask !== selected.permissions || draftName !== selected.name || draftPosition !== selected.position)
+    (draftMask !== selected.permissions ||
+      draftName !== selected.name ||
+      draftPosition !== selected.position ||
+      draftColor !== (selected.color ?? "") ||
+      draftHoist !== Boolean(selected.hoist) ||
+      draftMentionable !== Boolean(selected.mentionable))
 
   async function onSave() {
     if (!selected) return
     setSaving(true)
     try {
-      await updateRole(guildID, selected.id, { name: draftName, position: draftPosition, permissions: draftMask })
+      await updateRole(guildID, selected.id, {
+        name: draftName,
+        position: draftPosition,
+        permissions: draftMask,
+        color: draftColor,
+        hoist: draftHoist,
+        mentionable: draftMentionable,
+      })
       toast.success(`角色「${draftName}」已保存`)
       reload()
     } catch (reason) {
@@ -168,10 +186,18 @@ export function RolesTab({
                 selected?.id === role.id ? "border-primary/50 bg-primary/5 font-medium" : "border-transparent hover:bg-muted/60"
               )}
             >
-              <ShieldCheckIcon className="size-4 shrink-0 text-muted-foreground" />
+              <ShieldCheckIcon
+                className="size-4 shrink-0 text-muted-foreground"
+                style={role.color ? { color: role.color } : undefined}
+              />
               <StyledName nameStyle={parseRoleStyle(role.style)} className="truncate">
                 {role.name}
               </StyledName>
+              {role.hoist && (
+                <Badge variant="outline" className="shrink-0 px-1 text-[9px]">
+                  分组
+                </Badge>
+              )}
               <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">P{role.position}</span>
             </button>
           ))}
@@ -205,7 +231,38 @@ export function RolesTab({
                 className="w-24 tabular-nums"
               />
             </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="edit-role-color">颜色</Label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="edit-role-color"
+                  type="color"
+                  aria-label="角色颜色"
+                  value={draftColor || "#99aab5"}
+                  onChange={event => setDraftColor(event.target.value)}
+                  disabled={selected.is_everyone}
+                  className="h-9 w-12 cursor-pointer rounded-md border bg-background p-1"
+                />
+                {draftColor && !selected.is_everyone && (
+                  <Button variant="ghost" size="sm" onClick={() => setDraftColor("")}>
+                    清除
+                  </Button>
+                )}
+              </div>
+            </div>
             {selected.is_everyone && <Badge variant="outline">@everyone · 权限基线</Badge>}
+            {!selected.is_everyone && (
+              <div className="flex items-center gap-4 pb-1.5">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={draftHoist} onCheckedChange={next => setDraftHoist(Boolean(next))} />
+                  成员列表单独分组
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={draftMentionable} onCheckedChange={next => setDraftMentionable(Boolean(next))} />
+                  允许任何人 @提及
+                </label>
+              </div>
+            )}
             <div className="ml-auto flex items-center gap-2">
               <span className="text-xs text-muted-foreground">
                 已选 <span className="tabular-nums">{describePermissions(draftMask).length}</span> 项权限

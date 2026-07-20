@@ -18,9 +18,33 @@ import (
 
 type createChannelRequest struct {
 	Name     string            `json:"name" binding:"required,min=1,max=100"`
-	Type     model.ChannelType `json:"type" binding:"required,oneof=TEXT VOICE"`
+	Type     model.ChannelType `json:"type" binding:"required,oneof=TEXT VOICE CATEGORY"`
 	Topic    string            `json:"topic" binding:"omitempty,max=1024"`
 	Position int               `json:"position" binding:"omitempty,gte=0"`
+	// ParentID 所属分类（Owl-Desktop docs 03 FR-03）：仅 TEXT/VOICE 可设，
+	// 必须指向本服 CATEGORY 频道。
+	ParentID *uuid.UUID `json:"parent_id"`
+	// UserLimit 语音频道人数上限（docs 09 FR-40）：0=不限，1–99。
+	UserLimit int `json:"user_limit" binding:"omitempty,gte=0,lte=99"`
+	// RateLimitPerUser 文本频道慢速模式秒数（docs 03 §8-9）：0=关闭，≤21600。
+	RateLimitPerUser int `json:"rate_limit_per_user" binding:"omitempty,gte=0,lte=21600"`
+}
+
+// validateParentCategory 校验 parent_id 指向本服 CATEGORY 频道（分类自身不可再嵌套）。
+func (h *api) validateParentCategory(c *gin.Context, guildID uuid.UUID, channelType model.ChannelType, parentID *uuid.UUID) bool {
+	if parentID == nil {
+		return true
+	}
+	if channelType == model.ChannelCategory {
+		fail(c, http.StatusBadRequest, "CATEGORY_NO_NESTING", "分类频道不能再归属其他分类")
+		return false
+	}
+	var parent model.Channel
+	if err := h.deps.DB.First(&parent, "id = ? AND guild_id = ?", *parentID, guildID).Error; err != nil || parent.Type != model.ChannelCategory {
+		fail(c, http.StatusBadRequest, "INVALID_PARENT", "parent_id 必须指向本服务器的分类频道")
+		return false
+	}
+	return true
 }
 
 // createChannel POST /guilds/{gid}/channels（需 MANAGE_CHANNELS）→ CHANNEL_CREATE。
@@ -33,10 +57,23 @@ func (h *api) createChannel(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !h.validateParentCategory(c, ctx.Guild.ID, input.Type, input.ParentID) {
+		return
+	}
+	if input.UserLimit != 0 && input.Type != model.ChannelVoice {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "user_limit 仅语音频道可设")
+		return
+	}
+	if input.RateLimitPerUser != 0 && input.Type != model.ChannelText {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "rate_limit_per_user 仅文本频道可设")
+		return
+	}
 	channel := model.Channel{
 		ID: uuid.New(), GuildID: ctx.Guild.ID,
 		Name: strings.TrimSpace(input.Name), Type: input.Type,
 		Topic: strings.TrimSpace(input.Topic), Position: input.Position,
+		ParentID: input.ParentID, UserLimit: input.UserLimit,
+		RateLimitPerUser: input.RateLimitPerUser,
 	}
 	if err := h.deps.DB.Create(&channel).Error; err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "创建频道失败")
@@ -57,6 +94,13 @@ func (h *api) createChannel(c *gin.Context) {
 type updateChannelRequest struct {
 	Name  *string `json:"name" binding:"omitempty,min=1,max=100"`
 	Topic *string `json:"topic" binding:"omitempty,max=1024"`
+	// ParentID 移动到分类（docs 03 FR-13 跨分类拖拽）；显式传 null 表示移出分类。
+	// 用双指针区分「未携带」与「携带 null」。
+	ParentID **uuid.UUID `json:"parent_id"`
+	// UserLimit 语音频道人数上限（docs 09 FR-40）。
+	UserLimit *int `json:"user_limit" binding:"omitempty,gte=0,lte=99"`
+	// RateLimitPerUser 文本频道慢速模式秒数（docs 03 §8-9）。
+	RateLimitPerUser *int `json:"rate_limit_per_user" binding:"omitempty,gte=0,lte=21600"`
 }
 
 // updateChannel PATCH /channels/{cid}（需 MANAGE_CHANNELS；无 VIEW_CHANNEL 一律 404）
@@ -84,6 +128,29 @@ func (h *api) updateChannel(c *gin.Context) {
 	if input.Topic != nil {
 		channel.Topic = strings.TrimSpace(*input.Topic)
 		updates["topic"] = channel.Topic
+	}
+	if input.ParentID != nil {
+		if !h.validateParentCategory(c, ctx.Guild.ID, channel.Type, *input.ParentID) {
+			return
+		}
+		channel.ParentID = *input.ParentID
+		updates["parent_id"] = channel.ParentID
+	}
+	if input.UserLimit != nil {
+		if channel.Type != model.ChannelVoice {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "user_limit 仅语音频道可设")
+			return
+		}
+		channel.UserLimit = *input.UserLimit
+		updates["user_limit"] = channel.UserLimit
+	}
+	if input.RateLimitPerUser != nil {
+		if channel.Type != model.ChannelText {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "rate_limit_per_user 仅文本频道可设")
+			return
+		}
+		channel.RateLimitPerUser = *input.RateLimitPerUser
+		updates["rate_limit_per_user"] = channel.RateLimitPerUser
 	}
 	if len(updates) == 0 {
 		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "没有可更新的字段")
@@ -114,9 +181,18 @@ func (h *api) deleteChannel(c *gin.Context) {
 	}
 	guildID := ctx.Guild.ID
 	viewers, _ := snapshot.ChannelViewers(h.deps.DB, guildID, channel.ID)
+	// 分类被删除时子频道上浮（docs 03：parent 置空，频道保留）；先收集用于事后广播。
+	var children []model.Channel
+	if channel.Type == model.ChannelCategory {
+		h.deps.DB.Where("guild_id = ? AND parent_id = ?", guildID, channel.ID).Find(&children)
+	}
 	// 语音频道联动：断开房内全部用户（SFU 踢出 + VOICE_STATE_UPDATE）。
 	voice.DisconnectChannelUsers(guildID, channel.ID, "CHANNEL_DELETE")
 	err := h.deps.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.Channel{}).Where("guild_id = ? AND parent_id = ?", guildID, channel.ID).
+			Update("parent_id", nil).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("channel_id = ?", channel.ID).Delete(&model.ChannelOverwrite{}).Error; err != nil {
 			return err
 		}
@@ -141,6 +217,15 @@ func (h *api) deleteChannel(c *gin.Context) {
 		h.publish(eventbus.Event{
 			Type: eventbus.EventChannelDelete, GuildID: &guildID, UserIDs: viewers,
 			Payload: eventbus.NewChannelDeletePayload(guildID, channel.ID),
+		})
+	}
+	// 上浮后的子频道逐个广播 CHANNEL_UPDATE（parent_id 已置空）。
+	for _, child := range children {
+		child.ParentID = nil
+		childID := child.ID
+		h.publish(eventbus.Event{
+			Type: eventbus.EventChannelUpdate, GuildID: &guildID, ChannelID: &childID,
+			Payload: snapshot.NewChannelPayload(h.deps.DB, child),
 		})
 	}
 	c.Status(http.StatusNoContent)

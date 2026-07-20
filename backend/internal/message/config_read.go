@@ -32,3 +32,16 @@ func (s *service) getUploadLimit(c *gin.Context) {
 		"default_bytes":      int64(defaultUploadLimitBytes),
 	})
 }
+
+// getUploadLimitForMember GET /guilds/{gid}/upload-limit：本服成员读取生效上限
+//（Owl-Desktop docs 07 FR-06/§8-1：客户端上传前置校验的数据源）。非成员 404。
+func (s *service) getUploadLimitForMember(c *gin.Context) {
+	ctx, ok := s.guildAccess(c)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"guild_id":        ctx.Guild.ID,
+		"effective_bytes": s.uploadLimitBytes(ctx.Guild.ID),
+	})
+}

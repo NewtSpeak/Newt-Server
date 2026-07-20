@@ -3,6 +3,7 @@ import { Link, useOutletContext } from "react-router"
 import { ArrowRightIcon, PlusIcon, Users2Icon } from "lucide-react"
 import { toast } from "sonner"
 
+import { GuildAvatar } from "~/components/guild-avatar"
 import { PageHeader } from "~/components/page-header"
 import { EmptyState } from "~/components/states"
 import { Button } from "~/components/ui/button"
@@ -94,9 +95,7 @@ export default function ServersPage() {
                 className="anim-item group flex flex-col gap-3 rounded-2xl border bg-card p-5 shadow-xs transition-[border-color,box-shadow] hover:border-primary/40 hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none active:scale-[0.99]"
               >
                 <div className="flex items-center justify-between">
-                  <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                    <Users2Icon className="size-5" />
-                  </span>
+                  <GuildAvatar guild={guild} className="size-10" />
                   <ArrowRightIcon className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                 </div>
                 <div className="min-w-0">

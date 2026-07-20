@@ -3,9 +3,11 @@ package moderation
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/restriction"
@@ -133,6 +135,9 @@ func (h *api) banUser(c *gin.Context) {
 		"restrictions_lifted": lifted,
 		"lift_error":          errString(liftErr),
 	})
+	// GUILD_BAN_ADD：guild 广播（含预防性封禁非成员的场景——removeMember 只覆盖成员路径），
+	// 管理端封禁列表与在线成员据此实时刷新（docs 08 §8-8）。
+	h.publishBanEvent(eventbus.EventGuildBanAdd, ctx.Guild.ID, targetUserID, ban.Reason)
 	c.JSON(http.StatusOK, ban)
 }
 
@@ -161,7 +166,36 @@ func (h *api) unbanUser(c *gin.Context) {
 		return
 	}
 	h.audit(ctx, user, "moderation.unban", "user", targetUserID.String(), nil)
+	// GUILD_BAN_REMOVE：guild 广播 + 定向被解封者（其在线时立即感知可重新加入）。
+	h.publishBanEvent(eventbus.EventGuildBanRemove, ctx.Guild.ID, targetUserID, "")
+	if h.deps.Bus != nil {
+		guildID := ctx.Guild.ID
+		h.deps.Bus.Publish(eventbus.Event{
+			Type: eventbus.EventGuildBanRemove, GuildID: &guildID, UserIDs: []uuid.UUID{targetUserID},
+			Payload: banEventPayload(guildID, targetUserID, ""),
+		})
+	}
 	c.Status(http.StatusNoContent)
+}
+
+// banEventPayload GUILD_BAN_ADD / GUILD_BAN_REMOVE 载荷。
+func banEventPayload(guildID, userID uuid.UUID, reason string) gin.H {
+	payload := gin.H{"guild_id": guildID, "user_id": userID, "event_at": time.Now().UTC()}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	return payload
+}
+
+// publishBanEvent 封禁事件 guild 广播（bus 未注入时 no-op）。
+func (h *api) publishBanEvent(eventType string, guildID, userID uuid.UUID, reason string) {
+	if h.deps.Bus == nil {
+		return
+	}
+	h.deps.Bus.Publish(eventbus.Event{
+		Type: eventType, GuildID: &guildID,
+		Payload: banEventPayload(guildID, userID, reason),
+	})
 }
 
 // listBans GET /guilds/{gid}/bans：封禁列表（需 BAN_MEMBERS）。

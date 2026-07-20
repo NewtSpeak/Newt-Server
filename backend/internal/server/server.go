@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -27,6 +29,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/platformadmin"
 	"github.com/owlspeak/owl-server/backend/internal/presence"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/owlspeak/owl-server/backend/internal/registrationinvite"
 	"github.com/owlspeak/owl-server/backend/internal/restriction"
 	"github.com/owlspeak/owl-server/backend/internal/secretstore"
 	"github.com/owlspeak/owl-server/backend/internal/security"
@@ -56,12 +59,36 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	for _, mw := range observability.GinMiddleware() {
 		router.Use(mw)
 	}
-	router.Use(gin.Logger(), gin.Recovery(), cors.New(cors.Config{
+	// CORS 分平面：/gapi、/invite-api 面向桌面客户端（Tauri）跨域直连自部署服务端，
+	// 来源不可枚举（tauri://localhost / http://localhost:* / https://tauri.localhost 等），
+	// 放开任意 Origin（凭证走 Bearer header 而非 Cookie，无 CSRF 面）；
+	// 其余前缀（含 /api/v1 管理后台，生产同源）维持仅本地开发来源的收紧配置。
+	adminCORS := cors.New(cors.Config{
 		AllowOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{"Authorization", "Content-Type"},
-	}))
+	})
+	clientCORS := cors.New(cors.Config{
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:    []string{"Authorization", "Content-Type"},
+	})
+	router.Use(gin.Logger(), gin.Recovery(), func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/gapi/") || strings.HasPrefix(path, "/invite-api/") {
+			clientCORS(c)
+			return
+		}
+		adminCORS(c)
+	})
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	// 服务器时间（Owl-Desktop docs 08 §8-9：客户端显示 Restriction 剩余时长时
+	// 校准本地时钟偏差）。免认证、双前缀可达（CORS 中间件按前缀已放行）。
+	serverTime := func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"server_time": time.Now().UTC(), "unix_ms": time.Now().UTC().UnixMilli()})
+	}
+	router.GET("/api/v1/time", serverTime)
+	router.GET("/gapi/v1/time", serverTime)
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	tokens := security.NewTokenManager(cfg.JWTSecret, cfg.AccessTokenTTL)
 	api := httpapi.New(db, tokens, cfg.RefreshTokenTTL)
@@ -126,6 +153,7 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 		adminpresence.Register,   // 系统管理员临场（进频道发言/隐身/音频审计）
 		publicinvite.RegisterAdmin, // 邀请落地页内容管理（公告/协议）后台
 		platformadmin.Register,   // 平台用户治理（禁用/重置密码/系统管理员/注册开关）
+		registrationinvite.Register, // 注册邀请链接（凭码绕过注册开关，仅系统管理员）
 	}
 	for _, register := range modules {
 		if err := register(v1, deps); err != nil {
@@ -140,14 +168,24 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 
 	// 公开邀请落地页 API（/invite-api）：无需登录，供未安装客户端的用户查看
 	// 服务器信息/公告/协议与下载引导；与 /api、/gapi 前缀均隔离。
-	if err := publicinvite.RegisterPublic(router.Group("/invite-api"), deps); err != nil {
+	inviteAPI := router.Group("/invite-api")
+	if err := publicinvite.RegisterPublic(inviteAPI, deps); err != nil {
+		return nil, err
+	}
+	// 注册邀请公开预检（GET /invite-api/registration/{code}）：桌面客户端注册前免登录校验。
+	if err := registrationinvite.RegisterPublic(inviteAPI, deps); err != nil {
 		return nil, err
 	}
 	// 友好分享短链 /invite/{code}：服务端渲染 HTML 落地页（含深链唤起与下载引导）。
 	publicinvite.RegisterLanding(router, deps)
 
 	// 头像/横幅公开访问（/public-assets）：无需登录，文件名带版本号可长缓存。
-	if err := customization.RegisterPublic(router.Group("/public-assets"), deps); err != nil {
+	publicAssets := router.Group("/public-assets")
+	if err := customization.RegisterPublic(publicAssets, deps); err != nil {
+		return nil, err
+	}
+	// 入场语音包音频公开访问（/public-assets/voicepacks，docs 12 §5.1 客户端直拉）。
+	if err := message.RegisterPublicAssets(publicAssets, deps); err != nil {
 		return nil, err
 	}
 

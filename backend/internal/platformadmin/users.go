@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/audit"
+	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/security"
 )
@@ -117,9 +118,22 @@ func (h *api) disableUser(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "吊销会话失败")
 		return
 	}
+	// 强制下线：refresh token 吊销只阻止续期，已建立的 Gateway WS 须立即断开。
+	h.revokeGatewaySessions(target.ID)
 	h.audit(c, "platform.user_disable", target.ID.String(), map[string]any{"username": target.Username})
 	target.DisabledAt = &now
 	c.JSON(http.StatusOK, target)
+}
+
+// revokeGatewaySessions 经内部事件通知各 Gateway hub 立即断开该用户全部 WS 会话（4010）。
+func (h *api) revokeGatewaySessions(userID uuid.UUID) {
+	if h.deps.Bus == nil {
+		return
+	}
+	h.deps.Bus.Publish(eventbus.Event{
+		Type:    eventbus.InternalSessionRevoke,
+		UserIDs: []uuid.UUID{userID},
+	})
 }
 
 // enableUser POST /admin/users/{id}/enable：解除平台禁用。
@@ -164,6 +178,8 @@ func (h *api) resetPassword(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "吊销会话失败")
 		return
 	}
+	// 强制下线：密码已被管理员重置，在线端立即断开，须用新密码重新登录。
+	h.revokeGatewaySessions(target.ID)
 	h.audit(c, "platform.user_reset_password", target.ID.String(), map[string]any{"username": target.Username})
 	c.JSON(http.StatusOK, gin.H{"user_id": target.ID, "sessions_revoked": true})
 }

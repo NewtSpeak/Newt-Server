@@ -147,7 +147,9 @@ func (h *api) create(c *gin.Context) {
 		return
 	}
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.Reason == "" {
+	// reason 强制策略按服级配置（docs 08 AI.2/§8-9：默认强制，系统管可经
+	// PATCH /guilds/{gid} 的 restriction_reason_required 关闭）。
+	if input.Reason == "" && ctx.Guild.RestrictionReasonRequired {
 		fail(c, http.StatusBadRequest, "REASON_REQUIRED", "必须填写限制原因")
 		return
 	}

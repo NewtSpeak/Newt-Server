@@ -17,11 +17,32 @@ export type TokenResponse = {
   user: User
 }
 
+/** 服务器 banner（多张有序，docs 协议/服务器外观资产.md） */
+export type GuildBanner = {
+  id: string
+  guild_id: string
+  /** 公开访问路径（/public-assets/profile/...），不可变可长缓存 */
+  url: string
+  /** 展示顺序（0 起连续升序） */
+  position: number
+  created_at?: string
+  updated_at?: string
+}
+
 export type Guild = {
   id: string
   name: string
   description?: string
   owner_user_id: string
+  /** 服务器图标 / 横幅公开 URL（/public-assets/profile/...），空串表示未设置 */
+  icon_url?: string
+  banner_url?: string
+  /** 多 banner 列表（position 升序）；列表/详情响应与 GUILD_UPDATE 事件均携带 */
+  banners?: GuildBanner[]
+  /** 受限徽章服级开关（docs 08 AM.4） */
+  restriction_badge_visible?: boolean
+  /** Restriction 创建是否强制填写 reason（docs 08 AI.2，仅系统管可改） */
+  restriction_reason_required?: boolean
 }
 
 export type Role = {
@@ -33,6 +54,12 @@ export type Role = {
   is_everyone: boolean
   /** 角色名样式 JSON 字符串（RoleStyle schema），"{}" 表示无样式 */
   style?: string
+  /** 角色主色（#RRGGBB，空串 = 默认色） */
+  color?: string
+  /** 是否在成员列表单独分组显示 */
+  hoist?: boolean
+  /** 是否允许任何人 @提及该角色 */
+  mentionable?: boolean
 }
 
 export type RegistrationStatus = { registration_open: boolean }
@@ -135,7 +162,7 @@ export function gatewayURL() {
 // 频道 / 成员 / 角色 / 权限
 // ---------------------------------------------------------------------------
 
-export type ChannelType = "TEXT" | "VOICE"
+export type ChannelType = "TEXT" | "VOICE" | "CATEGORY"
 
 export type Channel = {
   id: string
@@ -144,6 +171,12 @@ export type Channel = {
   type: ChannelType
   topic?: string
   position: number
+  /** 所属分类频道 ID（docs 03 FR-03），null/缺省 = 未分组 */
+  parent_id?: string | null
+  /** 语音频道人数上限（0 = 不限，docs 09 FR-40） */
+  user_limit?: number
+  /** 文本频道慢速模式秒数（0 = 关闭，docs 03 §8-9） */
+  rate_limit_per_user?: number
 }
 
 export type GuildMember = {
@@ -160,15 +193,27 @@ export function memberName(member: GuildMember) {
 
 export const listGuilds = () => api<Guild[]>("/guilds")
 export const createGuild = (name: string) => api<Guild>("/guilds", { method: "POST", body: JSON.stringify({ name }) })
+/** 服务器详情 + 成员总数（docs 02 §8-1） */
+export const getGuildDetail = (gid: string) => api<{ guild: Guild; member_count: number }>(`/guilds/${gid}`)
 export const listChannels = (gid: string) => api<Channel[]>(`/guilds/${gid}/channels`)
-export const createChannel = (gid: string, body: { name: string; type: ChannelType }) =>
-  api<Channel>(`/guilds/${gid}/channels`, { method: "POST", body: JSON.stringify(body) })
+export const createChannel = (
+  gid: string,
+  body: { name: string; type: ChannelType; parent_id?: string; user_limit?: number; rate_limit_per_user?: number }
+) => api<Channel>(`/guilds/${gid}/channels`, { method: "POST", body: JSON.stringify(body) })
 export const listMembers = (gid: string) => api<GuildMember[]>(`/guilds/${gid}/members`)
 export const listRoles = (gid: string) => api<Role[]>(`/guilds/${gid}/roles`)
-export const createRole = (gid: string, body: { name: string; position: number; permissions: number }) =>
-  api<Role>(`/guilds/${gid}/roles`, { method: "POST", body: JSON.stringify(body) })
-export const updateRole = (gid: string, rid: string, body: Partial<Pick<Role, "name" | "position" | "permissions">>) =>
-  api<Role>(`/guilds/${gid}/roles/${rid}`, { method: "PATCH", body: JSON.stringify(body) })
+export const createRole = (
+  gid: string,
+  body: { name: string; position: number; permissions: number; color?: string; hoist?: boolean; mentionable?: boolean }
+) => api<Role>(`/guilds/${gid}/roles`, { method: "POST", body: JSON.stringify(body) })
+export const updateRole = (
+  gid: string,
+  rid: string,
+  body: Partial<Pick<Role, "name" | "position" | "permissions" | "color" | "hoist" | "mentionable">>
+) => api<Role>(`/guilds/${gid}/roles/${rid}`, { method: "PATCH", body: JSON.stringify(body) })
+/** 角色批量排序（docs 04 §8：拖拽调整层级，@everyone 不参与） */
+export const reorderRoles = (gid: string, entries: { id: string; position: number }[]) =>
+  api<void>(`/guilds/${gid}/roles`, { method: "PATCH", body: JSON.stringify(entries) })
 export const addMemberRole = (gid: string, mid: string, rid: string) =>
   api<void>(`/guilds/${gid}/members/${mid}/roles/${rid}`, { method: "PUT" })
 export const removeMemberRole = (gid: string, mid: string, rid: string) =>
@@ -319,6 +364,12 @@ export const listVoiceStates = (gid: string, cid: string) =>
 // 管理员断开（docs 05 §8.1）：POST /guilds/{gid}/voice/disconnect
 export const disconnectVoiceUser = (gid: string, _cid: string, uid: string) =>
   api<void>(`/guilds/${gid}/voice/disconnect`, { method: "POST", body: JSON.stringify({ user_id: uid }) })
+/** 管理员移动成员到另一语音频道（docs 09 FR-29：MOVE_MEMBERS + 层级） */
+export const moveVoiceUser = (gid: string, userID: string, channelID: string) =>
+  api<{ moved: boolean; to_channel_id?: string }>(`/guilds/${gid}/voice/move`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userID, channel_id: channelID }),
+  })
 // 手动热迁移（docs 09 §3.6）：以「用户语音会话」为粒度
 export const createVoiceMigration = (body: { guild_id: string; user_id: string; to_node_id?: string }) =>
   api<{ migration_id?: string }>("/admin/voice/migrations", { method: "POST", body: JSON.stringify(body) })
@@ -367,6 +418,9 @@ export const stageBringUp = (cid: string, userID: string) =>
   api<void>(`/channels/${cid}/stage/bring-up`, { method: "POST", body: JSON.stringify({ user_id: userID }) })
 export const stageBringDown = (cid: string, userID: string) =>
   api<void>(`/channels/${cid}/stage/bring-down`, { method: "POST", body: JSON.stringify({ user_id: userID }) })
+/** 管理员将他人移出麦序队列（docs 10 FR-15，需 STAGE_MANAGE_QUEUE / STAGE_BRING_UP） */
+export const stageRemoveFromQueue = (cid: string, userID: string) =>
+  api<void>(`/channels/${cid}/stage/queue/${userID}`, { method: "DELETE" })
 
 // ---------------------------------------------------------------------------
 // Restriction（文档 12 §4）
@@ -451,7 +505,13 @@ export type Attachment = {
   mime?: string
   size?: number
   url?: string
+  /** 图片像素尺寸（docs 07 §8-5，非图片为 0/缺省） */
+  width?: number
+  height?: number
 }
+
+/** 消息反应聚合（docs 05 FR-26）：me 表示调用者是否已反应 */
+export type ReactionSummary = { emoji: string; count: number; me: boolean }
 
 export type Message = {
   id: string
@@ -463,6 +523,7 @@ export type Message = {
   content: string
   reply_to_id?: string | null
   attachments?: Attachment[]
+  reactions?: ReactionSummary[]
   edit_count?: number
   edited_at?: string | null
   created_at: string
@@ -488,13 +549,18 @@ export const sendMessage = (cid: string, content: string) =>
 // 后端响应分别为 { edits, edit_count } 与 { messages }，此处解包为数组
 export const listMessageEdits = (cid: string, mid: string) =>
   api<{ edits?: MessageEdit[] }>(`/channels/${cid}/messages/${mid}/edits`).then(raw => raw.edits ?? [])
+export type SearchResult = { messages: Message[]; total: number }
+
 export const searchMessages = (params: {
   q: string
   guild_id?: string
   channel_id?: string
   author_id?: string
   limit?: number
-}) => api<{ messages?: Message[] }>(`/search/messages${qs(params)}`).then(raw => raw.messages ?? [])
+}) =>
+  api<{ messages?: Message[]; total?: number }>(`/search/messages${qs(params)}`).then(
+    (raw): SearchResult => ({ messages: raw.messages ?? [], total: raw.total ?? raw.messages?.length ?? 0 }),
+  )
 
 // ---------------------------------------------------------------------------
 // 机器人（bot 专项）：档案 / 令牌 / 安装到服；权限赋予复用成员角色端点
@@ -913,8 +979,63 @@ export const patchScreenQuota = async (gid: string, body: { base_limit?: number;
 // 服务器结构治理：生命周期 / 频道管理 / 覆盖读回 / 昵称（guildapi + moderation）
 // ---------------------------------------------------------------------------
 
-export const updateGuild = (gid: string, body: { name?: string; description?: string }) =>
-  api<Guild>(`/guilds/${gid}`, { method: "PATCH", body: JSON.stringify(body) })
+export const updateGuild = (
+  gid: string,
+  body: { name?: string; description?: string; restriction_badge_visible?: boolean; restriction_reason_required?: boolean }
+) => api<Guild>(`/guilds/${gid}`, { method: "PATCH", body: JSON.stringify(body) })
+
+/** 上传服务器图标 / 横幅（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF；需 MANAGE_GUILD） */
+export async function uploadGuildImage(gid: string, kind: "icon" | "banner", file: File) {
+  const session = getSession()
+  const form = new FormData()
+  form.append("file", file)
+  const response = await fetch(`${baseURL}/guilds/${gid}/${kind}`, {
+    method: "POST",
+    headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
+    body: form,
+  })
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as ApiError
+    throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
+  }
+  return response.json() as Promise<{ url: string; guild: Guild }>
+}
+export const deleteGuildImage = (gid: string, kind: "icon" | "banner") =>
+  api<Guild>(`/guilds/${gid}/${kind}`, { method: "DELETE" })
+
+// ---------------------------------------------------------------------------
+// 服务器多 banner（docs 协议/服务器外观资产.md）：每服多张有序，默认上限 10
+// ---------------------------------------------------------------------------
+
+export const listGuildBanners = (gid: string) =>
+  api<{ guild_id: string; banners: GuildBanner[]; limit: number }>(`/guilds/${gid}/banners`)
+
+/** 新增 banner（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF；需 MANAGE_GUILD），追加到末尾 */
+export async function addGuildBanner(gid: string, file: File) {
+  const session = getSession()
+  const form = new FormData()
+  form.append("file", file)
+  const response = await fetch(`${baseURL}/guilds/${gid}/banners`, {
+    method: "POST",
+    headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
+    body: form,
+  })
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as ApiError
+    throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
+  }
+  return response.json() as Promise<{ banner: GuildBanner; banners: GuildBanner[] }>
+}
+
+/** 重排序：banner_ids 为全量有序数组（必须恰好覆盖全部 banner，服务端按下标重排） */
+export const reorderGuildBanners = (gid: string, bannerIDs: string[]) =>
+  api<{ banners: GuildBanner[] }>(`/guilds/${gid}/banners`, {
+    method: "PATCH",
+    body: JSON.stringify({ banner_ids: bannerIDs }),
+  })
+
+export const deleteGuildBanner = (gid: string, bannerID: string) =>
+  api<{ banners: GuildBanner[] }>(`/guilds/${gid}/banners/${bannerID}`, { method: "DELETE" })
 /** 删除服务器：confirm_name 必须与服务器名完全一致（防误删） */
 export const deleteGuild = (gid: string, confirmName: string) =>
   api<void>(`/guilds/${gid}`, { method: "DELETE", body: JSON.stringify({ confirm_name: confirmName }) })
@@ -926,8 +1047,10 @@ export const transferGuildOwnership = (gid: string, newOwnerUserID: string) =>
 
 export const deleteRole = (gid: string, rid: string) => api<void>(`/guilds/${gid}/roles/${rid}`, { method: "DELETE" })
 
-export const updateChannel = (cid: string, body: { name?: string; topic?: string }) =>
-  api<Channel>(`/channels/${cid}`, { method: "PATCH", body: JSON.stringify(body) })
+export const updateChannel = (
+  cid: string,
+  body: { name?: string; topic?: string; parent_id?: string | null; user_limit?: number; rate_limit_per_user?: number }
+) => api<Channel>(`/channels/${cid}`, { method: "PATCH", body: JSON.stringify(body) })
 export const deleteChannel = (cid: string) => api<void>(`/channels/${cid}`, { method: "DELETE" })
 /** 批量保存频道排序（拖拽后整体提交） */
 export const reorderChannels = (gid: string, entries: { id: string; position: number }[]) =>
@@ -999,6 +1122,17 @@ export const patchGuildVoicePack = (
   body: { enabled?: boolean; audio_url?: string; scope?: string; trigger?: string }
 ) => api<VoicePackConfig>(`/guilds/${gid}/voice-pack`, { method: "PATCH", body: JSON.stringify(body) })
 
+/** 频道级语音包开关：无记录时默认允许播放 */
+export type ChannelVoicePack = { channel_id: string; guild_id: string; allowed: boolean }
+
+export const getChannelVoicePack = (gid: string, cid: string) =>
+  api<ChannelVoicePack>(`/guilds/${gid}/channels/${cid}/voice-pack`)
+export const putChannelVoicePack = (gid: string, cid: string, allowed: boolean) =>
+  api<ChannelVoicePack>(`/guilds/${gid}/channels/${cid}/voice-pack`, {
+    method: "PUT",
+    body: JSON.stringify({ allowed }),
+  })
+
 export type VoiceStageConfig = {
   channel_id: string
   mode: VoiceChannelMode
@@ -1052,6 +1186,32 @@ export const getRegistrationSetting = () => api<RegistrationSetting>("/admin/reg
 export const putRegistrationSetting = (enabled: boolean) =>
   api<RegistrationSetting>("/admin/registration", { method: "PUT", body: JSON.stringify({ signup_enabled: enabled }) })
 
+/** 注册邀请链接（凭码注册可绕过注册开关，仅系统管理员） */
+export type RegistrationInviteStatus = "active" | "expired" | "exhausted" | "revoked"
+
+export type RegistrationInvite = {
+  id: string
+  code: string
+  share_url: string
+  deep_link: string
+  created_by: string
+  created_at: string
+  expires_at: string | null
+  max_uses: number
+  uses: number
+  revoked: boolean
+  status: RegistrationInviteStatus
+}
+
+export const listRegistrationInvites = () => api<RegistrationInvite[]>("/admin/registration-invites")
+export const createRegistrationInvite = (ttlSeconds?: number, maxUses?: number) =>
+  api<RegistrationInvite>("/admin/registration-invites", {
+    method: "POST",
+    body: JSON.stringify({ ttl_seconds: ttlSeconds || undefined, max_uses: maxUses || undefined }),
+  })
+export const revokeRegistrationInvite = (id: string) =>
+  api<void>(`/admin/registration-invites/${id}`, { method: "DELETE" })
+
 // ---------------------------------------------------------------------------
 // 账号安全（userapi）：改密码 / 登录会话
 // ---------------------------------------------------------------------------
@@ -1063,6 +1223,10 @@ export type LoginSession = {
   last_used_at: string
   expires_at: string
   current: boolean
+  /** 设备元数据（docs 01 FR-27）：登录/最近轮换时采集，历史会话为空串 */
+  device_name?: string
+  platform?: string
+  ip_address?: string
 }
 
 export const changeMyPassword = (currentPassword: string, newPassword: string) =>
@@ -1073,3 +1237,8 @@ export const changeMyPassword = (currentPassword: string, newPassword: string) =
 export const listMySessions = () =>
   api<{ sessions?: LoginSession[] }>("/users/@me/sessions").then(raw => raw.sessions ?? [])
 export const revokeMySession = (sessionID: string) => api<void>(`/users/@me/sessions/${sessionID}`, { method: "DELETE" })
+/** 登出所有其他设备（保留当前会话，docs 01 FR-27） */
+export const revokeOtherSessions = () =>
+  api<{ revoked: number }>("/users/@me/sessions", { method: "DELETE" })
+/** 服务器时间（docs 08 §8-9：客户端校准时钟偏差） */
+export const getServerTime = () => api<{ server_time: string; unix_ms: number }>("/time")

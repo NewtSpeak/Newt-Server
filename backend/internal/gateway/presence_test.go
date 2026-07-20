@@ -92,8 +92,8 @@ func TestGatewayPresenceUpdateOpBroadcasts(t *testing.T) {
 		return p.UserID == env.bob.ID && p.Status == "online"
 	}, nil)
 
-	// bob 切 dnd → alice 与 bob 本人都收到 dnd。
-	sendFrame(t, wsBob, map[string]any{"op": opPresenceUpdate, "d": map[string]string{"status": "dnd", "custom_text": "开会"}})
+	// bob 切 dnd（用短别名 op PRESENCE，与 PRESENCE_UPDATE 等价）→ alice 与 bob 本人都收到 dnd。
+	sendFrame(t, wsBob, map[string]any{"op": opPresence, "d": map[string]string{"status": "dnd", "custom_text": "开会"}})
 	got := waitPresence(t, wsAlice, func(p presencePayload) bool {
 		return p.UserID == env.bob.ID && p.Status == "dnd"
 	}, nil)
@@ -162,6 +162,14 @@ func TestGatewayReadyCarriesPresences(t *testing.T) {
 	}
 	if statuses[env.bob.ID] != "online" {
 		t.Fatalf("READY presences 中 bob 本人 = %q，期待 online", statuses[env.bob.ID])
+	}
+	// 顶层 presences 为各 guild 并集（本例单 guild，与 guilds[0].presences 等价）。
+	union := map[uuid.UUID]string{}
+	for _, p := range ready.Presences {
+		union[p.UserID] = p.Status
+	}
+	if union[env.alice.ID] != "dnd" || union[env.bob.ID] != "online" {
+		t.Fatalf("READY 顶层 presences 异常: %v", union)
 	}
 }
 

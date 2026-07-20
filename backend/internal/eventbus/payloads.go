@@ -18,14 +18,26 @@ import (
 func eventNow() time.Time { return time.Now().UTC() }
 
 // GuildPayload GUILD_UPDATE 载荷（PATCH guild 端点由后续任务接入）。
+// Banners 仅在服务器 banner 增删/排序触发的 GUILD_UPDATE 中携带
+//（最新全量列表，position 升序）；其他 guild 变更事件省略该字段。
 type GuildPayload struct {
-	Guild   model.Guild `json:"guild"`
-	EventAt time.Time   `json:"event_at"`
+	Guild   model.Guild         `json:"guild"`
+	Banners []model.GuildBanner `json:"banners,omitempty"`
+	EventAt time.Time           `json:"event_at"`
 }
 
 // NewGuildUpdatePayload 供 guild PATCH 端点（后续任务）复用。
 func NewGuildUpdatePayload(guild model.Guild) GuildPayload {
 	return GuildPayload{Guild: guild, EventAt: eventNow()}
+}
+
+// NewGuildBannersUpdatePayload 服务器 banner 增删/排序端点复用（guildapi）：
+// GUILD_UPDATE 载荷附带最新 banners 全量，客户端整体替换本地列表。
+func NewGuildBannersUpdatePayload(guild model.Guild, banners []model.GuildBanner) GuildPayload {
+	if banners == nil {
+		banners = []model.GuildBanner{}
+	}
+	return GuildPayload{Guild: guild, Banners: banners, EventAt: eventNow()}
 }
 
 // GuildDeletePayload GUILD_DELETE 载荷（DELETE guild 端点由后续任务接入）。
@@ -138,34 +150,43 @@ func NewPermissionsUpdatePayload(guildID, channelID uuid.UUID) PermissionsUpdate
 }
 
 // UserUpdatePayload USER_UPDATE 载荷（用户资料公开投影）：display_name / bio /
-// 头像变更时广播给共享 guild 的在线成员并定向发给本人全部端。
-// 不含 email / system_admin 等私有字段。
+// 头像 / 横幅 / 强调色变更时广播给共享 guild 的在线成员并定向发给本人全部端。
+// 不含 email / system_admin / disabled_at 等私有字段——所有 USER_UPDATE 发布方
+//（userapi 与 customization）必须统一经本构造函数产出载荷，禁止直接广播 model.User。
 type UserUpdatePayload struct {
-	ID          uuid.UUID `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	Avatar      string    `json:"avatar"` // 头像可访问 URL（/public-assets/profile/...），空串表示未设置
-	Bio         string    `json:"bio"`
-	EventAt     time.Time `json:"event_at"`
+	ID             uuid.UUID `json:"id"`
+	Username       string    `json:"username"`
+	DisplayName    string    `json:"display_name"`
+	Avatar         string    `json:"avatar"` // 头像可访问 URL（/public-assets/profile/...），空串表示未设置
+	AvatarAnimated bool      `json:"avatar_animated"`
+	Banner         string    `json:"banner"`
+	AccentColor    string    `json:"accent_color"`
+	Bio            string    `json:"bio"`
+	EventAt        time.Time `json:"event_at"`
 }
 
-// NewUserUpdatePayload 供 userapi 资料/头像端点复用。
+// NewUserUpdatePayload 供 userapi 与 customization 的资料/头像/横幅端点复用。
 func NewUserUpdatePayload(user model.User) UserUpdatePayload {
 	return UserUpdatePayload{
 		ID: user.ID, Username: user.Username, DisplayName: user.DisplayName,
-		Avatar: user.AvatarURL, Bio: user.Bio, EventAt: eventNow(),
+		Avatar: user.AvatarURL, AvatarAnimated: user.AvatarAnimated,
+		Banner: user.BannerURL, AccentColor: user.AccentColor,
+		Bio: user.Bio, EventAt: eventNow(),
 	}
 }
 
 // PresenceUpdatePayload PRESENCE_UPDATE 载荷。
 // Status 取 online / idle / dnd / invisible / offline；发给他人的载荷绝不出现
 // invisible（服务端已掩码为 offline），仅本人的定向载荷携带真实 invisible。
-// CustomText 自定义状态文本（预留字段，docs 01 FR-23）。
+// CustomText/CustomEmoji/CustomExpiresAt 自定义状态（docs 01 FR-23）：
+// 文本 + 可选 emoji + 可选过期时间（客户端据 expires_at 自行倒计时清除）。
 type PresenceUpdatePayload struct {
-	UserID     uuid.UUID `json:"user_id"`
-	Status     string    `json:"status"`
-	CustomText string    `json:"custom_text,omitempty"`
-	EventAt    time.Time `json:"event_at"`
+	UserID          uuid.UUID  `json:"user_id"`
+	Status          string     `json:"status"`
+	CustomText      string     `json:"custom_text,omitempty"`
+	CustomEmoji     string     `json:"custom_emoji,omitempty"`
+	CustomExpiresAt *time.Time `json:"custom_expires_at,omitempty"`
+	EventAt         time.Time  `json:"event_at"`
 }
 
 // NewPresenceUpdatePayload 供 internal/presence 复用。

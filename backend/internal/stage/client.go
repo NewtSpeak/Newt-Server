@@ -36,8 +36,10 @@ func RegisterClient(authed *gin.RouterGroup, deps appdeps.Deps) {
 
 	// authed 已带用户端认证中间件，这里无需再叠加 deps.Auth。
 	channels := authed.Group("/channels/:channelID")
+	channels.GET("/voice-stage", h.getVoiceStage)
 	channels.PATCH("/voice-stage", h.patchVoiceStage)
 	channels.GET("/stage/queue", h.getQueue)
+	channels.DELETE("/stage/queue/:userID", h.removeFromQueue)
 	channels.POST("/stage/apply", h.apply)
 	channels.DELETE("/stage/apply", h.cancelApply)
 	channels.POST("/stage/bring-up", h.bringUp)

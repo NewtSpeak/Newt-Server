@@ -94,7 +94,7 @@ func TestMentionsAndReadStates(t *testing.T) {
 	}
 
 	tokenB, userB, _ := signupAndJoin(t, router, db, guildID, "rs_b")
-	_, userC, memberC := signupAndJoin(t, router, db, guildID, "rs_c")
+	tokenC, userC, memberC := signupAndJoin(t, router, db, guildID, "rs_c")
 
 	role := model.Role{ID: uuid.New(), GuildID: guildID, Name: "raiders-" + fmt.Sprintf("%06x", rand.Uint32())}
 	if err := db.Create(&role).Error; err != nil {
@@ -234,40 +234,58 @@ func TestMentionsAndReadStates(t *testing.T) {
 		t.Errorf("ack 旧消息后 last_read = %v，期待保持 %s（只前进不后退）", acked["last_read_message_id"], msg3ID)
 	}
 
-	// READ_STATE_UPDATE 事件：定向本人（UserIDs=[B]），payload 含频道与读位置。
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		mu.Lock()
-		count := len(readStateEvents)
-		mu.Unlock()
-		if count >= 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("未收到 READ_STATE_UPDATE 事件（count=%d）", count)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	mu.Lock()
-	firstEvent := readStateEvents[0]
-	mu.Unlock()
-	if len(firstEvent.UserIDs) != 1 || firstEvent.UserIDs[0] != userB {
-		t.Errorf("READ_STATE_UPDATE 应定向本人全部端: %v", firstEvent.UserIDs)
-	}
-	rawPayload, err := json.Marshal(firstEvent.Payload)
-	if err != nil {
-		t.Fatalf("序列化事件载荷失败: %v", err)
-	}
-	var payload struct {
+	// READ_STATE_UPDATE 事件：
+	//   - 提及计数增长时定向发给被提及者（mention_count > 0）；
+	//   - ack 时定向发给当事人（mention_count == 0、last_read 为 ack 位置）。
+	type readStatePayload struct {
+		UserID            uuid.UUID `json:"user_id"`
 		ChannelID         uuid.UUID `json:"channel_id"`
 		LastReadMessageID string    `json:"last_read_message_id"`
 		MentionCount      int       `json:"mention_count"`
 	}
-	if err := json.Unmarshal(rawPayload, &payload); err != nil {
-		t.Fatalf("解析事件载荷失败: %v", err)
+	decodePayload := func(event eventbus.Event) readStatePayload {
+		raw, err := json.Marshal(event.Payload)
+		if err != nil {
+			t.Fatalf("序列化事件载荷失败: %v", err)
+		}
+		var payload readStatePayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("解析事件载荷失败: %v", err)
+		}
+		return payload
 	}
-	if payload.ChannelID != channelID || payload.LastReadMessageID != msg3ID || payload.MentionCount != 0 {
-		t.Errorf("READ_STATE_UPDATE 载荷异常: %s", rawPayload)
+	// 等到 B 的 ack 事件出现（定向 UserIDs=[B]、mention_count=0、读位置=msg3）。
+	deadline := time.Now().Add(2 * time.Second)
+	var sawMentionEventForB, sawAckEventForB bool
+	for !sawAckEventForB {
+		if time.Now().After(deadline) {
+			t.Fatalf("未收到 B 的 ack READ_STATE_UPDATE（提及事件=%v）", sawMentionEventForB)
+		}
+		mu.Lock()
+		events := append([]eventbus.Event(nil), readStateEvents...)
+		mu.Unlock()
+		for _, event := range events {
+			if len(event.UserIDs) != 1 {
+				t.Fatalf("READ_STATE_UPDATE 应逐用户定向: %v", event.UserIDs)
+			}
+			if event.UserIDs[0] != userB {
+				continue
+			}
+			payload := decodePayload(event)
+			if payload.UserID != userB || payload.ChannelID != channelID {
+				t.Fatalf("READ_STATE_UPDATE 载荷 user/channel 异常: %+v", payload)
+			}
+			if payload.MentionCount > 0 {
+				sawMentionEventForB = true // 提及计数增长的定向事件
+			}
+			if payload.MentionCount == 0 && payload.LastReadMessageID == msg3ID {
+				sawAckEventForB = true
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !sawMentionEventForB {
+		t.Error("提及计数增长时应向被提及者定向发 READ_STATE_UPDATE")
 	}
 
 	// 7. ack 后再次被提及：计数从 0 重新累计。
@@ -281,13 +299,23 @@ func TestMentionsAndReadStates(t *testing.T) {
 		t.Errorf("ack 后再次提及 B 的 mention_count = %d，期待 1", state.MentionCount)
 	}
 
-	// 8. GET /users/@me/read-states REST 兜底（可选 guild_id 过滤）。
+	// 8. GET /users/@me/read-states REST 兜底（可选 guild_id 过滤）：
+	//    条目须带该频道当前 last_message_id（字符串形态，恢复普通未读白点）。
 	rec, listing := doJSONReq(t, router, http.MethodGet, "/gapi/v1/users/@me/read-states", tokenB, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("read-states 返回 %d: %s", rec.Code, rec.Body.String())
 	}
 	if states := listing["read_states"].([]any); len(states) != 1 {
 		t.Fatalf("read_states 数量 = %d，期待 1", len(states))
+	} else {
+		entry := states[0].(map[string]any)
+		var latestNow model.Message
+		if err := db.Where("channel_id = ?", channelID).Order("id DESC").First(&latestNow).Error; err != nil {
+			t.Fatalf("查询最新消息失败: %v", err)
+		}
+		if entry["last_message_id"] != fmt.Sprint(latestNow.ID) {
+			t.Errorf("read-states 条目 last_message_id = %v，期待 %d（字符串）", entry["last_message_id"], latestNow.ID)
+		}
 	}
 	rec, listing = doJSONReq(t, router, http.MethodGet, "/gapi/v1/users/@me/read-states?guild_id="+guildID.String(), tokenB, nil)
 	if rec.Code != http.StatusOK || len(listing["read_states"].([]any)) != 1 {
@@ -314,6 +342,54 @@ func TestMentionsAndReadStates(t *testing.T) {
 		t.Fatalf("空频道集合应返回空数组: %v %v", empty, err)
 	}
 
+	// 9b. READY guilds[].channels[].last_message_id 的 DB 组装路径（snapshot.BuildGuild）：
+	//     有消息的频道为当前最大消息 ID，无消息的频道为 0（JSON 中 "0"）。
+	guildSnap, err := snapshot.BuildGuild(db, owner, guildID)
+	if err != nil {
+		t.Fatalf("BuildGuild 失败: %v", err)
+	}
+	var latestInChannel model.Message
+	if err := db.Where("channel_id = ?", channelID).Order("id DESC").First(&latestInChannel).Error; err != nil {
+		t.Fatalf("查询最新消息失败: %v", err)
+	}
+	foundChannel := false
+	for _, snap := range guildSnap.Channels {
+		if snap.ID != channelID {
+			continue
+		}
+		foundChannel = true
+		if snap.LastMessageID != latestInChannel.ID {
+			t.Errorf("频道快照 last_message_id = %d，期待 %d", snap.LastMessageID, latestInChannel.ID)
+		}
+		raw, err := json.Marshal(snap)
+		if err != nil {
+			t.Fatalf("序列化频道快照失败: %v", err)
+		}
+		var encoded map[string]any
+		if err := json.Unmarshal(raw, &encoded); err != nil {
+			t.Fatalf("解析频道快照失败: %v", err)
+		}
+		if encoded["last_message_id"] != fmt.Sprint(latestInChannel.ID) {
+			t.Errorf("频道快照 JSON last_message_id = %v，期待字符串 %d", encoded["last_message_id"], latestInChannel.ID)
+		}
+	}
+	if !foundChannel {
+		t.Fatal("BuildGuild 快照缺少测试频道")
+	}
+	emptyChannel := model.Channel{ID: uuid.New(), GuildID: guildID, Name: "empty-" + fmt.Sprintf("%06x", rand.Uint32()), Type: model.ChannelText}
+	if err := db.Create(&emptyChannel).Error; err != nil {
+		t.Fatalf("插入空频道失败: %v", err)
+	}
+	guildSnap, err = snapshot.BuildGuild(db, owner, guildID)
+	if err != nil {
+		t.Fatalf("BuildGuild 失败: %v", err)
+	}
+	for _, snap := range guildSnap.Channels {
+		if snap.ID == emptyChannel.ID && snap.LastMessageID != 0 {
+			t.Errorf("空频道 last_message_id = %d，期待 0", snap.LastMessageID)
+		}
+	}
+
 	// 10. 频道不可见者调用 ack 一律 404（防扫频）。
 	strangerToken, _, _ := func() (string, uuid.UUID, uuid.UUID) {
 		username := "rs_x" + fmt.Sprintf("%07x", rand.Uint32())
@@ -328,5 +404,61 @@ func TestMentionsAndReadStates(t *testing.T) {
 	rec, _ = doJSONReq(t, router, http.MethodPost, base+"/messages/"+msg3ID+"/ack", strangerToken, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("非成员 ack 返回 %d，期待 404", rec.Code)
+	}
+
+	// 11. 体内版 ack：POST /channels/{id}/ack {message_id}（字符串形态）→ 204 并清零计数；
+	//     再以数字形态 ack 更旧的 msg1 → 不后退。
+	rec, _ = doJSONReq(t, router, http.MethodPost, base+"/ack", tokenB, map[string]any{"message_id": msg4ID})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("体内版 ack 返回 %d，期待 204: %s", rec.Code, rec.Body.String())
+	}
+	if state, _ := readStateRow(t, db, userB, channelID); state.MentionCount != 0 || fmt.Sprint(state.LastReadMessageID) != msg4ID {
+		t.Errorf("体内版 ack 后状态异常: %+v（期待 last_read=%s、mention_count=0）", state, msg4ID)
+	}
+	var msg1Numeric int64
+	if _, err := fmt.Sscan(msg1ID, &msg1Numeric); err != nil {
+		t.Fatalf("解析 msg1 ID 失败: %v", err)
+	}
+	rec, _ = doJSONReq(t, router, http.MethodPost, base+"/ack", tokenB, map[string]any{"message_id": msg1Numeric})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("数字形态 ack 返回 %d，期待 204", rec.Code)
+	}
+	if state, _ := readStateRow(t, db, userB, channelID); fmt.Sprint(state.LastReadMessageID) != msg4ID {
+		t.Errorf("ack 旧消息后 last_read = %d，期待保持 %s（只前进不后退）", state.LastReadMessageID, msg4ID)
+	}
+	rec, _ = doJSONReq(t, router, http.MethodPost, base+"/ack", tokenB, map[string]any{"message_id": 0})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("非法 message_id 返回 %d，期待 400", rec.Code)
+	}
+	rec, _ = doJSONReq(t, router, http.MethodPost, base+"/ack", strangerToken, map[string]any{"message_id": msg3ID})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("非成员体内版 ack 返回 %d，期待 404", rec.Code)
+	}
+
+	// 12. 全服已读：先给 C 制造新提及，再 POST /guilds/{id}/ack → 全部可见频道
+	//     推进到各自最新消息且计数清零；非成员 404。
+	rec, _ = doJSONReq(t, router, http.MethodPost, base+"/messages", ownerToken, map[string]string{
+		"content": "服内最后叫一次 <@" + userC.String() + ">",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("发消息返回 %d", rec.Code)
+	}
+	if state, _ := readStateRow(t, db, userC, channelID); state.MentionCount == 0 {
+		t.Fatal("guild ack 前 C 应有未读提及")
+	}
+	rec, _ = doJSONReq(t, router, http.MethodPost, "/gapi/v1/guilds/"+guildID.String()+"/ack", tokenC, nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("guild ack 返回 %d，期待 204: %s", rec.Code, rec.Body.String())
+	}
+	var latest model.Message
+	if err := db.Where("channel_id = ?", channelID).Order("id DESC").First(&latest).Error; err != nil {
+		t.Fatalf("查询最新消息失败: %v", err)
+	}
+	if state, _ := readStateRow(t, db, userC, channelID); state.MentionCount != 0 || state.LastReadMessageID != latest.ID {
+		t.Errorf("guild ack 后 C 状态异常: %+v（期待 last_read=%d、mention_count=0）", state, latest.ID)
+	}
+	rec, _ = doJSONReq(t, router, http.MethodPost, "/gapi/v1/guilds/"+guildID.String()+"/ack", strangerToken, nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("非成员 guild ack 返回 %d，期待 404", rec.Code)
 	}
 }

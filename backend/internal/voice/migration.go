@@ -229,7 +229,7 @@ func (e *migrationEngine) step(job model.VoiceMigrationJob) {
 	}
 }
 
-// advance 应用一次状态机转换并落库。
+// advance 应用一次状态机转换并落库（终态与重试顺带打观测指标，docs 09 §11）。
 func (e *migrationEngine) advance(job model.VoiceMigrationJob, ev migrationEvent) {
 	next, ok := nextMigrationState(job.State, ev)
 	if !ok {
@@ -245,12 +245,21 @@ func (e *migrationEngine) advance(job model.VoiceMigrationJob, ev migrationEvent
 		if ev == evConnectAck {
 			// 客户端确认已连上新节点（审计 O.1：CONNECT 完成时间戳）。
 			updates["connected_at"] = &now
+			job.ConnectedAt = &now
 		}
 	case model.MigrationStateCleanup:
 		deadline := now.Add(e.timeouts.Cleanup)
 		updates["state_deadline"] = &deadline
-	case model.MigrationStateDone, model.MigrationStateCanceled:
+	case model.MigrationStateQueued:
+		if ev == evRetry {
+			metricMigrationRetries.WithLabelValues(job.Reason).Inc()
+		}
+	case model.MigrationStateDone:
 		updates["completed_at"] = &now
+		observeMigrationCompleted(job, now)
+	case model.MigrationStateCanceled:
+		updates["completed_at"] = &now
+		metricMigrationsCanceled.WithLabelValues(job.Reason).Inc()
 	}
 	e.svc.db.Model(&model.VoiceMigrationJob{}).Where("id = ?", job.ID).Updates(updates)
 	e.kick()
@@ -481,6 +490,7 @@ func (e *migrationEngine) runCleanup(job model.VoiceMigrationJob) {
 // fail 记录失败并进入 FAILED；快速重试换目标，超过 3 次转排队重试（docs 09 K.3）。
 func (e *migrationEngine) fail(job model.VoiceMigrationJob, reason string) {
 	log.Printf("voice: 迁移 %s 失败（attempt=%d）: %s", job.ID, job.Attempt, reason)
+	metricMigrationFailedAttempts.WithLabelValues(job.Reason).Inc()
 	updates := map[string]any{
 		"state": model.MigrationStateFailed, "state_deadline": nil,
 		"last_error": reason, "to_node_id": nil, // 下次换目标
@@ -531,7 +541,8 @@ func (e *migrationEngine) createJob(job model.VoiceMigrationJob) (model.VoiceMig
 		if existing.Priority >= job.Priority {
 			return existing, nil // 已有同级或更高优先级迁移在途，合并。
 		}
-		// 抢占：取消低优先级 job。
+		// 抢占：取消低优先级 job（docs 09 K.4；观测 §11 抢占计数）。
+		metricMigrationPreemptions.Inc()
 		e.applyEvent(existing.ID, evCancel)
 	}
 	job.ID = uuid.New()
@@ -542,6 +553,7 @@ func (e *migrationEngine) createJob(job model.VoiceMigrationJob) (model.VoiceMig
 	if err := e.svc.db.Create(&job).Error; err != nil {
 		return job, err
 	}
+	metricMigrationsCreated.WithLabelValues(job.Reason).Inc()
 	audit.Log(e.svc.db, audit.Entry{
 		ActorID: job.ActorID, ActorType: job.ActorType, GuildID: &job.GuildID,
 		Action: "voice.migration.created", TargetType: "voice_migration", TargetID: job.ID.String(),

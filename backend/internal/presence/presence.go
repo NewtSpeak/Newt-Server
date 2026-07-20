@@ -16,6 +16,7 @@ package presence
 import (
 	"log"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
@@ -37,18 +38,44 @@ var statusRank = map[string]int{StatusDnd: 4, StatusOnline: 3, StatusIdle: 2, St
 // ValidStatus 判断是否为可主动设置的状态。
 func ValidStatus(status string) bool { _, ok := statusRank[status]; return ok }
 
+// CustomStatus 自定义状态（docs 01 FR-23）：文本 + 可选 emoji + 可选过期时间。
+// 过期采用惰性判定（读取时校验），载荷同时携带 expires_at 供客户端自行倒计时。
+type CustomStatus struct {
+	Text      string
+	Emoji     string
+	ExpiresAt *time.Time
+}
+
+// expired 过期判定（零值 ExpiresAt 表示不过期）。
+func (s CustomStatus) expired(now time.Time) bool {
+	return s.ExpiresAt != nil && now.After(*s.ExpiresAt)
+}
+
+// empty 是否为空状态。
+func (s CustomStatus) empty() bool { return s.Text == "" && s.Emoji == "" }
+
 // Info 某用户的一份状态视图（掩码与否由查询方视角决定）。
 type Info struct {
-	Status     string
-	CustomText string
+	Status          string
+	CustomText      string
+	CustomEmoji     string
+	CustomExpiresAt *time.Time
 }
 
 // SharedMemberFunc 返回与 userID 共享至少一个 guild 的全部其他用户 ID（去重、不含本人）。
 type SharedMemberFunc func(userID uuid.UUID) ([]uuid.UUID, error)
 
 type userState struct {
-	sessions   map[string]string // sessionID → 该端期望状态
-	customText string
+	sessions map[string]string // sessionID → 该端期望状态
+	custom   CustomStatus
+}
+
+// effectiveCustom 惰性过期后的自定义状态。
+func (s *userState) effectiveCustom(now time.Time) CustomStatus {
+	if s.custom.expired(now) {
+		return CustomStatus{}
+	}
+	return s.custom
 }
 
 // merged 多端合并后的真实状态（无会话 → offline）。
@@ -107,60 +134,81 @@ func (m *Manager) Disconnect(userID uuid.UUID, sessionID string) {
 	})
 }
 
-// SetStatus 设置某端期望状态（Gateway 上行 PRESENCE_UPDATE 帧）。
-// customText 为该用户级自定义状态文本（最后写入生效，预留字段）。
-// 未登记的会话按新连接补登记（对冲清扫竞态：能发上行帧说明连接存活）。
+// SetStatus 设置某端期望状态（Gateway 上行 PRESENCE_UPDATE 帧，兼容旧签名）。
+// customText 为该用户级自定义状态文本（最后写入生效）。
 func (m *Manager) SetStatus(userID uuid.UUID, sessionID, status, customText string) bool {
+	return m.SetStatusFull(userID, sessionID, status, CustomStatus{Text: customText})
+}
+
+// SetStatusFull 设置某端期望状态 + 完整自定义状态（文本/emoji/过期时间，docs 01 FR-23）。
+// 未登记的会话按新连接补登记（对冲清扫竞态：能发上行帧说明连接存活）。
+func (m *Manager) SetStatusFull(userID uuid.UUID, sessionID, status string, custom CustomStatus) bool {
 	if !ValidStatus(status) {
 		return false
 	}
 	m.mutate(userID, func(state *userState) {
 		state.sessions[sessionID] = status
-		state.customText = customText
+		state.custom = custom
 	})
 	return true
 }
 
 // mutate 在锁内应用变更并对比前后视图，必要时发布事件（发布在锁外执行）。
 func (m *Manager) mutate(userID uuid.UUID, apply func(*userState)) {
+	now := time.Now().UTC()
 	m.mu.Lock()
 	state, ok := m.users[userID]
 	if !ok {
 		state = &userState{sessions: make(map[string]string)}
 		m.users[userID] = state
 	}
-	prevReal, prevText := state.merged(), state.customText
+	prevReal, prevCustom := state.merged(), state.effectiveCustom(now)
 	apply(state)
-	real, text := state.merged(), state.customText
+	real, custom := state.merged(), state.effectiveCustom(now)
 	if real == StatusOffline {
-		state.customText = ""
-		text = ""
+		state.custom = CustomStatus{}
+		custom = CustomStatus{}
 		delete(m.users, userID)
 	}
 	m.mu.Unlock()
 
-	prevDisplayed, prevDisplayedText := mask(prevReal, prevText)
-	displayed, displayedText := mask(real, text)
-	if displayed != prevDisplayed || displayedText != prevDisplayedText {
-		m.publishToOthers(userID, displayed, displayedText)
+	prevDisplayed, prevDisplayedCustom := mask(prevReal, prevCustom)
+	displayed, displayedCustom := mask(real, custom)
+	if displayed != prevDisplayed || !equalCustom(displayedCustom, prevDisplayedCustom) {
+		m.publishToOthers(userID, displayed, displayedCustom)
 	}
-	if real != prevReal || text != prevText {
-		m.publishToSelf(userID, real, text)
+	if real != prevReal || !equalCustom(custom, prevCustom) {
+		m.publishToSelf(userID, real, custom)
 	}
 }
 
-// mask 他人视角掩码：invisible → offline，且 offline 不携带 custom_text。
-func mask(status, customText string) (string, string) {
-	if status == StatusInvisible || status == StatusOffline {
-		return StatusOffline, ""
+// equalCustom 值语义比较（ExpiresAt 按时间值而非指针比较）。
+func equalCustom(a, b CustomStatus) bool {
+	if a.Text != b.Text || a.Emoji != b.Emoji {
+		return false
 	}
-	return status, customText
+	switch {
+	case a.ExpiresAt == nil && b.ExpiresAt == nil:
+		return true
+	case a.ExpiresAt == nil || b.ExpiresAt == nil:
+		return false
+	default:
+		return a.ExpiresAt.Equal(*b.ExpiresAt)
+	}
+}
+
+// mask 他人视角掩码：invisible → offline，且 offline 不携带自定义状态。
+func mask(status string, custom CustomStatus) (string, CustomStatus) {
+	if status == StatusInvisible || status == StatusOffline {
+		return StatusOffline, CustomStatus{}
+	}
+	return status, custom
 }
 
 // publishToOthers 定向发给共享 guild 的全部成员（不含本人；离线成员无会话，hub 自然丢弃）。
 // 不走 GuildID 广播是刻意的：广播会把同一载荷送达本人，而他人载荷是掩码过的，
 // 定向排除本人保证「本人看真实状态、他人看掩码状态」两路彻底分离。
-func (m *Manager) publishToOthers(userID uuid.UUID, status, customText string) {
+func (m *Manager) publishToOthers(userID uuid.UUID, status string, custom CustomStatus) {
 	if m.bus == nil || m.sharedMembers == nil {
 		return
 	}
@@ -172,22 +220,26 @@ func (m *Manager) publishToOthers(userID uuid.UUID, status, customText string) {
 	if len(memberIDs) == 0 {
 		return
 	}
+	payload := eventbus.NewPresenceUpdatePayload(userID, status, custom.Text)
+	payload.CustomEmoji, payload.CustomExpiresAt = custom.Emoji, custom.ExpiresAt
 	m.bus.Publish(eventbus.Event{
 		Type:    eventbus.EventPresenceUpdate,
 		UserIDs: memberIDs,
-		Payload: eventbus.NewPresenceUpdatePayload(userID, status, customText),
+		Payload: payload,
 	})
 }
 
 // publishToSelf 定向发给本人全部端（真实状态，含 invisible）。
-func (m *Manager) publishToSelf(userID uuid.UUID, status, customText string) {
+func (m *Manager) publishToSelf(userID uuid.UUID, status string, custom CustomStatus) {
 	if m.bus == nil {
 		return
 	}
+	payload := eventbus.NewPresenceUpdatePayload(userID, status, custom.Text)
+	payload.CustomEmoji, payload.CustomExpiresAt = custom.Emoji, custom.ExpiresAt
 	m.bus.Publish(eventbus.Event{
 		Type:    eventbus.EventPresenceUpdate,
 		UserIDs: []uuid.UUID{userID},
-		Payload: eventbus.NewPresenceUpdatePayload(userID, status, customText),
+		Payload: payload,
 	})
 }
 
@@ -195,6 +247,7 @@ func (m *Manager) publishToSelf(userID uuid.UUID, status, customText string) {
 // 他人条目做 invisible→offline 掩码；offline 用户不出现在结果中
 //（viewer 本人 offline 时同样省略——调用方通常在其连接存活期间查询）。
 func (m *Manager) Displayed(viewerID uuid.UUID, userIDs []uuid.UUID) map[uuid.UUID]Info {
+	now := time.Now().UTC()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	result := make(map[uuid.UUID]Info, len(userIDs))
@@ -203,14 +256,17 @@ func (m *Manager) Displayed(viewerID uuid.UUID, userIDs []uuid.UUID) map[uuid.UU
 		if !ok {
 			continue
 		}
-		status, text := state.merged(), state.customText
+		status, custom := state.merged(), state.effectiveCustom(now)
 		if id != viewerID {
-			status, text = mask(status, text)
+			status, custom = mask(status, custom)
 		}
 		if status == StatusOffline {
 			continue
 		}
-		result[id] = Info{Status: status, CustomText: text}
+		result[id] = Info{
+			Status: status, CustomText: custom.Text,
+			CustomEmoji: custom.Emoji, CustomExpiresAt: custom.ExpiresAt,
+		}
 	}
 	return result
 }

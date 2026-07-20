@@ -555,3 +555,62 @@ func TestSettingsMergeAndSyncEvent(t *testing.T) {
 		t.Fatalf("超限应 413，实际 %d", r.Code)
 	}
 }
+
+// TestSettingsPutReplaceWhole PUT /users/@me/settings 整体替换：204、旧顶层 key 全部丢弃、
+// USER_SETTINGS_UPDATE 载荷为新全量文档；非对象 400、超限 413。
+func TestSettingsPutReplaceWhole(t *testing.T) {
+	env := newEnv(t)
+	alice := env.signup(t)
+
+	// 先经 PATCH 写入两个 key，再 PUT 全量替换为只含 appearance 的新文档。
+	if r := env.request(t, http.MethodPatch, "/gapi/v1/users/@me/settings", alice.AccessToken, map[string]any{
+		"notifications": map[string]any{"global": "mentions"},
+		"voice":         map[string]any{"input_volume": 80},
+	}); r.Code != http.StatusOK {
+		t.Fatalf("准备数据 PATCH 失败: %d", r.Code)
+	}
+	if r := env.request(t, http.MethodPut, "/gapi/v1/users/@me/settings", alice.AccessToken, map[string]any{
+		"appearance": map[string]any{"theme": "light"},
+	}); r.Code != http.StatusNoContent {
+		t.Fatalf("PUT 设置应 204，实际 %d: %s", r.Code, r.Body.String())
+	}
+
+	type settingsResponse struct {
+		Settings map[string]json.RawMessage `json:"settings"`
+	}
+	got := decode[settingsResponse](t, env.request(t, http.MethodGet, "/gapi/v1/users/@me/settings", alice.AccessToken, nil))
+	if len(got.Settings) != 1 {
+		t.Fatalf("PUT 后应只剩新文档的顶层 key: %+v", got.Settings)
+	}
+	if _, ok := got.Settings["appearance"]; !ok {
+		t.Fatalf("PUT 后缺少 appearance: %+v", got.Settings)
+	}
+
+	// USER_SETTINGS_UPDATE 定向本人，载荷为替换后的全量文档。
+	env.events.wait(t, "PUT 触发 USER_SETTINGS_UPDATE", func(e eventbus.Event) bool {
+		if e.Type != eventbus.EventUserSettingsUpdate || len(e.UserIDs) != 1 || e.UserIDs[0] != alice.User.ID {
+			return false
+		}
+		p, ok := e.Payload.(eventbus.UserSettingsUpdatePayload)
+		if !ok {
+			return false
+		}
+		var doc map[string]json.RawMessage
+		if err := json.Unmarshal(p.Settings, &doc); err != nil {
+			return false
+		}
+		_, hasAppearance := doc["appearance"]
+		_, hasVoice := doc["voice"]
+		return hasAppearance && !hasVoice
+	})
+
+	// 非对象请求体 400；超限 413。
+	if r := env.request(t, http.MethodPut, "/gapi/v1/users/@me/settings", alice.AccessToken, []int{1}); r.Code != http.StatusBadRequest {
+		t.Fatalf("数组请求体应 400，实际 %d", r.Code)
+	}
+	if r := env.request(t, http.MethodPut, "/gapi/v1/users/@me/settings", alice.AccessToken, map[string]any{
+		"huge": strings.Repeat("x", 65*1024),
+	}); r.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("超限应 413，实际 %d", r.Code)
+	}
+}

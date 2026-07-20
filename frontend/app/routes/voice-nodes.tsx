@@ -66,13 +66,14 @@ export default function VoiceNodesPage() {
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<SfuNodeCreated | null>(null)
 
-  // 轮询 15s + Gateway 事件双通道刷新（后端未就绪时轮询报错也仅保留旧数据）
+  // 轮询 15s 刷新（节点生命周期走 internal.NODE_* 内部事件，不下发客户端）；
+  // 节点池变更事件作为辅助信号（授权/勾选变化通常伴随节点面板操作）。
   useEffect(() => {
     const timer = setInterval(() => nodes.reload(true), 15_000)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  useGatewayEvent(["SFU_NODE_UPDATE", "SFU_NODE_CREATE"], () => nodes.reload(true))
+  useGatewayEvent("VOICE_NODE_POOL_UPDATE", () => nodes.reload(true))
 
   // 列表入场 stagger
   useGSAP(

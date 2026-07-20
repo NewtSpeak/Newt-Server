@@ -341,6 +341,17 @@ func (h *adminHandlers) installBot(c *gin.Context) {
 		Action: "bot.install", TargetType: "bot", TargetID: bot.ID.String(),
 		Detail: map[string]any{"member_id": member.ID, "bot_user_id": bot.UserID},
 	})
+	// GUILD_MEMBER_ADD 广播：bot 作为成员出现，在线成员列表实时更新。
+	if h.bus != nil {
+		var botUser model.User
+		if err := h.db.First(&botUser, "id = ?", bot.UserID).Error; err == nil {
+			guildID := ctx.Guild.ID
+			h.bus.Publish(eventbus.Event{
+				Type: eventbus.EventGuildMemberAdd, GuildID: &guildID,
+				Payload: eventbus.NewGuildMemberAddPayload(member, botUser),
+			})
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"member_id": member.ID, "bot_id": bot.ID, "guild_id": ctx.Guild.ID})
 }
 
@@ -377,6 +388,14 @@ func (h *adminHandlers) uninstallBot(c *gin.Context) {
 		Action: "bot.uninstall", TargetType: "bot", TargetID: bot.ID.String(),
 		Detail: map[string]any{"bot_user_id": bot.UserID},
 	})
+	// GUILD_MEMBER_REMOVE 广播：bot 从成员列表实时消失。
+	if h.bus != nil {
+		guildID := ctx.Guild.ID
+		h.bus.Publish(eventbus.Event{
+			Type: eventbus.EventGuildMemberRemove, GuildID: &guildID,
+			Payload: eventbus.NewGuildMemberRemovePayload(member, "uninstall"),
+		})
+	}
 	c.Status(http.StatusNoContent)
 }
 

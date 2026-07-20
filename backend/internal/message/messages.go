@@ -48,6 +48,28 @@ func (s *service) createMessage(c *gin.Context) {
 		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "缺少发送消息权限")
 		return
 	}
+	// 慢速模式（docs 03 §8-9 / 05 FR-08）：频道配置 rate_limit_per_user 秒内每用户
+	// 限一条；MANAGE_MESSAGES / MANAGE_CHANNELS 豁免（对标 Discord）。429 携带
+	// retry_after（秒，向上取整）供客户端倒计时。
+	if channel.RateLimitPerUser > 0 && !rbac.Has(bits, rbac.ManageMessages) && !rbac.Has(bits, rbac.ManageChannels) {
+		var last model.Message
+		err := s.db.Select("created_at").
+			Where("channel_id = ? AND author_id = ?", channel.ID, s.currentUser(c).ID).
+			Order("id DESC").First(&last).Error
+		if err == nil {
+			elapsed := time.Since(last.CreatedAt)
+			window := time.Duration(channel.RateLimitPerUser) * time.Second
+			if elapsed < window {
+				retryAfter := int((window - elapsed + time.Second - 1) / time.Second)
+				c.Header("Retry-After", strconv.Itoa(retryAfter))
+				c.JSON(http.StatusTooManyRequests, gin.H{
+					"error":       gin.H{"code": "SLOWMODE_RATE_LIMITED", "message": "慢速模式生效中，请稍后再发"},
+					"retry_after": retryAfter,
+				})
+				return
+			}
+		}
+	}
 	var input createMessageRequest
 	if !bind(c, &input) {
 		return
@@ -232,7 +254,7 @@ func (s *service) listMessages(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
 		return
 	}
-	views, err := s.messageViews(messages)
+	views, err := s.messageViews(messages, s.currentUser(c).ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取附件失败")
 		return
@@ -264,7 +286,7 @@ func (s *service) getMessage(c *gin.Context) {
 		notFound(c)
 		return
 	}
-	view, err := s.messageViewOne(message)
+	view, err := s.messageViewOne(message, s.currentUser(c).ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
 		return

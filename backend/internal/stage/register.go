@@ -122,6 +122,7 @@ func Register(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 	channels.GET("/voice-stage", h.getVoiceStage)
 	channels.PATCH("/voice-stage", h.patchVoiceStage)
 	channels.GET("/stage/queue", h.getQueue)
+	channels.DELETE("/stage/queue/:userID", h.removeFromQueue)
 	channels.POST("/stage/apply", h.apply)
 	channels.DELETE("/stage/apply", h.cancelApply)
 	channels.POST("/stage/bring-up", h.bringUp)

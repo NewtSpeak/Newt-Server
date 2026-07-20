@@ -18,6 +18,7 @@ export default function SearchPage() {
   const [guildFilter, setGuildFilter] = useState<string>(ALL_GUILDS)
 
   const [results, setResults] = useState<Message[] | null>(null)
+  const [total, setTotal] = useState(0)
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
   const [error, setError] = useState("")
   const versionRef = useRef(0)
@@ -35,13 +36,14 @@ export default function SearchPage() {
     setError("")
     const timer = setTimeout(async () => {
       try {
-        const list = await searchMessages({
+        const result = await searchMessages({
           q: trimmed,
           guild_id: guildFilter === ALL_GUILDS ? undefined : guildFilter,
           limit: 50,
         })
         if (versionRef.current !== version) return
-        setResults(list)
+        setResults(result.messages)
+        setTotal(result.total)
         setStatus("success")
       } catch (reason) {
         if (versionRef.current !== version) return
@@ -84,7 +86,8 @@ export default function SearchPage() {
           />
           {status === "success" && results && (
             <span className="text-xs text-muted-foreground">
-              命中 <span className="font-medium text-foreground tabular-nums">{results.length}</span> 条
+              共命中 <span className="font-medium text-foreground tabular-nums">{total}</span> 条
+              {total > results.length && <>（显示前 {results.length} 条）</>}
             </span>
           )}
         </div>

@@ -80,7 +80,25 @@ export function MessageItem({ message, index }: { message: Message; index: numbe
                 <PaperclipIcon />
                 <span className="truncate">{attachment.filename ?? attachment.id}</span>
                 <span className="shrink-0 text-muted-foreground tabular-nums">{formatBytes(attachment.size)}</span>
+                {(attachment.width ?? 0) > 0 && (
+                  <span className="shrink-0 text-muted-foreground tabular-nums">
+                    {attachment.width}×{attachment.height}
+                  </span>
+                )}
               </Badge>
+            ))}
+          </div>
+        )}
+        {(message.reactions?.length ?? 0) > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {message.reactions!.map(reaction => (
+              <span
+                key={reaction.emoji}
+                className={`inline-flex h-6 items-center gap-1 rounded-full border px-2 text-xs ${reaction.me ? "border-primary/50 bg-primary/10" : "bg-muted/40"}`}
+              >
+                {reaction.emoji}
+                <span className="text-muted-foreground tabular-nums">{reaction.count}</span>
+              </span>
             ))}
           </div>
         )}

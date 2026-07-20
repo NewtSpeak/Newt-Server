@@ -1,6 +1,7 @@
 package guildapi
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -30,6 +31,48 @@ type roleRequest struct {
 	Name        string `json:"name" binding:"required,min=1,max=100"`
 	Permissions int64  `json:"permissions"`
 	Position    int    `json:"position" binding:"gte=1"`
+	// 展示属性（Owl-Desktop docs 04 §8）：可选，缺省时保留原值（更新）或用零值（创建）。
+	Color       *string `json:"color" binding:"omitempty,max=16"`
+	Hoist       *bool   `json:"hoist"`
+	Mentionable *bool   `json:"mentionable"`
+}
+
+// validRoleColor 校验角色颜色为空串或 #RGB/#RRGGBB 十六进制。
+func validRoleColor(color string) bool {
+	if color == "" {
+		return true
+	}
+	if len(color) != 4 && len(color) != 7 {
+		return false
+	}
+	if color[0] != '#' {
+		return false
+	}
+	for _, r := range color[1:] {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// applyRoleAppearance 将请求中的展示属性写入 role；颜色非法返回 false。
+func applyRoleAppearance(c *gin.Context, role *model.Role, input roleRequest) bool {
+	if input.Color != nil {
+		color := strings.TrimSpace(*input.Color)
+		if !validRoleColor(color) {
+			fail(c, http.StatusBadRequest, "INVALID_COLOR", "颜色需为 #RGB 或 #RRGGBB 十六进制")
+			return false
+		}
+		role.Color = color
+	}
+	if input.Hoist != nil {
+		role.Hoist = *input.Hoist
+	}
+	if input.Mentionable != nil {
+		role.Mentionable = *input.Mentionable
+	}
+	return true
 }
 
 // createRole POST /guilds/{gid}/roles（需 MANAGE_ROLES + 防提权：不能授予超过
@@ -49,6 +92,9 @@ func (h *api) createRole(c *gin.Context) {
 		return
 	}
 	role := model.Role{ID: uuid.New(), GuildID: ctx.Guild.ID, Name: strings.TrimSpace(input.Name), Permissions: databaseMask(requested), Position: input.Position}
+	if !applyRoleAppearance(c, &role, input) {
+		return
+	}
 	if err := h.deps.DB.Create(&role).Error; err != nil {
 		fail(c, http.StatusConflict, "ROLE_EXISTS", "角色名称已存在或数据无效")
 		return
@@ -83,6 +129,18 @@ func (h *api) updateRole(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "EVERYONE_POSITION_FIXED", "@everyone 的层级固定为 0")
 		return
 	}
+	// 内置管理员角色（guildseed）：permissions 锁定为 ADMINISTRATOR、position 固定；
+	// 名称与展示属性可改（仍走下方层级校验，实际仅所有者/系统管可达）。
+	if role.Managed {
+		if databaseMask(permissionMask(input.Permissions)) != role.Permissions {
+			fail(c, http.StatusConflict, "MANAGED_ROLE", "内置管理员角色的权限已锁定，不可修改")
+			return
+		}
+		if input.Position != role.Position {
+			fail(c, http.StatusConflict, "MANAGED_ROLE", "内置管理员角色的层级固定，不可修改")
+			return
+		}
+	}
 	requested := permissionMask(input.Permissions)
 	if !canManageRole(ctx, role) || !canGrant(ctx, requested, input.Position) {
 		fail(c, http.StatusForbidden, "CANNOT_MANAGE_ROLE", "不能管理该角色")
@@ -95,6 +153,9 @@ func (h *api) updateRole(c *gin.Context) {
 	const featureBits = rbac.ManageBots | rbac.ManageBadges | rbac.ManageCustomization
 	merged := (requested &^ featureBits) | (permissionMask(role.Permissions) & featureBits)
 	role.Name, role.Permissions = strings.TrimSpace(input.Name), databaseMask(merged)
+	if !applyRoleAppearance(c, &role, input) {
+		return
+	}
 	if !role.IsEveryone {
 		role.Position = input.Position
 	}
@@ -113,6 +174,89 @@ func (h *api) updateRole(c *gin.Context) {
 	})
 	c.JSON(http.StatusOK, role)
 }
+
+type rolePositionEntry struct {
+	ID       uuid.UUID `json:"id" binding:"required"`
+	Position int       `json:"position" binding:"gte=1"`
+}
+
+// reorderRoles PATCH /guilds/{gid}/roles（需 MANAGE_ROLES）：角色批量排序
+//（Owl-Desktop docs 04 §8：拖拽调整层级）。body 为 [{id, position}] 数组；
+// @everyone（position=0）不可参与排序；每个被移动的角色必须处于调用者可管理
+// 层级内，且目标 position 不得超过自身最高角色（防自我提权）；事务整体生效，
+// 逐角色发 GUILD_ROLE_UPDATE。
+func (h *api) reorderRoles(c *gin.Context) {
+	var input []rolePositionEntry
+	if err := c.ShouldBindJSON(&input); err != nil || len(input) == 0 {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "需要非空的 [{id, position}] 数组")
+		return
+	}
+	ctx, user, ok := h.requireGuildPermission(c, rbac.ManageRoles)
+	if !ok {
+		return
+	}
+	guildID := ctx.Guild.ID
+	moved := make([]model.Role, 0, len(input))
+	err := h.deps.DB.Transaction(func(tx *gorm.DB) error {
+		for _, entry := range input {
+			var role model.Role
+			if err := tx.First(&role, "id = ? AND guild_id = ?", entry.ID, guildID).Error; err != nil {
+				return err
+			}
+			if role.IsEveryone {
+				return errEveryoneReorder
+			}
+			if role.Managed {
+				return errManagedReorder
+			}
+			if !canManageRole(ctx, role) || !(ctx.SystemAdmin || ctx.Owner || entry.Position < ctx.HighestRole) {
+				return errRoleHierarchy
+			}
+			if role.Position == entry.Position {
+				continue
+			}
+			if err := tx.Model(&model.Role{}).Where("id = ?", role.ID).Update("position", entry.Position).Error; err != nil {
+				return err
+			}
+			role.Position = entry.Position
+			moved = append(moved, role)
+		}
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, errEveryoneReorder):
+			fail(c, http.StatusBadRequest, "EVERYONE_POSITION_FIXED", "@everyone 的层级固定为 0")
+		case errors.Is(err, errManagedReorder):
+			fail(c, http.StatusConflict, "MANAGED_ROLE", "内置管理员角色的层级固定，不参与排序")
+		case errors.Is(err, errRoleHierarchy):
+			fail(c, http.StatusForbidden, "CANNOT_MANAGE_ROLE", "存在超出自身层级的角色调整")
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			fail(c, http.StatusNotFound, "NOT_FOUND", "存在不属于本服务器的角色")
+		default:
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存角色排序失败")
+		}
+		return
+	}
+	positions := map[string]any{}
+	for _, role := range moved {
+		positions[role.ID.String()] = role.Position
+	}
+	h.audit(ctx, user, "rbac.role_reorder", "guild", guildID.String(), map[string]any{"positions": positions})
+	for _, role := range moved {
+		h.publish(eventbus.Event{
+			Type: eventbus.EventGuildRoleUpdate, GuildID: &guildID,
+			Payload: eventbus.NewGuildRolePayload(role),
+		})
+	}
+	c.Status(http.StatusNoContent)
+}
+
+var (
+	errEveryoneReorder = errors.New("everyone role cannot be reordered")
+	errManagedReorder  = errors.New("managed role cannot be reordered")
+	errRoleHierarchy   = errors.New("role hierarchy violation")
+)
 
 // deleteRole DELETE /guilds/{gid}/roles/{roleID}（需 MANAGE_ROLES + 层级；
 // @everyone 不可删）。连带清理成员绑定与该角色的频道权限覆盖，发 GUILD_ROLE_DELETE。
@@ -133,6 +277,10 @@ func (h *api) deleteRole(c *gin.Context) {
 	}
 	if role.IsEveryone {
 		fail(c, http.StatusBadRequest, "EVERYONE_UNDELETABLE", "@everyone 角色不可删除")
+		return
+	}
+	if role.Managed {
+		fail(c, http.StatusConflict, "MANAGED_ROLE", "内置管理员角色不可删除")
 		return
 	}
 	if !canManageRole(ctx, role) {
@@ -192,7 +340,16 @@ func (h *api) changeMemberRole(c *gin.Context, assign bool) {
 		fail(c, http.StatusBadRequest, "EVERYONE_IMPLICIT", "@everyone 自动应用，不能手工绑定")
 		return
 	}
-	if !canManageRole(ctx, role) || !h.canManageMember(ctx, member) {
+	// 内置管理员角色的成员操作：仅所有者或已持有 ADMINISTRATOR 者可为之
+	//（不走 canManageRole 层级——ADMINISTRATOR 持有者最高层级恰等于该角色
+	// position，严格大于永不成立；也防止所有者手建更高层级 MANAGE_ROLES
+	// 角色后被绕过）。目标成员治理校验（canManageMember）仍保留：
+	// 管理员之间不能互相摘除该角色，所有者不受限。
+	if role.Managed && !(ctx.SystemAdmin || ctx.Owner || ctx.Has(rbac.Administrator)) {
+		fail(c, http.StatusForbidden, "CANNOT_MANAGE_MEMBER", "仅所有者或管理员可以调整内置管理员角色的成员")
+		return
+	}
+	if (!role.Managed && !canManageRole(ctx, role)) || !h.canManageMember(ctx, member) {
 		fail(c, http.StatusForbidden, "CANNOT_MANAGE_MEMBER", "角色层级不足")
 		return
 	}

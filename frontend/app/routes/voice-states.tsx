@@ -35,6 +35,7 @@ import {
   listChannels,
   listSfuNodes,
   listVoiceStates,
+  moveVoiceUser,
   type Channel,
   type SfuNode,
   type VoiceState,
@@ -63,6 +64,28 @@ export default function VoiceStatesPage() {
   const [targetNode, setTargetNode] = useState<string | null>(null)
   const [migrating, setMigrating] = useState(false)
   const nodes = useAsyncData<SfuNode[]>(migrateOpen ? () => listSfuNodes() : null, [migrateOpen])
+
+  // 移动成员（docs 09 FR-29）：选目标语音频道后由服务端发 VOICE_MOVE 信令驱动客户端重连。
+  const [moveTarget, setMoveTarget] = useState<VoiceState | null>(null)
+  const [moveChannelID, setMoveChannelID] = useState<string | null>(null)
+  const [moving, setMoving] = useState(false)
+
+  async function onMove() {
+    if (!guildID || !moveTarget || !moveChannelID) return
+    const name = moveTarget.username ?? moveTarget.user_id
+    setMoving(true)
+    try {
+      await moveVoiceUser(guildID, moveTarget.user_id, moveChannelID)
+      toast.success(`已将「${name}」移动到目标频道，其客户端将自动重连`)
+      setMoveTarget(null)
+      setMoveChannelID(null)
+      states.reload(true)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "移动失败")
+    } finally {
+      setMoving(false)
+    }
+  }
 
   async function onDisconnect(state: VoiceState) {
     if (!guildID || !activeChannel) return
@@ -155,6 +178,38 @@ export default function VoiceStatesPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={moveTarget !== null} onOpenChange={open => !open && setMoveTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>移动成员 · {moveTarget?.username ?? moveTarget?.user_id}</DialogTitle>
+            <DialogDescription>
+              需要 MOVE_MEMBERS 权限与更高层级；目标频道必须对被移动者可连接且未满员。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label>目标语音频道</Label>
+            <SimpleSelect
+              ariaLabel="目标语音频道"
+              placeholder="选择频道"
+              value={moveChannelID}
+              onChange={setMoveChannelID}
+              options={voiceChannels
+                .filter(channel => channel.id !== activeChannel)
+                .map(channel => ({ value: channel.id, label: `🔊 ${channel.name}` }))}
+              className="w-full"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveTarget(null)}>
+              取消
+            </Button>
+            <Button onClick={onMove} disabled={!moveChannelID || moving}>
+              {moving ? "移动中…" : "确认移动"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <section className="flex flex-col gap-4 px-4 lg:px-6">
         <div className="flex flex-wrap items-center gap-2">
           <SimpleSelect
@@ -238,6 +293,18 @@ export default function VoiceStatesPage() {
                       </Badge>
                     )}
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setMoveTarget(state)
+                      setMoveChannelID(null)
+                    }}
+                    disabled={voiceChannels.length < 2}
+                  >
+                    <ArrowLeftRightIcon data-icon="inline-start" />
+                    移动
+                  </Button>
                   <Button variant="destructive" size="sm" onClick={() => onDisconnect(state)}>
                     <PhoneOffIcon data-icon="inline-start" />
                     断开

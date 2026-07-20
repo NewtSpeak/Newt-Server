@@ -103,6 +103,49 @@ func (h *api) patchSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"settings": json.RawMessage(merged), "updated_at": time.Now().UTC()})
 }
 
+// putSettings PUT /users/@me/settings：整体替换设置文档（docs 16 §7-1 建议形态之一）。
+// 请求体即完整新文档（JSON 对象，≤64KB），服务端不解释内容；成功 204，
+// 并向本人全部端定向发 USER_SETTINGS_UPDATE（载荷为新全量文档，其他端整体替换本地副本）。
+func (h *api) putSettings(c *gin.Context) {
+	user := h.deps.CurrentUser(c)
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxSettingsBytes+1))
+	if err != nil {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "读取请求体失败")
+		return
+	}
+	if int64(len(body)) > maxSettingsBytes {
+		fail(c, http.StatusRequestEntityTooLarge, "SETTINGS_TOO_LARGE", "设置文档超过 64KB 上限")
+		return
+	}
+	document, ok := decodeObject(body)
+	if !ok {
+		fail(c, http.StatusBadRequest, "INVALID_SETTINGS", "请求体必须为 JSON 对象")
+		return
+	}
+	// 重编码归一化（去除多余空白、稳定存储形态），也顺带丢弃重复 key 等边角输入。
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		fail(c, http.StatusBadRequest, "INVALID_SETTINGS", "设置文档无法编码")
+		return
+	}
+	err = h.deps.DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"data", "updated_at"}),
+	}).Create(&model.UserSettings{UserID: user.ID, Data: string(encoded), UpdatedAt: time.Now().UTC()}).Error
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存设置失败")
+		return
+	}
+	if h.deps.Bus != nil {
+		h.deps.Bus.Publish(eventbus.Event{
+			Type:    eventbus.EventUserSettingsUpdate,
+			UserIDs: []uuid.UUID{user.ID},
+			Payload: eventbus.NewUserSettingsUpdatePayload(encoded),
+		})
+	}
+	c.Status(http.StatusNoContent)
+}
+
 var errSettingsTooLarge = &settingsTooLargeError{}
 
 type settingsTooLargeError struct{}

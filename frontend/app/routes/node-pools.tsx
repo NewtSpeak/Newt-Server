@@ -11,6 +11,7 @@ import { Button } from "~/components/ui/button"
 import { Checkbox } from "~/components/ui/checkbox"
 import { Label } from "~/components/ui/label"
 import { useAsyncData } from "~/hooks/use-async-data"
+import { useGatewayEvent } from "~/hooks/use-gateway"
 import { useGuildID } from "~/hooks/use-guild-id"
 import { getGuildNodePool, listSfuNodes, putGuildNodePool, type NodePool, type SfuNode } from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
@@ -22,6 +23,12 @@ export default function NodePoolsPage() {
 
   const nodes = useAsyncData<SfuNode[]>(() => listSfuNodes(), [])
   const pool = useAsyncData<NodePool>(guildID ? () => getGuildNodePool(guildID) : null, [guildID])
+
+  // 实时同步：他端/系统管改动本服节点池后立即刷新勾选状态。
+  useGatewayEvent("VOICE_NODE_POOL_UPDATE", payload => {
+    const gid = (payload as { guild_id?: string } | undefined)?.guild_id
+    if (!gid || gid === guildID) pool.reload(true)
+  })
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)

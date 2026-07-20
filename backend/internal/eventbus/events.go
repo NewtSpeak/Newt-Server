@@ -9,6 +9,10 @@ const (
 	EventVoiceMigrating     = "VOICE_MIGRATING"
 	EventVoiceMigrated      = "VOICE_MIGRATED"
 	EventVoicePackPlay      = "VOICE_PACK_PLAY"
+	// EventVoiceMove 管理员移动成员到另一语音频道（docs 09 FR-29）：定向发给被移动者，
+	// payload 含 guild_id / from_channel_id / to_channel_id；客户端收到后按正常
+	// POST /voice/join 流程接入目标频道（join 响应自带新节点与 token）。
+	EventVoiceMove = "VOICE_MOVE"
 
 	EventMessageCreate         = "MESSAGE_CREATE"
 	EventMessageUpdate         = "MESSAGE_UPDATE"
@@ -17,9 +21,10 @@ const (
 	EventMessageReactionRemove = "MESSAGE_REACTION_REMOVE"
 	EventTypingStart           = "TYPING_START" // 频道内打字指示（用户端 POST /channels/{id}/typing 触发）
 
-	// EventReadStateUpdate 已读状态跨端同步（docs 15 §7-1）：本人 ack 某频道后
-	// 定向发给本人全部端（UserIDs），payload 含 channel_id / last_read_message_id /
-	// mention_count（恒为 0）/ event_at，其他端据此清除该频道角标。
+	// EventReadStateUpdate 已读状态跨端同步（docs 15 §7-1），两个触发点，均定向（UserIDs）：
+	//   - 本人 ack 某频道后发给本人全部端（mention_count=0，其他端据此清除角标）；
+	//   - 提及计数增长时发给被提及者全部端（mention_count 为累计后的最新值）。
+	// payload 含 user_id / channel_id / last_read_message_id / mention_count / event_at。
 	EventReadStateUpdate = "READ_STATE_UPDATE"
 
 	EventRestrictionCreate = "RESTRICTION_CREATE"
@@ -52,16 +57,39 @@ const (
 	EventGuildRoleUpdate   = "GUILD_ROLE_UPDATE"
 	EventGuildRoleDelete   = "GUILD_ROLE_DELETE"
 
+	// 封禁事件（docs 08 §8-8）：guild 广播；GUILD_BAN_REMOVE 同时定向被解封者
+	//（其若在线可立即感知可重新加入）。载荷 {guild_id, user_id, reason?, event_at}。
+	EventGuildBanAdd    = "GUILD_BAN_ADD"
+	EventGuildBanRemove = "GUILD_BAN_REMOVE"
+
+	// 服级/频道级配置变更（实时同步专项）：
+	//   - GUILD_CONFIG_UPDATE：上传上限 / 消息保留 / 服级语音包配置等 guild 级配置，
+	//     guild 广播，载荷 {guild_id, kind, config, event_at}，kind 区分配置域；
+	//   - CHANNEL_CONFIG_UPDATE：频道级配置（语音包开关等），带 ChannelID 按可见性过滤。
+	EventGuildConfigUpdate   = "GUILD_CONFIG_UPDATE"
+	EventChannelConfigUpdate = "CHANNEL_CONFIG_UPDATE"
+
+	// VOICE_PACK_UPDATE 语音包定义变更（CRUD/音频替换/停用）：guild 广播，客户端重拉选包列表。
+	// 用户级选包变更（select/@me 清除）以同事件定向本人全部端（载荷带 selection）。
+	EventVoicePackUpdate = "VOICE_PACK_UPDATE"
+
+	// VOICE_NODE_POOL_UPDATE 服级节点池变更：guild 广播轻量通知（载荷仅 guild_id+event_at），
+	// 客户端据此重拉 GET /guilds/{gid}/voice/nodes 候选列表刷新 RTT 探测目标。
+	EventVoiceNodePoolUpdate = "VOICE_NODE_POOL_UPDATE"
+
 	// 机器人与消息流式/卡片（bot 专项）。
 	EventMessageStreamStart = "MESSAGE_STREAM_START" // 流式消息开始（占位消息已创建）
 	EventMessageStreamDelta = "MESSAGE_STREAM_DELTA" // 流式增量分片
 	EventMessageStreamEnd   = "MESSAGE_STREAM_END"   // 流式结束（最终态）
 
 	// 用户资料 / 自定义 / 徽章（customization 专项）。
-	EventUserUpdate       = "USER_UPDATE"       // 头像/横幅/强调色变更
+	EventUserUpdate        = "USER_UPDATE"         // 头像/横幅/强调色变更
 	EventGuildMemberUpdate = "GUILD_MEMBER_UPDATE" // 成员昵称/角色/展示变更
-	EventBadgeGrant       = "BADGE_GRANT"
-	EventBadgeRevoke      = "BADGE_REVOKE"
+	EventBadgeGrant        = "BADGE_GRANT"
+	EventBadgeRevoke       = "BADGE_REVOKE"
+	// EventBadgeUpdate 徽章定义变更（创建/编辑/删除）：guild 广播，
+	// 载荷 {guild_id, badge_id, deleted?, badge?, event_at}，删除时 deleted=true。
+	EventBadgeUpdate = "BADGE_UPDATE"
 
 	// 管理员临场（adminpresence 专项）：管理员进入/离开频道的隐身与审计提示。
 	EventAdminPresenceUpdate = "ADMIN_PRESENCE_UPDATE"
@@ -93,6 +121,9 @@ const (
 	// InternalEdgeDown 级联边断开（SFU EdgeStatus 上报，docs 08 §6.1）。
 	// voice 编排订阅后补边或标记房间降级（docs 08 §7.2）。Payload 为 EdgeDownPayload。
 	InternalEdgeDown = "internal.EDGE_DOWN"
+	// InternalSessionRevoke 强制下线：账号禁用/密码重置/注销后由发布方携带
+	// UserIDs 发出，各 Gateway hub 消费后立即断开目标用户全部 WS 会话（4010）。
+	InternalSessionRevoke = "internal.SESSION_REVOKE"
 )
 
 // EdgeDownPayload InternalEdgeDown 的载荷约定（ID 均为字符串形式的 UUID）。

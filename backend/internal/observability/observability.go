@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/owlspeak/owl-server/backend/internal/config"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"go.opentelemetry.io/otel"
@@ -167,6 +169,26 @@ func Init(ctx context.Context, cfg config.Config) (shutdown func(context.Context
 		"endpoint", endpoint, "protocol", map[bool]string{true: "grpc", false: "http/protobuf"}[useGRPC],
 		"service", serviceName, "insecure", insecure)
 	return shutdownAll, nil
+}
+
+// StartMetricsServer 在独立监听地址暴露 Prometheus /metrics（默认注册表，含
+// voice 迁移指标等，docs 09 §11）。addr 为空时不启动；部署时应仅绑定内网/本机
+//（METRICS_ADDRESS，如 "127.0.0.1:9091"），不做鉴权。
+// 返回关闭函数；监听失败只记录错误（观测面不拖垮业务面）。
+func StartMetricsServer(addr string) func(context.Context) error {
+	if strings.TrimSpace(addr) == "" {
+		return func(context.Context) error { return nil }
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		slog.Info("observability: Prometheus /metrics 监听启动（应仅内网可达）", "address", addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("observability: /metrics 监听退出", "error", err)
+		}
+	}()
+	return server.Shutdown
 }
 
 // GinMiddleware 返回 HTTP 请求可观测中间件：otelgin 追踪 + http.server.duration 直方图

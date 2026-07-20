@@ -123,7 +123,11 @@ type Attachment struct {
 	Size       int64     `gorm:"not null" json:"size"`
 	// ObjectKey 存储层对象键；本地实现为 DataDir/attachments 下的相对路径，日后可平移到对象存储。
 	ObjectKey string `gorm:"size:255;not null" json:"-"`
-	Uploaded  bool   `gorm:"not null;default:false" json:"uploaded"`
+	// Width/Height 图片像素尺寸（Owl-Desktop docs 07 §8-5 UX-04 占位比例）：
+	// 上传完成时服务端解码探测（PNG/JPEG/GIF），非图片或解码失败为 0。
+	Width    int  `gorm:"not null;default:0" json:"width,omitempty"`
+	Height   int  `gorm:"not null;default:0" json:"height,omitempty"`
+	Uploaded bool `gorm:"not null;default:false" json:"uploaded"`
 	// UploadTokenHash 一次性上传令牌的 SHA-256 十六进制；上传成功后置空。
 	UploadTokenHash string    `gorm:"size:64;not null;default:''" json:"-"`
 	UploadExpiresAt time.Time `gorm:"not null" json:"-"`

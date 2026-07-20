@@ -30,10 +30,11 @@ func defaultOptions() options {
 		IdentifyTimeout:   10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		SendBuffer:        256,
-		ReplayBufferSize:  512,
-		ReplayTTL:         5 * time.Minute,
-		ResumeWindow:      3 * time.Minute,
-		SweepInterval:     30 * time.Second,
+		// 回放缓冲：最近 512 条或 60s（二者取小）；断开后会话保留 60s 供 RESUME。
+		ReplayBufferSize: 512,
+		ReplayTTL:        60 * time.Second,
+		ResumeWindow:     60 * time.Second,
+		SweepInterval:    15 * time.Second,
 	}
 }
 
@@ -150,11 +151,13 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 	}
 	sess := &session{id: uuid.NewString(), user: user, conn: c}
 	h.hub.register(sess)
+	unionPresences := []snapshot.Presence{}
 	if h.presence != nil {
 		// 先登记 presence（默认 online，会触发本人/他人 PRESENCE_UPDATE 广播），
 		// 再组装 READY presences，保证快照里能看到自己。事件帧只会进入发送队列
 		//（writePump 在握手完成后才启动），不会先于 READY 送达。
 		h.presence.Connect(user.ID, sess.id)
+		seen := make(map[uuid.UUID]struct{}, 16)
 		for i := range guilds {
 			memberIDs, err := h.hub.dir.GuildMemberIDs(guilds[i].Guild.ID)
 			if err != nil {
@@ -164,7 +167,16 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 			presences := make([]snapshot.Presence, 0, len(infos))
 			for _, memberID := range memberIDs {
 				if info, ok := infos[memberID]; ok {
-					presences = append(presences, snapshot.Presence{UserID: memberID, Status: info.Status, CustomText: info.CustomText})
+					entry := snapshot.Presence{
+						UserID: memberID, Status: info.Status, CustomText: info.CustomText,
+						CustomEmoji: info.CustomEmoji, CustomExpiresAt: info.CustomExpiresAt,
+					}
+					presences = append(presences, entry)
+					// 顶层 presences 为各 guild 的并集（按 user_id 去重，快照一致视角）。
+					if _, dup := seen[memberID]; !dup {
+						seen[memberID] = struct{}{}
+						unionPresences = append(unionPresences, entry)
+					}
 				}
 			}
 			guilds[i].Presences = presences
@@ -187,6 +199,7 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 		User:       user,
 		GuildIDs:   guildIDs,
 		Guilds:     guilds,
+		Presences:  unionPresences,
 		ReadStates: readStates,
 	}
 	if !h.writeDirect(c, outFrame{Op: opReady, D: ready}) {
@@ -269,7 +282,7 @@ func (h *handler) readLoop(c *conn, sess *session) {
 				c.shutdown(closeSlowConsumer, "消息积压", h.opts.WriteTimeout)
 				return
 			}
-		case opPresenceUpdate:
+		case opPresenceUpdate, opPresence:
 			if h.presence == nil {
 				continue
 			}
@@ -277,8 +290,10 @@ func (h *handler) readLoop(c *conn, sess *session) {
 			if err := json.Unmarshal(f.D, &input); err != nil {
 				continue
 			}
-			// 非法 status 由 SetStatus 拒绝（返回 false），与无法解析的帧同样静默忽略。
-			h.presence.SetStatus(sess.user.ID, sess.id, input.Status, input.CustomText)
+			// 非法 status 由 SetStatusFull 拒绝（返回 false），与无法解析的帧同样静默忽略。
+			h.presence.SetStatusFull(sess.user.ID, sess.id, input.Status, presence.CustomStatus{
+				Text: input.CustomText, Emoji: input.CustomEmoji, ExpiresAt: input.CustomExpiresAt,
+			})
 		}
 	}
 }

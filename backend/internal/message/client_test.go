@@ -75,6 +75,10 @@ func TestDualPrefixCoexistSmoke(t *testing.T) {
 		{http.MethodGet, "/gapi/v1/search/messages"},
 		{http.MethodGet, "/gapi/v1/guilds/" + guildID + "/voice-pack"},
 		{http.MethodGet, "/gapi/v1/guilds/" + guildID + "/channels/" + channelID + "/voice-pack"},
+		// 语音包配置写入口双平面同挂（docs 03 FR-35：服管/频道管理员在客户端配置；
+		// MANAGE_GUILD / MANAGE_CHANNELS 由 handler 内校验）。
+		{http.MethodPatch, "/gapi/v1/guilds/" + guildID + "/voice-pack"},
+		{http.MethodPut, "/gapi/v1/guilds/" + guildID + "/channels/" + channelID + "/voice-pack"},
 		{http.MethodPost, "/gapi/v1/channels/" + channelID + "/typing"},
 		// 后台平面抽查：同一 handler 集挂在 /api/v1 且同样受认证保护。
 		{http.MethodPost, "/api/v1/channels/" + channelID + "/messages"},
@@ -94,8 +98,6 @@ func TestDualPrefixCoexistSmoke(t *testing.T) {
 		{http.MethodPatch, "/gapi/v1/admin/guilds/" + guildID + "/upload-limit"},
 		{http.MethodGet, "/gapi/v1/guilds/" + guildID + "/message-retention"},
 		{http.MethodPatch, "/gapi/v1/guilds/" + guildID + "/message-retention"},
-		{http.MethodPatch, "/gapi/v1/guilds/" + guildID + "/voice-pack"},
-		{http.MethodPut, "/gapi/v1/guilds/" + guildID + "/channels/" + channelID + "/voice-pack"},
 		// typing 为用户端专属，后台前缀不挂。
 		{http.MethodPost, "/api/v1/channels/" + channelID + "/typing"},
 	}

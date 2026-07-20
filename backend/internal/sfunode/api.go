@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/perms"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
@@ -365,7 +366,21 @@ func (a *api) adminPutPool(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "POOL_UPDATE_FAILED", err.Error())
 		return
 	}
+	a.publishPoolUpdate(guildID)
 	c.JSON(http.StatusOK, a.poolResponse(cfg))
+}
+
+// publishPoolUpdate 节点池变更轻量广播（实时同步专项）：载荷仅 guild_id+event_at，
+// 客户端据此重拉 GET /guilds/{gid}/voice/nodes 刷新 RTT 探测候选与管理界面。
+func (a *api) publishPoolUpdate(guildID uuid.UUID) {
+	if a.deps.Bus == nil {
+		return
+	}
+	a.deps.Bus.Publish(eventbus.Event{
+		Type:    eventbus.EventVoiceNodePoolUpdate,
+		GuildID: &guildID,
+		Payload: map[string]any{"guild_id": guildID, "event_at": time.Now().UTC()},
+	})
 }
 
 // requireGuildAdmin 服务器管理员（ManageGuild）判定；无权限一律 404。
@@ -426,6 +441,7 @@ func (a *api) guildPutPool(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "POOL_UPDATE_FAILED", err.Error())
 		return
 	}
+	a.publishPoolUpdate(guildID)
 	c.JSON(http.StatusOK, a.poolResponse(cfg))
 }
 

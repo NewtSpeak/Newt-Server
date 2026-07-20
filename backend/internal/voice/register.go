@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
 	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
 )
 
 // tryRegister 容错注册路由：并行开发期间其他模块可能已抢注同一路径（gin 对重复注册会 panic），
@@ -52,14 +53,21 @@ func ensureService(deps appdeps.Deps) (*Service, error) {
 		return nil, fmt.Errorf("voice 模块需要 Media Token 签发器（deps.MediaTokens 未装配）")
 	}
 	sched := defaultSchedConfig()
+	// 过载自动迁移（docs 09 I.3：默认关，部署配置可开）；开关经既有配置口
+	// OverloadAutoMigrate 生效，阈值/批量/冷却见 overloadConfigFromEnv。
+	overloadCfg := overloadConfigFromEnv(deps.Cfg)
+	sched.OverloadAutoMigrate = overloadCfg.Enabled
 	svc := &Service{
-		db:     deps.DB,
-		bus:    deps.Bus,
-		cfg:    deps.Cfg,
-		tokens: deps.MediaTokens,
-		rtt:    newRTTStore(sched),
-		resv:   newReservationStore(),
-		sched:  sched,
+		db:            deps.DB,
+		bus:           deps.Bus,
+		cfg:           deps.Cfg,
+		tokens:        deps.MediaTokens,
+		rtt:           newRTTStore(sched),
+		resv:          newReservationStore(),
+		sched:         sched,
+		overload:      newOverloadDetector(overloadCfg),
+		overloadNodes: func() ([]sfuctl.NodeInfo, error) { return sfuctl.Dir().AllNodes() },
+		edgeFlaps:     newEdgeFlapTracker(),
 	}
 	svc.engine = newMigrationEngine(svc)
 
@@ -69,6 +77,9 @@ func ensureService(deps appdeps.Deps) (*Service, error) {
 	deps.Bus.Subscribe(svc.handleBusEvent)
 	svc.engine.start()
 	go svc.leaseMaintenanceLoop()
+	if overloadCfg.Enabled {
+		go svc.overloadLoop()
+	}
 
 	sharedService = svc
 	serviceInitCount++
@@ -119,8 +130,14 @@ func Register(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 	tryRegister(func() { authed.PATCH("/voice/state", svc.handleSelfState) })
 	tryRegister(func() { authed.POST("/voice/rtt", svc.handleRTTReport) })
 	tryRegister(func() { authed.POST("/voice/ice-failed", svc.handleIceFailed) })
+	// ICE 失败上报（docs 13 FR-16 / 15 BI.2）：双信号提前判死的独立信号源。
+	tryRegister(func() { authed.POST("/voice/ice-failure", svc.handleICEFailure) })
 	tryRegister(func() { authed.POST("/voice/migrations/:migrationID/ack", svc.handleMigrationAck) })
+	// 候选节点池下发（docs 13 §7.1）：客户端后台 RTT 探测用，成员即可读。
+	tryRegister(func() { authed.GET("/guilds/:guildID/voice/nodes", svc.handleListVoiceNodes) })
 	tryRegister(func() { authed.POST("/guilds/:guildID/voice/disconnect", svc.handleAdminDisconnect) })
+	// 管理员移动成员到另一语音频道（docs 09 FR-29：MOVE_MEMBERS + 层级）。
+	tryRegister(func() { authed.POST("/guilds/:guildID/voice/move", svc.handleAdminMove) })
 	tryRegister(func() { authed.PATCH("/guilds/:guildID/voice/states/:userID", svc.handleServerState) })
 	tryRegister(func() { authed.GET("/guilds/:guildID/channels/:channelID/voice-states", svc.handleListVoiceStates) })
 	tryRegister(func() { authed.POST("/admin/voice/migrations", svc.handleManualMigration) })

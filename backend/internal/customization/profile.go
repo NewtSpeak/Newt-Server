@@ -95,7 +95,8 @@ func (h *api) uploadProfileImage(c *gin.Context, kind string, maxBytes int64) {
 
 	var fresh model.User
 	if err := h.deps.DB.First(&fresh, "id = ?", user.ID).Error; err == nil {
-		h.publishToUserGuilds(user.ID, eventbus.EventUserUpdate, fresh)
+		// 广播脱敏投影（禁止直接广播 model.User——含 email 等私有字段）。
+		h.publishToUserGuilds(user.ID, eventbus.EventUserUpdate, eventbus.NewUserUpdatePayload(fresh))
 		c.JSON(http.StatusOK, fresh)
 		return
 	}
@@ -148,7 +149,8 @@ func (h *api) patchProfile(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取资料失败")
 		return
 	}
-	h.publishToUserGuilds(user.ID, eventbus.EventUserUpdate, fresh)
+	// 广播脱敏投影（禁止直接广播 model.User——含 email 等私有字段）。
+	h.publishToUserGuilds(user.ID, eventbus.EventUserUpdate, eventbus.NewUserUpdatePayload(fresh))
 	c.JSON(http.StatusOK, fresh)
 }
 

@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,10 +24,48 @@ import (
 
 // readStateUpdatePayload READ_STATE_UPDATE 事件载荷（docs 15 §7-1，拟名落地）。
 type readStateUpdatePayload struct {
+	UserID            uuid.UUID `json:"user_id"`
 	ChannelID         uuid.UUID `json:"channel_id"`
 	LastReadMessageID string    `json:"last_read_message_id"`
 	MentionCount      int       `json:"mention_count"`
 	EventAt           time.Time `json:"event_at"`
+}
+
+// publishReadState 向当事人全部端定向发 READ_STATE_UPDATE（多端角标同步）。
+func (s *service) publishReadState(state model.ReadState, at time.Time) {
+	s.bus.Publish(eventbus.Event{
+		Type:    eventbus.EventReadStateUpdate,
+		UserIDs: []uuid.UUID{state.UserID},
+		Payload: readStateUpdatePayload{
+			UserID:            state.UserID,
+			ChannelID:         state.ChannelID,
+			LastReadMessageID: strconv.FormatInt(state.LastReadMessageID, 10),
+			MentionCount:      state.MentionCount,
+			EventAt:           at,
+		},
+	})
+}
+
+// advanceReadState ack 核心：推进 last_read（GREATEST 只前进不后退）并清零 mention_count，
+// 返回落库后的最终行（RETURNING）。
+func (s *service) advanceReadState(userID uuid.UUID, channel model.Channel, messageID int64, now time.Time) (model.ReadState, error) {
+	state := model.ReadState{
+		UserID:            userID,
+		ChannelID:         channel.ID,
+		GuildID:           channel.GuildID,
+		LastReadMessageID: messageID,
+		MentionCount:      0,
+		UpdatedAt:         now,
+	}
+	err := s.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "channel_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"last_read_message_id": gorm.Expr("GREATEST(read_states.last_read_message_id, EXCLUDED.last_read_message_id)"),
+			"mention_count":        0,
+			"updated_at":           now,
+		}),
+	}, clause.Returning{}).Create(&state).Error
+	return state, err
 }
 
 // ackMessage POST /channels/{id}/messages/{mid}/ack：本人已读推进。
@@ -50,37 +89,153 @@ func (s *service) ackMessage(c *gin.Context) {
 	}
 	user := s.currentUser(c)
 	now := time.Now().UTC()
-	state := model.ReadState{
-		UserID:            user.ID,
-		ChannelID:         channel.ID,
-		GuildID:           channel.GuildID,
-		LastReadMessageID: messageID,
-		MentionCount:      0,
-		UpdatedAt:         now,
+	state, err := s.advanceReadState(user.ID, channel, messageID, now)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "更新已读状态失败")
+		return
 	}
-	err := s.db.Clauses(clause.OnConflict{
+	s.publishReadState(state, now)
+	c.JSON(http.StatusOK, state)
+}
+
+// ackChannel POST /channels/{id}/ack {message_id}：本人已读推进（体内传消息 ID 的等价形态，
+// docs 15 §7-1；message_id 兼容字符串与数字两种 JSON 形态）。语义与 ackMessage 一致，响应 204。
+func (s *service) ackChannel(c *gin.Context) {
+	channelID, ok := parseUUIDParam(c, "channelID")
+	if !ok {
+		return
+	}
+	var input struct {
+		MessageID flexInt64 `json:"message_id"`
+	}
+	if !bind(c, &input) {
+		return
+	}
+	if input.MessageID <= 0 {
+		fail(c, http.StatusBadRequest, "INVALID_MESSAGE_ID", "message_id 必须为正整数（字符串或数字）")
+		return
+	}
+	_, channel, _, ok := s.channelAccess(c, channelID)
+	if !ok {
+		return
+	}
+	user := s.currentUser(c)
+	now := time.Now().UTC()
+	state, err := s.advanceReadState(user.ID, channel, int64(input.MessageID), now)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "更新已读状态失败")
+		return
+	}
+	s.publishReadState(state, now)
+	c.Status(http.StatusNoContent)
+}
+
+// ackGuild POST /guilds/{id}/ack：该服全部可见频道标记已读（docs 15 FR-02 Shift+Esc）。
+//   - 每个可见频道推进到其当前最新消息 ID（含软删——ID 只是读位置游标）并清零 mention_count；
+//   - 无消息且无存量 read state 的频道跳过（不制造空行）；
+//   - 批量 upsert 一条 SQL 落库，随后对每个受影响频道向本人全部端发 READ_STATE_UPDATE；
+//   - 非成员 404（不可见即不存在）。响应 204。
+func (s *service) ackGuild(c *gin.Context) {
+	guildID, ok := parseUUIDParam(c, "guildID")
+	if !ok {
+		return
+	}
+	user := s.currentUser(c)
+	ctx, err := perms.LoadGuild(s.db, user, guildID)
+	if err != nil {
+		notFound(c)
+		return
+	}
+	channels, err := ctx.VisibleChannels(s.db)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取频道列表失败")
+		return
+	}
+	if len(channels) == 0 {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	channelIDs := make([]uuid.UUID, 0, len(channels))
+	for _, channel := range channels {
+		channelIDs = append(channelIDs, channel.ID)
+	}
+	// 每频道当前最新消息 ID（单条聚合 SQL，不逐频道查询）。
+	targets, err := snapshot.ChannelLastMessageIDs(s.db, channelIDs)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息位置失败")
+		return
+	}
+	// 消息已被 GC 但仍有存量计数的频道也要清零（目标读位置取 0，GREATEST 保持原位）。
+	var staleChannelIDs []uuid.UUID
+	err = s.db.Model(&model.ReadState{}).Where("user_id = ? AND channel_id IN ?", user.ID, channelIDs).
+		Pluck("channel_id", &staleChannelIDs).Error
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取已读状态失败")
+		return
+	}
+	for _, channelID := range staleChannelIDs {
+		if _, ok := targets[channelID]; !ok {
+			targets[channelID] = 0
+		}
+	}
+	if len(targets) == 0 {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	now := time.Now().UTC()
+	rows := make([]model.ReadState, 0, len(targets))
+	for channelID, lastRead := range targets {
+		rows = append(rows, model.ReadState{
+			UserID:            user.ID,
+			ChannelID:         channelID,
+			GuildID:           guildID,
+			LastReadMessageID: lastRead,
+			MentionCount:      0,
+			UpdatedAt:         now,
+		})
+	}
+	err = s.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}, {Name: "channel_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"last_read_message_id": gorm.Expr("GREATEST(read_states.last_read_message_id, EXCLUDED.last_read_message_id)"),
 			"mention_count":        0,
 			"updated_at":           now,
 		}),
-	}, clause.Returning{}).Create(&state).Error
+	}, clause.Returning{}).Create(&rows).Error
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "更新已读状态失败")
 		return
 	}
-	s.bus.Publish(eventbus.Event{
-		Type:    eventbus.EventReadStateUpdate,
-		UserIDs: []uuid.UUID{user.ID},
-		Payload: readStateUpdatePayload{
-			ChannelID:         channel.ID,
-			LastReadMessageID: strconv.FormatInt(state.LastReadMessageID, 10),
-			MentionCount:      0,
-			EventAt:           now,
-		},
-	})
-	c.JSON(http.StatusOK, state)
+	for _, state := range rows {
+		s.publishReadState(state, now)
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// flexInt64 兼容字符串与数字两种 JSON 形态的 int64
+//（消息 ID 在响应中序列化为字符串，客户端可能原样回传）。
+type flexInt64 int64
+
+func (v *flexInt64) UnmarshalJSON(raw []byte) error {
+	text := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	if text == "" || text == "null" {
+		*v = 0
+		return nil
+	}
+	parsed, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return err
+	}
+	*v = flexInt64(parsed)
+	return nil
+}
+
+// readStateView GET /users/@me/read-states 的响应条目：read state 行 +
+// 该频道当前最大消息 ID（与 READY guilds[].channels[].last_message_id 同源，
+// 保持两条同步路径信息一致——客户端据此恢复「普通未读」白点）。
+type readStateView struct {
+	model.ReadState
+	LastMessageID int64 `json:"last_message_id,string"`
 }
 
 // listMyReadStates GET /users/@me/read-states?guild_id=：REST 兜底（docs 15 §7-1），
@@ -102,7 +257,20 @@ func (s *service) listMyReadStates(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取已读状态失败")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"read_states": states})
+	channelIDs := make([]uuid.UUID, 0, len(states))
+	for _, state := range states {
+		channelIDs = append(channelIDs, state.ChannelID)
+	}
+	lastMessageIDs, err := snapshot.ChannelLastMessageIDs(s.db, channelIDs)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息位置失败")
+		return
+	}
+	views := make([]readStateView, 0, len(states))
+	for _, state := range states {
+		views = append(views, readStateView{ReadState: state, LastMessageID: lastMessageIDs[state.ChannelID]})
+	}
+	c.JSON(http.StatusOK, gin.H{"read_states": views})
 }
 
 // bumpMentionCounts MESSAGE_CREATE 后为被提及用户（在线与离线一视同仁，计数落库）
@@ -139,15 +307,21 @@ func (s *service) bumpMentionCounts(message model.Message) {
 			UpdatedAt:    now,
 		})
 	}
+	// RETURNING 拿到落库后的最终行（含累计后的 mention_count 与既有 last_read），
+	// 逐用户定向发 READ_STATE_UPDATE——在线端实时加角标，离线端靠 READY 快照。
 	err = s.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}, {Name: "channel_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"mention_count": gorm.Expr("read_states.mention_count + 1"),
 			"updated_at":    now,
 		}),
-	}).Create(&rows).Error
+	}, clause.Returning{}).Create(&rows).Error
 	if err != nil {
 		log.Printf("message: 批量递增 mention_count 失败（message=%d）: %v", message.ID, err)
+		return
+	}
+	for _, state := range rows {
+		s.publishReadState(state, now)
 	}
 }
 

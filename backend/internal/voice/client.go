@@ -48,9 +48,13 @@ func RegisterClient(authed *gin.RouterGroup, deps appdeps.Deps) {
 	tryRegister(func() { group.POST("/voice/rtt", svc.handleRTTReport) })
 	// 客户端侧 ICE/连接失败上报（BI.3 提前判死独立信号源，docs 15 §5）。
 	tryRegister(func() { group.POST("/voice/ice-failed", svc.handleIceFailed) })
+	// ICE 失败上报（docs 13 FR-16 / 15 BI.2）：双信号提前判死的独立信号源。
+	tryRegister(func() { group.POST("/voice/ice-failure", svc.handleICEFailure) })
 	tryRegister(func() { group.POST("/voice/migrations/:migrationID/ack", svc.handleMigrationAck) })
 	// 频道语音成员列表；不可见一律 404（docs 06 议题 8 防扫频语义，handler 内实现）。
 	tryRegister(func() { group.GET("/guilds/:guildID/channels/:channelID/voice-states", svc.handleListVoiceStates) })
+	// 候选节点池下发（docs 13 §7.1）：客户端后台 RTT 探测用，成员即可读。
+	tryRegister(func() { group.GET("/guilds/:guildID/voice/nodes", svc.handleListVoiceNodes) })
 }
 
 // RegisterClientModeration 把服级语音管理端点挂到用户端认证平面：
@@ -67,6 +71,8 @@ func RegisterClientModeration(authed *gin.RouterGroup, deps appdeps.Deps) {
 	}
 	group := authed.Group("", injectCurrentUser(deps.CurrentUser))
 	tryRegister(func() { group.POST("/guilds/:guildID/voice/disconnect", svc.handleAdminDisconnect) })
+	// 管理员移动成员到另一语音频道（docs 09 FR-29：MOVE_MEMBERS + 层级）。
+	tryRegister(func() { group.POST("/guilds/:guildID/voice/move", svc.handleAdminMove) })
 	tryRegister(func() { group.PATCH("/guilds/:guildID/voice/states/:userID", svc.handleServerState) })
 }
 

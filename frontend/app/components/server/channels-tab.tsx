@@ -10,7 +10,7 @@ import {
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers"
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { GripVerticalIcon, HashIcon, MicIcon, PencilIcon, PlusIcon, Trash2Icon, Volume2Icon } from "lucide-react"
+import { FolderIcon, GripVerticalIcon, HashIcon, MicIcon, PencilIcon, PlusIcon, Trash2Icon, Volume2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { SimpleSelect } from "~/components/simple-select"
@@ -31,8 +31,10 @@ import { Switch } from "~/components/ui/switch"
 import {
   createChannel,
   deleteChannel,
+  getChannelVoicePack,
   getVoiceStageConfig,
   patchVoiceStageConfig,
+  putChannelVoicePack,
   reorderChannels,
   updateChannel,
   type Channel,
@@ -107,10 +109,11 @@ export function ChannelsTab({
   }
 
   async function onSaveOrder() {
-    // position 全量重编：文本区从 0 开始，语音区顺延（跨类型互不干扰）。
+    // position 全量重编：分类区从 0 开始，文本区、语音区依次顺延（跨类型互不干扰）。
+    const categories = order.filter(channel => channel.type === "CATEGORY")
     const texts = order.filter(channel => channel.type === "TEXT")
     const voices = order.filter(channel => channel.type === "VOICE")
-    const entries = [...texts, ...voices].map((channel, index) => ({ id: channel.id, position: index }))
+    const entries = [...categories, ...texts, ...voices].map((channel, index) => ({ id: channel.id, position: index }))
     try {
       await reorderChannels(guildID, entries)
       toast.success("频道排序已保存")
@@ -121,7 +124,9 @@ export function ChannelsTab({
   }
 
   async function onDelete(channel: Channel) {
-    if (!window.confirm(`确定删除频道「${channel.name}」？语音频道内的用户将被断开。`)) return
+    const hint =
+      channel.type === "CATEGORY" ? "分类下的子频道会自动上浮（不会被删除）。" : "语音频道内的用户将被断开。"
+    if (!window.confirm(`确定删除频道「${channel.name}」？${hint}`)) return
     try {
       await deleteChannel(channel.id)
       toast.success("频道已删除")
@@ -131,8 +136,10 @@ export function ChannelsTab({
     }
   }
 
+  const categoryChannels = order.filter(channel => channel.type === "CATEGORY")
   const textChannels = order.filter(channel => channel.type === "TEXT")
   const voiceChannels = order.filter(channel => channel.type === "VOICE")
+  const categoryNames = new Map(categoryChannels.map(channel => [channel.id, channel.name]))
 
   return (
     <div className="flex flex-col gap-5">
@@ -146,6 +153,7 @@ export function ChannelsTab({
             options={[
               { value: "TEXT", label: "文字频道" },
               { value: "VOICE", label: "语音频道" },
+              { value: "CATEGORY", label: "分类" },
             ]}
             className="w-32"
           />
@@ -169,6 +177,7 @@ export function ChannelsTab({
       {status === "success" && channels.length > 0 && (
         <div className="grid gap-5 lg:grid-cols-2">
           {[
+            { label: "分类", icon: FolderIcon, list: categoryChannels },
             { label: "文字频道", icon: HashIcon, list: textChannels },
             { label: "语音频道", icon: Volume2Icon, list: voiceChannels },
           ].map(section => (
@@ -197,6 +206,7 @@ export function ChannelsTab({
                         key={channel.id}
                         channel={channel}
                         icon={section.icon}
+                        categoryName={channel.parent_id ? categoryNames.get(channel.parent_id) : undefined}
                         onEdit={() => setEditing(channel)}
                         onDelete={() => onDelete(channel)}
                         onStage={channel.type === "VOICE" ? () => setStageChannel(channel) : undefined}
@@ -210,8 +220,13 @@ export function ChannelsTab({
         </div>
       )}
 
-      <EditChannelDialog channel={editing} onClose={() => setEditing(null)} onSaved={reload} />
-      <StageConfigDialog channel={stageChannel} onClose={() => setStageChannel(null)} />
+      <EditChannelDialog
+        channel={editing}
+        categories={categoryChannels}
+        onClose={() => setEditing(null)}
+        onSaved={reload}
+      />
+      <StageConfigDialog guildID={guildID} channel={stageChannel} onClose={() => setStageChannel(null)} />
     </div>
   )
 }
@@ -219,17 +234,23 @@ export function ChannelsTab({
 function ChannelRow({
   channel,
   icon: Icon,
+  categoryName,
   onEdit,
   onDelete,
   onStage,
 }: {
   channel: Channel
   icon: typeof HashIcon
+  categoryName?: string
   onEdit: () => void
   onDelete: () => void
   onStage?: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: channel.id })
+  const meta: string[] = []
+  if (categoryName) meta.push(`分类：${categoryName}`)
+  if (channel.type === "VOICE" && (channel.user_limit ?? 0) > 0) meta.push(`上限 ${channel.user_limit} 人`)
+  if (channel.type === "TEXT" && (channel.rate_limit_per_user ?? 0) > 0) meta.push(`慢速 ${channel.rate_limit_per_user}s`)
   return (
     <div
       ref={setNodeRef}
@@ -248,7 +269,9 @@ function ChannelRow({
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{channel.name}</p>
-        {channel.topic && <p className="truncate text-xs text-muted-foreground">{channel.topic}</p>}
+        {(channel.topic || meta.length > 0) && (
+          <p className="truncate text-xs text-muted-foreground">{[channel.topic, ...meta].filter(Boolean).join(" · ")}</p>
+        )}
       </div>
       <span className="shrink-0 font-mono text-[10px] text-muted-foreground">#{channel.position}</span>
       {onStage && (
@@ -266,23 +289,33 @@ function ChannelRow({
   )
 }
 
+const NO_CATEGORY = "__none__"
+
 function EditChannelDialog({
   channel,
+  categories,
   onClose,
   onSaved,
 }: {
   channel: Channel | null
+  categories: Channel[]
   onClose: () => void
   onSaved: () => void
 }) {
   const [name, setName] = useState("")
   const [topic, setTopic] = useState("")
+  const [parentID, setParentID] = useState<string>(NO_CATEGORY)
+  const [userLimit, setUserLimit] = useState(0)
+  const [rateLimit, setRateLimit] = useState(0)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (channel) {
       setName(channel.name)
       setTopic(channel.topic ?? "")
+      setParentID(channel.parent_id ?? NO_CATEGORY)
+      setUserLimit(channel.user_limit ?? 0)
+      setRateLimit(channel.rate_limit_per_user ?? 0)
     }
   }, [channel])
 
@@ -290,7 +323,13 @@ function EditChannelDialog({
     if (!channel) return
     setSaving(true)
     try {
-      await updateChannel(channel.id, { name: name.trim(), topic })
+      await updateChannel(channel.id, {
+        name: name.trim(),
+        topic,
+        ...(channel.type !== "CATEGORY" ? { parent_id: parentID === NO_CATEGORY ? null : parentID } : {}),
+        ...(channel.type === "VOICE" ? { user_limit: userLimit } : {}),
+        ...(channel.type === "TEXT" ? { rate_limit_per_user: rateLimit } : {}),
+      })
       toast.success("频道已更新")
       onClose()
       onSaved()
@@ -306,7 +345,7 @@ function EditChannelDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>编辑频道</DialogTitle>
-          <DialogDescription>修改名称与主题（需 MANAGE_CHANNELS）。</DialogDescription>
+          <DialogDescription>修改名称、主题、所属分类与频道限制（需 MANAGE_CHANNELS）。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid gap-2">
@@ -317,6 +356,49 @@ function EditChannelDialog({
             <Label htmlFor="edit-channel-topic">主题（文本频道展示）</Label>
             <Input id="edit-channel-topic" value={topic} onChange={event => setTopic(event.target.value)} maxLength={1024} />
           </div>
+          {channel?.type !== "CATEGORY" && (
+            <div className="grid gap-2">
+              <Label>所属分类</Label>
+              <SimpleSelect
+                ariaLabel="所属分类"
+                value={parentID}
+                onChange={setParentID}
+                options={[
+                  { value: NO_CATEGORY, label: "未分组" },
+                  ...categories.map(category => ({ value: category.id, label: category.name })),
+                ]}
+                className="w-full"
+              />
+            </div>
+          )}
+          {channel?.type === "VOICE" && (
+            <div className="grid gap-2">
+              <Label htmlFor="edit-channel-user-limit">人数上限（0 = 不限，1–99；管理员可超限进入）</Label>
+              <Input
+                id="edit-channel-user-limit"
+                type="number"
+                min={0}
+                max={99}
+                value={userLimit}
+                onChange={event => setUserLimit(Math.min(99, Math.max(0, Number(event.target.value) || 0)))}
+                className="w-32 tabular-nums"
+              />
+            </div>
+          )}
+          {channel?.type === "TEXT" && (
+            <div className="grid gap-2">
+              <Label htmlFor="edit-channel-rate-limit">慢速模式（秒，0 = 关闭，最大 21600）</Label>
+              <Input
+                id="edit-channel-rate-limit"
+                type="number"
+                min={0}
+                max={21600}
+                value={rateLimit}
+                onChange={event => setRateLimit(Math.min(21600, Math.max(0, Number(event.target.value) || 0)))}
+                className="w-32 tabular-nums"
+              />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
@@ -331,9 +413,18 @@ function EditChannelDialog({
   )
 }
 
-/** 语音频道舞台配置弹窗：模式 / 麦位 / 申请上麦 / 协管改模式 / 屏幕并发上限 */
-function StageConfigDialog({ channel, onClose }: { channel: Channel | null; onClose: () => void }) {
+/** 语音频道舞台配置弹窗：模式 / 麦位 / 申请上麦 / 协管改模式 / 屏幕并发上限 / 语音包开关 */
+function StageConfigDialog({
+  guildID,
+  channel,
+  onClose,
+}: {
+  guildID: string
+  channel: Channel | null
+  onClose: () => void
+}) {
   const [config, setConfig] = useState<VoiceStageConfig | null>(null)
+  const [voicePackAllowed, setVoicePackAllowed] = useState(true)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -343,11 +434,14 @@ function StageConfigDialog({ channel, onClose }: { channel: Channel | null; onCl
       return
     }
     setLoading(true)
-    getVoiceStageConfig(channel.id)
-      .then(setConfig)
+    Promise.all([getVoiceStageConfig(channel.id), getChannelVoicePack(guildID, channel.id).catch(() => null)])
+      .then(([stage, pack]) => {
+        setConfig(stage)
+        setVoicePackAllowed(pack?.allowed ?? true)
+      })
       .catch(reason => toast.error(reason instanceof Error ? reason.message : "读取舞台配置失败"))
       .finally(() => setLoading(false))
-  }, [channel?.id])
+  }, [guildID, channel?.id])
 
   async function onSave() {
     if (!channel || !config) return
@@ -360,6 +454,7 @@ function StageConfigDialog({ channel, onClose }: { channel: Channel | null; onCl
         allow_co_mod_change_mode: config.allow_co_mod_change_mode,
         ...(config.max_concurrent_screens >= 0 ? { max_concurrent_screens: config.max_concurrent_screens } : {}),
       })
+      await putChannelVoicePack(guildID, channel.id, voicePackAllowed)
       toast.success("舞台配置已保存")
       onClose()
     } catch (reason) {
@@ -431,6 +526,10 @@ function StageConfigDialog({ channel, onClose }: { channel: Channel | null; onCl
                 onCheckedChange={next => setConfig({ ...config, allow_co_mod_change_mode: Boolean(next) })}
               />
               允许协管切换频道模式
+            </label>
+            <label className="flex items-center gap-2.5 text-sm">
+              <Switch checked={voicePackAllowed} onCheckedChange={next => setVoicePackAllowed(Boolean(next))} />
+              本频道允许播放进房语音包
             </label>
           </div>
         )}
