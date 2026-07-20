@@ -1,0 +1,177 @@
+basePath: /api/v1
+definitions:
+  httpapi.apiError:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  httpapi.createGuildRequest:
+    properties:
+      name:
+        maxLength: 100
+        minLength: 2
+        type: string
+    required:
+    - name
+    type: object
+  httpapi.errorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/httpapi.apiError'
+    type: object
+  httpapi.loginRequest:
+    properties:
+      identifier:
+        type: string
+      password:
+        type: string
+    required:
+    - identifier
+    - password
+    type: object
+  httpapi.registerRequest:
+    properties:
+      email:
+        maxLength: 255
+        type: string
+      password:
+        maxLength: 128
+        minLength: 8
+        type: string
+      username:
+        maxLength: 32
+        minLength: 2
+        type: string
+    required:
+    - email
+    - password
+    - username
+    type: object
+  httpapi.tokenResponse:
+    properties:
+      access_expires_at:
+        type: string
+      access_token:
+        type: string
+      refresh_expires_at:
+        type: string
+      refresh_token:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+    type: object
+  model.Guild:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      owner_user_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.User:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      system_admin:
+        type: boolean
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: OwlSpeak 账号、Guild RBAC 与权限管理 API。
+  title: Owl-Server API
+  version: 0.1.0
+paths:
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户名或邮箱及密码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.loginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.tokenResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/httpapi.errorResponse'
+      summary: 登录
+      tags:
+      - 认证
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 注册资料
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.registerRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/httpapi.tokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpapi.errorResponse'
+      summary: 注册账号
+      tags:
+      - 认证
+  /guilds:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 服务器资料
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/httpapi.createGuildRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Guild'
+      security:
+      - BearerAuth: []
+      summary: 创建服务器
+      tags:
+      - RBAC
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

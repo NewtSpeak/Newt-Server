@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: owl
+      POSTGRES_USER: owl
+      POSTGRES_PASSWORD: owl_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - owl-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U owl -d owl"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  owl-postgres-data:

@@ -1,0 +1,6 @@
+.env
+bin/
+tmp/
+build-errors.log
+internal/web/dist/*
+!internal/web/dist/README.txt
