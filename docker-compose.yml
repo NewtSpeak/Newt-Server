@@ -8,7 +8,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - owl-postgres-data:/var/lib/postgresql/data
+      - owl-postgres18-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U owl -d owl"]
       interval: 5s
@@ -16,4 +16,4 @@ services:
       retries: 20
 
 volumes:
-  owl-postgres-data:
+  owl-postgres18-data:

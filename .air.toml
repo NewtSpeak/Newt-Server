@@ -3,7 +3,7 @@
 root = "backend"
 tmp_dir = "tmp"
 testdata_dir = "testdata"
-env_files = ["backend/.env"]
+env_files = [".env"]
 
 [build]
   bin = "./tmp/main"
