@@ -18,6 +18,6 @@ run:
 	go run ./cmd/server
 
 dev:
-	@bun --cwd ../frontend run dev --host 127.0.0.1 & frontend_pid=$$!; \
+	@bun --cwd=../frontend run dev --host 127.0.0.1 & frontend_pid=$$!; \
 	trap 'kill $$frontend_pid 2>/dev/null || true' EXIT INT TERM; \
-	air
+	cd .. && air

@@ -1,0 +1,37 @@
+#:schema https://json.schemastore.org/any.json
+
+root = "backend"
+tmp_dir = "tmp"
+testdata_dir = "testdata"
+env_files = ["backend/.env"]
+
+[build]
+  bin = "./tmp/main"
+  cmd = "go -C backend build -o ./tmp/main ./cmd/server"
+  entrypoint = ["./tmp/main"]
+  delay = 1000
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "internal/web/dist"]
+  exclude_regex = ["_test.go"]
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  kill_delay = "0s"
+  log = "build-errors.log"
+  send_interrupt = true
+  stop_on_error = true
+
+[color]
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  silent = false
+  time = false
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

@@ -12,6 +12,8 @@ make dev
 
 `make dev` 同时启动 React Router（Bun）与 Air。浏览器访问 `http://localhost:8080/`，Gin 会代理前端开发端口；Swagger UI 位于 `http://localhost:8080/swagger/index.html`。
 
+也可以在仓库根目录直接执行 `air`，此时只启动后端热重载；根目录 `.air.toml` 会将监听范围限制在 `backend`，不会扫描 `frontend/node_modules`。
+
 ## 生产构建
 
 ```sh
