@@ -8,6 +8,7 @@ import (
 )
 
 type Config struct {
+	Environment      string
 	Address          string
 	DatabaseURL      string
 	JWTSecret        string
@@ -19,6 +20,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	cfg := Config{
+		Environment:      env("APP_ENV", "development"),
 		Address:          env("APP_ADDRESS", ":8080"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		JWTSecret:        os.Getenv("JWT_SECRET"),

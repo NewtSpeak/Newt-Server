@@ -147,6 +147,21 @@ paths:
       tags:
       - 认证
   /guilds:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.Guild'
+            type: array
+      security:
+      - BearerAuth: []
+      summary: 列出当前用户加入的服务器
+      tags:
+      - RBAC
     post:
       consumes:
       - application/json

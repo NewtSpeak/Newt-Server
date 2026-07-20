@@ -15,8 +15,8 @@ import (
 //go:embed dist
 var frontendAssets embed.FS
 
-func RegisterFallback(router *gin.Engine, _ string, devURL string) error {
-	if _, err := fs.Stat(frontendAssets, "dist/index.html"); err == nil {
+func RegisterFallback(router *gin.Engine, environment, devURL string) error {
+	if _, err := fs.Stat(frontendAssets, "dist/index.html"); environment == "production" && err == nil {
 		root, err := fs.Sub(frontendAssets, "dist")
 		if err != nil {
 			return err

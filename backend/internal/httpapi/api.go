@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,19 +17,23 @@ import (
 
 const userContextKey = "authenticated_user"
 
+var errRegistrationClosed = errors.New("系统初始化注册已关闭")
+
 type API struct {
 	db              *gorm.DB
 	tokens          *security.TokenManager
+	loginLimiter    *security.LoginLimiter
 	refreshTokenTTL time.Duration
 }
 
 func New(db *gorm.DB, tokens *security.TokenManager, refreshTokenTTL time.Duration) *API {
-	return &API{db: db, tokens: tokens, refreshTokenTTL: refreshTokenTTL}
+	return &API{db: db, tokens: tokens, loginLimiter: security.NewLoginLimiter(5, 20, 15*time.Minute), refreshTokenTTL: refreshTokenTTL}
 }
 
 func (a *API) RegisterRoutes(group *gin.RouterGroup) {
 	auth := group.Group("/auth")
 	auth.POST("/register", a.register)
+	auth.GET("/registration-status", a.registrationStatus)
 	auth.POST("/login", a.login)
 	auth.POST("/refresh", a.refresh)
 	auth.POST("/logout", a.logout)
@@ -37,6 +42,7 @@ func (a *API) RegisterRoutes(group *gin.RouterGroup) {
 	protected := group.Group("")
 	protected.Use(a.requireAuth())
 	protected.POST("/guilds", a.createGuild)
+	protected.GET("/guilds", a.listGuilds)
 	protected.GET("/guilds/:guildID/roles", a.listRoles)
 	protected.POST("/guilds/:guildID/roles", a.createRole)
 	protected.PATCH("/guilds/:guildID/roles/:roleID", a.updateRole)
@@ -75,8 +81,25 @@ func (a *API) register(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_PASSWORD", err.Error())
 		return
 	}
-	user := model.User{ID: uuid.New(), Username: input.Username, Email: input.Email, PasswordHash: hash}
-	if err := a.db.Create(&user).Error; err != nil {
+	user := model.User{ID: uuid.New(), Username: input.Username, Email: input.Email, PasswordHash: hash, SystemAdmin: true}
+	err = a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", "owl:first-user-registration").Error; err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&model.User{}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return errRegistrationClosed
+		}
+		return tx.Create(&user).Error
+	})
+	if err != nil {
+		if errors.Is(err, errRegistrationClosed) {
+			fail(c, http.StatusForbidden, "REGISTRATION_CLOSED", "系统初始化已完成，后台仅允许登录")
+			return
+		}
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			fail(c, http.StatusConflict, "ACCOUNT_EXISTS", "用户名或邮箱已被使用")
 			return
@@ -85,6 +108,15 @@ func (a *API) register(c *gin.Context) {
 		return
 	}
 	a.issueTokens(c, http.StatusCreated, user)
+}
+
+func (a *API) registrationStatus(c *gin.Context) {
+	var count int64
+	if err := a.db.Model(&model.User{}).Count(&count).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取初始化状态失败")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"registration_open": count == 0})
 }
 
 type loginRequest struct {
@@ -107,11 +139,22 @@ func (a *API) login(c *gin.Context) {
 		return
 	}
 	identifier := strings.ToLower(strings.TrimSpace(input.Identifier))
+	if allowed, retryAfter := a.loginLimiter.Allow(c.ClientIP(), identifier); !allowed {
+		seconds := int(retryAfter.Seconds())
+		if seconds < 1 {
+			seconds = 1
+		}
+		c.Header("Retry-After", strconv.Itoa(seconds))
+		fail(c, http.StatusTooManyRequests, "LOGIN_RATE_LIMITED", "登录尝试过多，请稍后再试")
+		return
+	}
 	var user model.User
 	if err := a.db.Where("LOWER(email) = ? OR LOWER(username) = ?", identifier, identifier).First(&user).Error; err != nil || !security.VerifyPassword(user.PasswordHash, input.Password) {
+		a.loginLimiter.Failure(c.ClientIP(), identifier)
 		fail(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "账号或密码错误")
 		return
 	}
+	a.loginLimiter.Success(identifier)
 	a.issueTokens(c, http.StatusOK, user)
 }
 

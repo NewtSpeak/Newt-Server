@@ -22,4 +22,8 @@ make build
 
 构建会先产出 React SPA，再将静态资源编译进 `bin/owl-server`。运行时只需一个二进制和 PostgreSQL 连接配置，不需要单独启动前端服务。
 
+生产运行时请设置 `APP_ENV=production`，Gin 才会提供编译进二进制的 SPA；开发环境则始终代理 Vite，避免 Air 使用旧的静态资源。
+
+首次空数据库启动时，`/signup` 只允许创建一个初始化账号，该账号自动成为系统管理员。初始化完成后注册接口关闭，后台仅保留登录。密码登录按账号和来源 IP 双维度限流。
+
 数据库仅支持 PostgreSQL，必须配置 `DATABASE_URL`；项目未引入 SQLite 驱动。

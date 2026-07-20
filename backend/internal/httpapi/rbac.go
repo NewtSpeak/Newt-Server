@@ -49,6 +49,27 @@ func (a *API) createGuild(c *gin.Context) {
 	c.JSON(http.StatusCreated, guild)
 }
 
+// listGuilds godoc
+// @Summary 列出当前用户加入的服务器
+// @Tags RBAC
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {array} model.Guild
+// @Router /guilds [get]
+func (a *API) listGuilds(c *gin.Context) {
+	user := currentUser(c)
+	var guilds []model.Guild
+	query := a.db.Order("guilds.created_at DESC")
+	if !user.SystemAdmin {
+		query = query.Joins("JOIN members ON members.guild_id = guilds.id").Where("members.user_id = ?", user.ID)
+	}
+	if err := query.Find(&guilds).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取服务器列表失败")
+		return
+	}
+	c.JSON(http.StatusOK, guilds)
+}
+
 func (a *API) listRoles(c *gin.Context) {
 	guild, ok := a.guildForUser(c)
 	if !ok {

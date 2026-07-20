@@ -94,6 +94,31 @@ const docTemplate = `{
             }
         },
         "/guilds": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "RBAC"
+                ],
+                "summary": "列出当前用户加入的服务器",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Guild"
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
