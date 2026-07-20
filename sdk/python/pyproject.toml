@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "owlspeak-bot"
+version = "0.1.0"
+description = "OwlSpeak 机器人开放平台官方 Python SDK"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["owlspeak", "bot", "sdk", "chat", "voice"]
+
+[project.optional-dependencies]
+# Gateway 实时事件需要 websockets（REST 部分仅用标准库）
+gateway = ["websockets>=12"]
+
+[tool.setuptools]
+packages = ["owlspeak_bot"]

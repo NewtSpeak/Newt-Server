@@ -27,3 +27,17 @@ make build
 首次空数据库启动时，`/signup` 只允许创建一个初始化账号，该账号自动成为系统管理员。初始化完成后注册接口关闭，后台仅保留登录。密码登录按账号和来源 IP 双维度限流。
 
 数据库仅支持 PostgreSQL，必须配置 `DATABASE_URL`；项目未引入 SQLite 驱动。
+
+## 可观测（OTLP → SigNoz）
+
+后端内置 OpenTelemetry：HTTP 请求追踪（otelgin）、`http.server.duration` 直方图（按路由维度）、GORM SQL 追踪与 slog 日志桥（OTLP 导出 + stdout 双写）。**未配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 时全部为 no-op**，本地开发零成本。
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | 空（不启用） | OTLP 接收端地址，如 `http://127.0.0.1:4317` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` 或 `http/protobuf` |
+| `OTEL_SERVICE_NAME` | `owl-server` | 上报的服务名 |
+| `OTLP_INSECURE` | `false` | `true` 时强制明文连接（本地 SigNoz 常用） |
+| `AUDIT_RETENTION_DAYS` | `0`（永久） | 审计日志保留天数，>0 时每小时清理过期记录 |
+
+SigNoz 部署方式与完整示例见 `../deploy/signoz/README.md`。Owl-SFU 目前暴露 Prometheus 指标，接入 OTLP 为后续事项。

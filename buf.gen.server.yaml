@@ -1,0 +1,14 @@
+# 生成到 Owl-Server backend：buf generate --template buf.gen.server.yaml
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/owlspeak/owl-server/backend/gen
+plugins:
+  - local: protoc-gen-go
+    out: backend/gen
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: backend/gen
+    opt: paths=source_relative

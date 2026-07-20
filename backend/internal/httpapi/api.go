@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/security"
@@ -24,6 +25,20 @@ type API struct {
 	tokens          *security.TokenManager
 	loginLimiter    *security.LoginLimiter
 	refreshTokenTTL time.Duration
+	// sfu SFU 配套子系统依赖（节点注册表 + Media Token 签发），经 AttachSFU 注入。
+	sfu *SFUOptions
+	// bus 事件总线（经 AttachEventBus 注入；为 nil 时静默不发布，纯单测场景兼容）。
+	bus *eventbus.Bus
+}
+
+// AttachEventBus 注入事件总线，使 RBAC/频道等变更端点能发布 Gateway 事件（docs 14 §3.2）。
+func (a *API) AttachEventBus(bus *eventbus.Bus) { a.bus = bus }
+
+// publish 发布事件（bus 未注入时为 no-op）。
+func (a *API) publish(event eventbus.Event) {
+	if a.bus != nil {
+		a.bus.Publish(event)
+	}
 }
 
 func New(db *gorm.DB, tokens *security.TokenManager, refreshTokenTTL time.Duration) *API {
@@ -43,15 +58,29 @@ func (a *API) RegisterRoutes(group *gin.RouterGroup) {
 	protected.Use(a.requireAuth())
 	protected.POST("/guilds", a.createGuild)
 	protected.GET("/guilds", a.listGuilds)
-	protected.GET("/guilds/:guildID/roles", a.listRoles)
-	protected.POST("/guilds/:guildID/roles", a.createRole)
-	protected.PATCH("/guilds/:guildID/roles/:roleID", a.updateRole)
-	protected.PUT("/guilds/:guildID/members/:memberID/roles/:roleID", a.assignRole)
-	protected.DELETE("/guilds/:guildID/members/:memberID/roles/:roleID", a.removeRole)
-	protected.POST("/guilds/:guildID/channels", a.createChannel)
-	protected.PUT("/guilds/:guildID/channels/:channelID/overwrites/:targetID", a.upsertOverwrite)
-	protected.GET("/guilds/:guildID/permissions/@me", a.myGuildPermissions)
-	protected.GET("/guilds/:guildID/channels/:channelID/permissions/@me", a.myChannelPermissions)
+	protected.GET("/guilds/:guildID/channels", a.listChannels)
+	protected.GET("/guilds/:guildID/members", a.listMembers)
+	// 角色/频道创建/权限覆盖/服务器生命周期等结构管理端点已抽出为共享包
+	// internal/guildapi，由 server.New 以模块形式挂载到双认证平面
+	//（后台 /api/v1 保持原路径不变，用户端 /gapi/v1 走标准 RBAC 无 SystemAdmin 短路）。
+
+	// SFU 节点管理（基于 sfucontrol gRPC 控制面，handler 见 sfu_admin.go）：
+	// 创建占位 + enrollment token、状态迁移、吊销；Owl-SFU 节点只讲 proto/owlsfu/v1 的
+	// gRPC 协议（Enroll + ControlService.Channel，默认外连 :9443），Media Token 验签
+	// 公钥经 Enroll/RegisterAck 下发。
+	admin := protected.Group("/admin/sfu", a.requireSystemAdmin())
+	admin.POST("/nodes", a.createSfuNode)
+	admin.GET("/nodes", a.listSfuNodes)
+	admin.PATCH("/nodes/:nodeID", a.updateSfuNode)
+	admin.DELETE("/nodes/:nodeID", a.deleteSfuNode)
+	admin.POST("/nodes/:nodeID/revoke", a.revokeSfuNode)
+
+	// 语音会话收敛说明（端到端统一专项）：早期本文件平行实现的
+	// POST /guilds/:gid/channels/:cid/voice/join|leave、/guilds/:gid/voice/refresh-token、
+	// /guilds/:gid/voice/disconnect、PATCH /guilds/:gid/voice/participants/:uid/caps
+	// 已整体移除（原 handler 文件 voice.go 已删除）。唯一进房主路径为 internal/voice 模块的
+	// POST /voice/join（含调度、级联、caps 全链路与 VOICE_* 事件），管理员踢人为
+	// POST /guilds/:guildID/voice/disconnect（voice.Register 挂载）。
 }
 
 type registerRequest struct {
@@ -149,9 +178,16 @@ func (a *API) login(c *gin.Context) {
 		return
 	}
 	var user model.User
-	if err := a.db.Where("LOWER(email) = ? OR LOWER(username) = ?", identifier, identifier).First(&user).Error; err != nil || !security.VerifyPassword(user.PasswordHash, input.Password) {
+	// 后台登录仅对系统管理员开放；非系统管与密码错误返回同一错误（且同样计入限流），
+	// 不暴露「账号存在但无后台权限」的信息。普通用户请走用户端登录。
+	if err := a.db.Where("LOWER(email) = ? OR LOWER(username) = ?", identifier, identifier).First(&user).Error; err != nil || !security.VerifyPassword(user.PasswordHash, input.Password) || !user.SystemAdmin {
 		a.loginLimiter.Failure(c.ClientIP(), identifier)
 		fail(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "账号或密码错误")
+		return
+	}
+	// 平台禁用拦截（platformadmin）：凭证正确但账号被禁用，明确告知。
+	if user.Disabled() {
+		fail(c, http.StatusForbidden, "ACCOUNT_DISABLED", "账号已被平台禁用")
 		return
 	}
 	a.loginLimiter.Success(identifier)
@@ -168,7 +204,8 @@ func (a *API) refresh(c *gin.Context) {
 		return
 	}
 	var stored model.RefreshToken
-	err := a.db.Where("token_hash = ? AND revoked_at IS NULL AND expires_at > ?", security.HashToken(input.Token), time.Now().UTC()).First(&stored).Error
+	// 仅接受后台受众（admin）的 refresh token，用户端 refresh token 不可换取后台凭证。
+	err := a.db.Where("token_hash = ? AND audience = ? AND revoked_at IS NULL AND expires_at > ?", security.HashToken(input.Token), security.AudienceAdmin, time.Now().UTC()).First(&stored).Error
 	if err != nil {
 		fail(c, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "刷新令牌无效或已过期")
 		return
@@ -179,11 +216,15 @@ func (a *API) refresh(c *gin.Context) {
 		return
 	}
 	var user model.User
-	if err := a.db.First(&user, "id = ?", stored.UserID).Error; err != nil {
+	// 轮换时复查系统管理员身份与禁用状态：被撤职/被平台禁用的账号
+	// 无法凭旧 refresh token 续期后台凭证。
+	if err := a.db.First(&user, "id = ?", stored.UserID).Error; err != nil || !user.SystemAdmin || user.Disabled() {
 		fail(c, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "刷新令牌无效")
 		return
 	}
-	a.issueTokens(c, http.StatusOK, user)
+	// 轮换后的新 token 继承会话链（session_id / 会话创建时间），
+	// 使会话列表与「改密码保留当前会话」能跨轮换识别同一次登录。
+	a.issueTokensForSession(c, http.StatusOK, user, stored.SessionID, stored.SessionCreatedAt)
 }
 
 func (a *API) logout(c *gin.Context) {
@@ -192,7 +233,8 @@ func (a *API) logout(c *gin.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	a.db.Model(&model.RefreshToken{}).Where("token_hash = ? AND revoked_at IS NULL", security.HashToken(input.Token)).Update("revoked_at", now)
+	// 只吊销后台受众的令牌，与 refresh 的受众过滤保持一致。
+	a.db.Model(&model.RefreshToken{}).Where("token_hash = ? AND audience = ? AND revoked_at IS NULL", security.HashToken(input.Token), security.AudienceAdmin).Update("revoked_at", now)
 	c.Status(http.StatusNoContent)
 }
 
@@ -206,8 +248,14 @@ type tokenResponse struct {
 	User             model.User `json:"user"`
 }
 
+// issueTokens 登录/注册路径：开启新的会话链。
 func (a *API) issueTokens(c *gin.Context, status int, user model.User) {
-	access, accessExpiry, err := a.tokens.AccessToken(user.ID)
+	a.issueTokensForSession(c, status, user, uuid.New(), time.Now().UTC())
+}
+
+// issueTokensForSession 按指定会话链签发 access/refresh token 对（refresh 轮换时继承旧链）。
+func (a *API) issueTokensForSession(c *gin.Context, status int, user model.User, sessionID uuid.UUID, sessionCreatedAt time.Time) {
+	access, accessExpiry, err := a.tokens.AccessTokenForSession(user.ID, security.AudienceAdmin, sessionID.String())
 	if err != nil {
 		fail(c, 500, "TOKEN_ERROR", "签发访问令牌失败")
 		return
@@ -218,7 +266,10 @@ func (a *API) issueTokens(c *gin.Context, status int, user model.User) {
 		return
 	}
 	refreshExpiry := time.Now().UTC().Add(a.refreshTokenTTL)
-	stored := model.RefreshToken{ID: uuid.New(), UserID: user.ID, TokenHash: refreshHash, ExpiresAt: refreshExpiry}
+	stored := model.RefreshToken{
+		ID: uuid.New(), UserID: user.ID, TokenHash: refreshHash, Audience: security.AudienceAdmin,
+		SessionID: sessionID, SessionCreatedAt: sessionCreatedAt, ExpiresAt: refreshExpiry,
+	}
 	if err := a.db.Create(&stored).Error; err != nil {
 		fail(c, 500, "DATABASE_ERROR", "保存刷新令牌失败")
 		return
@@ -234,6 +285,7 @@ func (a *API) requireAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		// ParseAccessToken 内部强制 aud=admin：用户端（aud=client）token 打后台 API 一律 401。
 		userID, err := a.tokens.ParseAccessToken(strings.TrimPrefix(header, "Bearer "))
 		if err != nil {
 			fail(c, 401, "UNAUTHORIZED", err.Error())
@@ -243,6 +295,11 @@ func (a *API) requireAuth() gin.HandlerFunc {
 		var user model.User
 		if err := a.db.First(&user, "id = ?", userID).Error; err != nil {
 			fail(c, 401, "UNAUTHORIZED", "用户不存在")
+			c.Abort()
+			return
+		}
+		if user.Disabled() {
+			fail(c, 401, "ACCOUNT_DISABLED", "账号已被平台禁用")
 			c.Abort()
 			return
 		}
@@ -272,5 +329,4 @@ func bind(c *gin.Context, target any) bool {
 	return true
 }
 
-func permissionMask(value int64) rbac.Permission { return rbac.Permission(uint64(value)) }
-func databaseMask(value rbac.Permission) int64   { return int64(uint64(value)) }
+func databaseMask(value rbac.Permission) int64 { return int64(uint64(value)) }

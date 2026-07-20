@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package owlsfu.v1;
+
+// 媒体能力（Media Token caps 与控制指令共用）。
+// SFU 唯一理解的"权限语言"，业务 RBAC/舞台/Restriction 均由 Server 投影为 caps。
+enum Cap {
+  CAP_UNSPECIFIED = 0;
+  CAP_JOIN = 1;
+  CAP_PUBLISH_AUDIO = 2;
+  CAP_SUBSCRIBE_AUDIO = 3;
+  // 预留（06 议题 11：屏幕共享生态位）
+  CAP_PUBLISH_SCREEN = 4;
+  CAP_PUBLISH_VIDEO = 5;
+  CAP_PRIORITY_SPEAKER = 6;
+}
+
+// 节点容量与负载（心跳上报，调度器输入）。
+message NodeCapacity {
+  uint32 max_users = 1;          // 配置上限（如 1000）
+  uint32 current_users = 2;      // 当前媒体会话数
+  uint32 room_count = 3;
+  double cpu_pct = 4;
+  double mem_pct = 5;
+  double bandwidth_out_mbps = 6; // 当前出口带宽
+  uint32 screen_tracks = 7;      // 屏幕轨数（14 BD.3）
+}
+
+// Media Token 验签公钥（Ed25519，支持 kid 轮换）。
+message MediaTokenKey {
+  string kid = 1;
+  bytes ed25519_public_key = 2; // 32 字节原始公钥
+}

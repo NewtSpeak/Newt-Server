@@ -6,12 +6,18 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/plugin/opentelemetry/tracing"
 )
 
 func Open(databaseURL string) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{TranslateError: true})
 	if err != nil {
 		return nil, fmt.Errorf("连接 PostgreSQL: %w", err)
+	}
+	// GORM OTel 追踪：SQL 语句挂到请求 span 下；未启用 OTLP 时全局 provider 为 no-op。
+	// 指标由 http 层与运行时统一收集，这里只开 tracing，避免与 SigNoz 默认面板重复。
+	if err := db.Use(tracing.NewPlugin(tracing.WithoutMetrics())); err != nil {
+		return nil, fmt.Errorf("启用 GORM OTel 插件: %w", err)
 	}
 	if err := db.AutoMigrate(model.Models()...); err != nil {
 		return nil, fmt.Errorf("执行 PostgreSQL 迁移: %w", err)

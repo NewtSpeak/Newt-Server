@@ -1,0 +1,112 @@
+package message
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+// 消息与附件的纯逻辑校验（docs 13 AP.3/AP.4、AT.3/AT.5、AV）。
+// 说明：AP.2 的「有限 Markdown」由客户端按白名单标签渲染并负责 XSS 防护，
+// 服务端只存储原始纯文本，不做 Markdown 解析或 HTML 清洗。
+
+const (
+	// maxContentRunes 正文最大长度（AP.3，按 Unicode 字符数而非字节）。
+	maxContentRunes = 4000
+	// maxAttachmentsPerMessage 每消息附件上限（AT.3）。
+	maxAttachmentsPerMessage = 10
+	// defaultUploadLimitBytes 平台默认单文件上限 25MB（AT.4）。
+	defaultUploadLimitBytes = int64(25 << 20)
+	// nonceWindow nonce 幂等判定窗口（AR.6）：窗口内同 channel+author+nonce 视为重复提交。
+	nonceWindow = 10 * time.Minute
+	// maxEmojiBytes / maxEmojiRunes 反应 emoji 的长度上限（组合 emoji 可能多码点）。
+	maxEmojiBytes = 64
+	maxEmojiRunes = 16
+)
+
+var (
+	errContentTooLong = errors.New("正文长度超过 4000 字符")
+	errContentEmpty   = errors.New("正文与附件不能同时为空")
+	errTooManyFiles   = errors.New("每条消息最多携带 10 个附件")
+	errBadEmoji       = errors.New("emoji 非法：需为合法 Unicode 字符串且长度受限")
+	errBadCard        = errors.New("card 非法：需为 JSON 对象且不超过 8KB")
+)
+
+// maxCardBytes 卡片消息载荷上限（bot 专项）：8KB 足以容纳嵌入/字段/按钮结构。
+const maxCardBytes = 8 << 10
+
+// validateContent 校验消息正文与附件数量组合（AP.3/AP.4/AT.3）。
+// hasCard=true 时允许正文与附件同时为空（纯卡片消息，bot 专项）。
+func validateContent(content string, attachmentCount int, hasCard bool) error {
+	if utf8.RuneCountInString(content) > maxContentRunes {
+		return errContentTooLong
+	}
+	if strings.TrimSpace(content) == "" && attachmentCount == 0 && !hasCard {
+		return errContentEmpty
+	}
+	if attachmentCount > maxAttachmentsPerMessage {
+		return errTooManyFiles
+	}
+	return nil
+}
+
+// validateCard 校验卡片载荷（bot 专项）：必须是 JSON 对象（客户端按 schema 渲染），
+// 大小受限。返回归一化（原样）字符串。
+func validateCard(raw []byte) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	if len(raw) > maxCardBytes {
+		return "", errBadCard
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(trimmed, "{") || !json.Valid(raw) {
+		return "", errBadCard
+	}
+	return trimmed, nil
+}
+
+// nonceDuplicate nonce 幂等判定：已有消息落在窗口内视为重复（AR.6）。
+func nonceDuplicate(existingCreatedAt, now time.Time) bool {
+	return now.Sub(existingCreatedAt) < nonceWindow
+}
+
+// previewKind 附件预览白名单（AT.5 / 5B.3）：仅图片、音频、视频、PDF 标注 preview；
+// 其余 MIME 照存但只提供下载。返回空串表示不可预览。
+func previewKind(mime string) string {
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	// 去掉 "; charset=..." 等参数部分。
+	if idx := strings.IndexByte(mime, ';'); idx >= 0 {
+		mime = strings.TrimSpace(mime[:idx])
+	}
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mime, "video/"):
+		return "video"
+	case mime == "application/pdf":
+		return "pdf"
+	default:
+		return ""
+	}
+}
+
+// validateEmoji 反应 emoji 校验（AV）：合法 UTF-8、非空、长度受限、不含空白与控制字符。
+func validateEmoji(emoji string) error {
+	if emoji == "" || len(emoji) > maxEmojiBytes || !utf8.ValidString(emoji) {
+		return errBadEmoji
+	}
+	if utf8.RuneCountInString(emoji) > maxEmojiRunes {
+		return errBadEmoji
+	}
+	for _, r := range emoji {
+		if r < 0x20 || r == 0x7f || r == ' ' {
+			return errBadEmoji
+		}
+	}
+	return nil
+}

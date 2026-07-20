@@ -49,9 +49,22 @@ const (
 	CreateEvents
 	UseExternalSounds
 	SendVoiceMessages
+	// 以下为定稿文档新增的权限节点：
+	// docs 11 §7.2 舞台协管节点，docs 14 §7.4 屏幕共享节点。
+	// 02 文档「46+ 保留位」被编号更大的 11/14 定稿覆盖（README 冲突规则）。
+	StageBringUp     // 46 舞台：抱上麦
+	StageBringDown   // 47 舞台：抱下麦
+	StageManageQueue // 48 舞台：管理申请队列
+	StageChangeMode  // 49 舞台：切换 FREE/STAGE 模式
+	StreamEndOthers  // 50 屏幕共享：强制结束他人共享
+	StreamQuality    // 51 屏幕共享：可选更高清晰度档
+	// 以下为「AI 时代」扩展功能新增的权限节点：
+	ManageBots       // 52 机器人：创建/配置/授权本服机器人集成
+	ManageBadges     // 53 徽章：分配/回收徽章
+	ManageCustomization // 54 自定义：编辑角色名样式（颜色/渐变）等展示定制
 )
 
-const AllDefined Permission = (1 << 46) - 1
+const AllDefined Permission = (1 << 55) - 1
 
 const DefaultEveryone = ViewChannel | SendMessages | ReadMessageHistory | Connect | Speak | ChangeNickname | AddReactions | UseVAD
 

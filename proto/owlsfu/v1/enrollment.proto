@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package owlsfu.v1;
+
+import "owlsfu/v1/common.proto";
+
+// 节点接入（03：一次性 token → CSR → 证书签发）。
+// Enroll 走普通 TLS（节点尚无证书）；RenewCertificate 走已建立的 mTLS。
+service EnrollmentService {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+}
+
+message EnrollRequest {
+  string node_id = 1;          // Server 预创建占位的 node_id
+  string enrollment_token = 2; // 一次性、短 TTL、绑定 node_id
+  string csr_pem = 3;          // 节点本地生成私钥后的 CSR；Server 强制以 node_id 重写身份
+  string node_version = 4;
+}
+
+message EnrollResponse {
+  string certificate_pem = 1;             // 节点证书（CN/SAN = node_id）
+  string ca_bundle_pem = 2;               // 集群 CA，用于校验 Server 与级联对端
+  string control_endpoint = 3;            // 控制通道 gRPC 地址
+  repeated MediaTokenKey media_token_keys = 4;
+  string cert_not_after = 5;              // RFC3339
+}
+
+message RenewCertificateRequest {
+  string csr_pem = 1;
+}
+
+message RenewCertificateResponse {
+  string certificate_pem = 1;
+  string ca_bundle_pem = 2;
+  string cert_not_after = 3;
+}

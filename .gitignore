@@ -1,0 +1,14 @@
+.DS_Store
+
+# 本地运行时数据（含 Media Token 私钥、SFU CA、附件、审计录音等，严禁入库）
+backend/data/
+data/
+
+# 构建产物与临时文件
+tmp/
+backend/tmp/
+*.log
+
+# 环境变量（示例文件 .env.example 保留）
+.env
+backend/.env

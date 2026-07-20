@@ -1,0 +1,87 @@
+import { useEffect, useRef, useState } from "react"
+import { Outlet, useLocation, useNavigate } from "react-router"
+
+import { AppSidebar } from "~/components/app-sidebar"
+import { SiteHeader } from "~/components/site-header"
+import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar"
+import { api, getSession, logout, type Guild, type User } from "~/lib/api"
+import type { ConsoleContext } from "~/lib/console-context"
+import { gsap, MOTION, MOTION_OK, useGSAP } from "~/lib/gsap"
+import { pageTitle } from "~/lib/nav"
+
+export default function ConsoleLayout() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [user, setUser] = useState<User | null>(() => getSession()?.user ?? null)
+  const [guilds, setGuilds] = useState<Guild[]>([])
+  const [error, setError] = useState("")
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!getSession()) {
+      navigate("/login", { replace: true })
+      return
+    }
+    Promise.all([api<User>("/auth/me"), api<Guild[]>("/guilds")])
+      .then(([currentUser, currentGuilds]) => {
+        setUser(currentUser)
+        setGuilds(currentGuilds ?? [])
+      })
+      .catch(reason => {
+        if (!getSession()) navigate("/login", { replace: true })
+        else setError(reason instanceof Error ? reason.message : "后台加载失败")
+      })
+  }, [navigate])
+
+  // 侧边栏切换页面时的内容区过渡（GSAP + 尊重 prefers-reduced-motion）
+  useGSAP(
+    () => {
+      const media = gsap.matchMedia()
+      media.add(MOTION_OK, () => {
+        gsap.fromTo(
+          contentRef.current,
+          { autoAlpha: 0, y: 10 },
+          { autoAlpha: 1, y: 0, duration: MOTION.enter, ease: MOTION.ease, clearProps: "all" }
+        )
+      })
+    },
+    { dependencies: [location.pathname], scope: contentRef }
+  )
+
+  if (!user)
+    return <div className="grid min-h-dvh place-items-center text-sm text-muted-foreground">正在加载后台…</div>
+
+  async function signOut() {
+    await logout()
+    navigate("/login", { replace: true })
+  }
+
+  const context: ConsoleContext = {
+    user,
+    guilds,
+    addGuild: guild => setGuilds(current => [guild, ...current]),
+    refreshGuilds: async () => {
+      const next = await api<Guild[]>("/guilds").catch(() => null)
+      if (next) setGuilds(next)
+    },
+  }
+
+  return (
+    <SidebarProvider
+      style={{ "--sidebar-width": "calc(var(--spacing) * 72)", "--header-height": "calc(var(--spacing) * 12)" } as React.CSSProperties}
+    >
+      <AppSidebar user={user} onLogout={signOut} variant="inset" />
+      <SidebarInset>
+        <SiteHeader title={pageTitle(location.pathname)} />
+        {error && (
+          <p role="alert" className="m-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive lg:m-6">
+            {error}
+          </p>
+        )}
+        <div ref={contentRef} className="flex flex-1 flex-col">
+          <Outlet context={context} />
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
+  )
+}

@@ -1,3 +1,5 @@
+# 可观测：SigNoz 体量较大，不放进主 compose。
+# 部署方式与 OTEL_* 环境变量示例见 deploy/signoz/README.md。
 services:
   postgres:
     image: postgres:18-alpine
