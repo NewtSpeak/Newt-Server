@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 	"github.com/owlspeak/owl-server/backend/internal/presence"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
 )
@@ -196,7 +197,7 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 	}
 	ready := readyData{
 		SessionID:  sess.id,
-		User:       user,
+		User:       platformbadge.ViewOf(user),
 		GuildIDs:   guildIDs,
 		Guilds:     guilds,
 		Presences:  unionPresences,

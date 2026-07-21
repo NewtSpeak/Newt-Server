@@ -31,6 +31,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
@@ -405,14 +406,16 @@ function GuildInstallSection({
               }
             />
             <DropdownMenuContent align="start">
-              <DropdownMenuLabel>选择机器人</DropdownMenuLabel>
-              {installable.map(bot => (
-                <DropdownMenuItem key={bot.id} onClick={() => onInstall(bot)}>
-                  <BotIcon />
-                  {bot.name}
-                  <span className="ml-auto font-mono text-xs text-muted-foreground">@{bot.username}</span>
-                </DropdownMenuItem>
-              ))}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>选择机器人</DropdownMenuLabel>
+                {installable.map(bot => (
+                  <DropdownMenuItem key={bot.id} onClick={() => onInstall(bot)}>
+                    <BotIcon />
+                    {bot.name}
+                    <span className="ml-auto font-mono text-xs text-muted-foreground">@{bot.username}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -473,14 +476,16 @@ function GuildInstallSection({
                       }
                     />
                     <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>选择角色</DropdownMenuLabel>
-                      {assignable.map(role => (
-                        <DropdownMenuItem key={role.id} onClick={() => bindRole(bot, role.id)}>
-                          <ShieldCheckIcon />
-                          {role.name}
-                          <span className="ml-auto font-mono text-xs text-muted-foreground">P{role.position}</span>
-                        </DropdownMenuItem>
-                      ))}
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel>选择角色</DropdownMenuLabel>
+                        {assignable.map(role => (
+                          <DropdownMenuItem key={role.id} onClick={() => bindRole(bot, role.id)}>
+                            <ShieldCheckIcon />
+                            {role.name}
+                            <span className="ml-auto font-mono text-xs text-muted-foreground">P{role.position}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>

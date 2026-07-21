@@ -91,20 +91,41 @@ function PlatformAuditCard() {
     }
   }
 
+  const ingestEnabled = platform.data?.ingest_enabled !== false
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">平台级音频审计默认</CardTitle>
-        <CardDescription>所有语音频道的默认策略；单个频道可在下方独立覆盖。</CardDescription>
+        <CardDescription>所有语音频道的默认策略；单个频道可在下方独立覆盖。已在房用户会立即收到 token 刷新与提示。</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {platform.status === "loading" && <LoadingState rows={2} />}
         {platform.status === "error" && <ErrorState message={platform.error} onRetry={() => platform.reload()} />}
         {platform.status === "success" && (
           <>
+            {platform.data && platform.data.ingest_enabled === false && (
+              <div
+                role="status"
+                className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200"
+              >
+                <p className="font-medium">审计上传管线未就绪</p>
+                <p className="mt-1 text-xs opacity-90">
+                  主节点未配置 <code className="rounded bg-muted px-1">AUDIT_INGEST_TOKEN</code>
+                  ，SFU 即使录制也无法上传。请在 Owl-Server 设置该环境变量，并在 SFU 配置相同的{" "}
+                  <code className="rounded bg-muted px-1">audit_ingest_token</code> 与{" "}
+                  <code className="rounded bg-muted px-1">audit_ingest_url</code>
+                  （如 <code className="rounded bg-muted px-1">https://你的域名/audit-api/records</code>）。
+                </p>
+              </div>
+            )}
             <ToggleRow
               title="默认录制音频到主节点（审计）"
-              description="开启后新语音会话的上行音频将录制上传主节点服务器。"
+              description={
+                ingestEnabled
+                  ? "开启后语音会话的上行音频将录制并上传主节点；中途开关会对在房用户立即生效。"
+                  : "开启后 SFU 会本地录制，但因上传密钥未配置，录音不会出现在下方列表。"
+              }
               checked={record}
               onChange={setRecord}
               icon={RadioIcon}
@@ -315,25 +336,46 @@ function AuditRecordsCard({ guilds }: { guilds: ConsoleContext["guilds"] }) {
   )
   const guildName = new Map(guilds.map(g => [g.id, g.name]))
 
+  // 录音仅在说话者结束上行轨 / 离房后由 SFU 上传；定时轻量刷新便于管理员看到新段。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      records.reload(true)
+    }, 15_000)
+    return () => window.clearInterval(timer)
+    // guildID 变化时 useAsyncData 会重拉；此处仅保持轮询句柄与当前 records 绑定
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guildID])
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">审计录音</CardTitle>
-        <CardDescription>被审计频道的上行音频录制，按说话者分段存于主节点，可下载留存。</CardDescription>
+        <CardDescription>
+          被审计频道的上行音频录制，按说话者一段会话存于主节点（离房或停麦后上传），可下载留存。
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        <SimpleSelect
-          ariaLabel="按服务器筛选"
-          placeholder="全部服务器"
-          value={guildID || null}
-          onChange={v => setGuildID(v ?? "")}
-          options={[{ value: "", label: "全部服务器" }, ...guilds.map(g => ({ value: g.id, label: g.name }))]}
-          className="w-56"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <SimpleSelect
+            ariaLabel="按服务器筛选"
+            placeholder="全部服务器"
+            value={guildID || null}
+            onChange={v => setGuildID(v ?? "")}
+            options={[{ value: "", label: "全部服务器" }, ...guilds.map(g => ({ value: g.id, label: g.name }))]}
+            className="w-56"
+          />
+          <Button variant="outline" size="sm" onClick={() => records.reload(true)}>
+            刷新
+          </Button>
+        </div>
         {records.status === "loading" && <LoadingState rows={3} />}
         {records.status === "error" && <ErrorState message={records.error} onRetry={() => records.reload()} />}
         {records.status === "success" && (records.data?.length ?? 0) === 0 && (
-          <EmptyState icon={RadioIcon} title="暂无审计录音" description="开启频道审计后，语音发言会在此生成录音。" />
+          <EmptyState
+            icon={RadioIcon}
+            title="暂无审计录音"
+            description="开启频道审计并确保 SFU 配置了上传地址后，用户结束发言/离房时会在此生成录音。"
+          />
         )}
         {records.status === "success" &&
           (records.data ?? []).map(rec => (
@@ -341,7 +383,8 @@ function AuditRecordsCard({ guilds }: { guilds: ConsoleContext["guilds"] }) {
               <RadioIcon className="size-4 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <p className="truncate">
-                  {guildName.get(rec.guild_id) ?? rec.guild_id} · 用户 <span className="font-mono text-xs">{rec.user_id.slice(0, 8)}</span>
+                  {guildName.get(rec.guild_id) ?? rec.guild_id} ·{" "}
+                  <span title={rec.user_id}>{auditSpeakerLabel(rec)}</span>
                 </p>
                 <p className="text-xs text-muted-foreground tabular-nums">
                   {formatTime(rec.started_at)} → {formatTime(rec.ended_at)} · {formatBytes(rec.size)}
@@ -364,6 +407,15 @@ function AuditRecordsCard({ guilds }: { guilds: ConsoleContext["guilds"] }) {
       </CardContent>
     </Card>
   )
+}
+
+/** 审计录音说话者展示：优先用户名 → 显示名 → UUID 短前缀兜底 */
+function auditSpeakerLabel(rec: AuditRecord): string {
+  const username = rec.username?.trim()
+  if (username) return username
+  const display = rec.display_name?.trim()
+  if (display) return display
+  return `用户 ${rec.user_id.slice(0, 8)}`
 }
 
 // ---------------------------------------------------------------------------

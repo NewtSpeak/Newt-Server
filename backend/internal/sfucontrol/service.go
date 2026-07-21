@@ -39,6 +39,10 @@ type Config struct {
 	HeartbeatIntervalMS int
 	// EarlyDeath BI.3 提前判死组合规则（docs 15 §5；零值字段取定稿默认）。
 	EarlyDeath EarlyDeathConfig
+	// AuditIngestURL / AuditIngestToken 经 RegisterAck 下发给 SFU（adminpresence 音频审计）。
+	// 为空则不下发，SFU 保持本地配置或仅落盘。
+	AuditIngestURL   string
+	AuditIngestToken string
 }
 
 // Service EnrollmentService + ControlService 的实现。
@@ -60,6 +64,10 @@ type Service struct {
 	// onEdgeDown 级联 EdgeDown 回调（经 SetEdgeDownHandler 注入）：由装配层
 	// 发布 eventbus.InternalEdgeDown，voice 编排据此补边或标记房间降级（docs 08 §7.2）。
 	onEdgeDown func(es *owlsfuv1.EdgeStatus)
+	// onVoiceConnectedChange SFU 上报 PARTICIPANT_JOINED/LEFT 后、已更新 VoiceState.connected
+	// 时调用（经 SetVoiceConnectedChangeHandler 注入）：由装配层广播 VOICE_STATE_UPDATE，
+	// 使刷新/ICE 断线后的 connected 变化能实时反映到其他客户端名单。
+	onVoiceConnectedChange func(vs model.VoiceState)
 }
 
 // SetNodeDownHandler 注入节点判死回调（心跳监控在硬判死窗口触发时调用）。
@@ -75,6 +83,12 @@ func (s *Service) SetScreenTrackActiveHandler(handler func(channelID, userID uui
 // 边断作为提前信号源之一，voice 编排据此补边或标记降级）。
 func (s *Service) SetEdgeDownHandler(handler func(es *owlsfuv1.EdgeStatus)) {
 	s.onEdgeDown = handler
+}
+
+// SetVoiceConnectedChangeHandler 注入 VoiceState.connected 翻转回调
+//（PARTICIPANT_JOINED → true / PARTICIPANT_LEFT|ICE_FAILED → false）。
+func (s *Service) SetVoiceConnectedChangeHandler(handler func(vs model.VoiceState)) {
+	s.onVoiceConnectedChange = handler
 }
 
 func NewService(db *gorm.DB, authority *ca.CA, tokens *mediatoken.Manager, registry *Registry, cfg Config) *Service {
@@ -305,6 +319,9 @@ func (s *Service) handleRegister(nodeID uuid.UUID, connection *conn, register *o
 		NodeId:              nodeID.String(),
 		HeartbeatIntervalMs: uint32(s.cfg.HeartbeatIntervalMS),
 		MediaTokenKeys:      s.mediaTokenKeys(),
+		// 音频审计上传配置：SFU 本地未配时采用此处（adminpresence）。
+		AuditIngestUrl:   s.cfg.AuditIngestURL,
+		AuditIngestToken: s.cfg.AuditIngestToken,
 	}}})
 }
 
@@ -317,11 +334,14 @@ func (s *Service) handleRoomEvent(logger *slog.Logger, nodeID uuid.UUID, event *
 	switch event.GetType() {
 	case owlsfuv1.RoomEvent_EVENT_TYPE_PARTICIPANT_JOINED:
 		s.db.Model(&model.VoiceState{}).Where("voice_session_id = ?", sessionID).Update("connected", true)
+		s.notifyVoiceConnectedChange(sessionID)
 	case owlsfuv1.RoomEvent_EVENT_TYPE_PARTICIPANT_LEFT,
 		owlsfuv1.RoomEvent_EVENT_TYPE_PARTICIPANT_ICE_FAILED:
-		// 按 session_id 只标记 connected=false（幂等）；VoiceState 行的删除
-		// 由 /voice/leave、管理员踢人或下一次 join 的切频道逻辑负责。
+		// 按 session_id 只标记 connected=false（幂等）；VoiceState 行的 channel_id 保留，
+		// 便于客户端刷新后仍显示在房内并自动 rejoin（docs 09 FR-06）；
+		// 完整离房由 /voice/leave、管理员踢人或切频道 join 负责。
 		s.db.Model(&model.VoiceState{}).Where("voice_session_id = ?", sessionID).Update("connected", false)
+		s.notifyVoiceConnectedChange(sessionID)
 		// BI.3 提前信号（弱）：节点自报其客户端会话 ICE 失败——媒体面可能异常
 		// 但信号来自节点自己，整类只计一个独立源（origin 恒定 "self_ice"），
 		// 真正独立的客户端侧上报走 voice 的 /voice/ice-failed（origin 按用户去重）。
@@ -343,6 +363,18 @@ func (s *Service) handleRoomEvent(logger *slog.Logger, nodeID uuid.UUID, event *
 	default:
 		logger.Debug("忽略 RoomEvent", "type", event.GetType(), "room_id", event.GetRoomId())
 	}
+}
+
+// notifyVoiceConnectedChange 读取最新 VoiceState 并回调（用于广播 VOICE_STATE_UPDATE）。
+func (s *Service) notifyVoiceConnectedChange(sessionID uuid.UUID) {
+	if s.onVoiceConnectedChange == nil {
+		return
+	}
+	var vs model.VoiceState
+	if err := s.db.First(&vs, "voice_session_id = ?", sessionID).Error; err != nil {
+		return
+	}
+	s.onVoiceConnectedChange(vs)
 }
 
 // handleEdgeStatus 记录级联边状态（Registry 内存跟踪 + 唤醒 WaitEdgeUp 等待者），

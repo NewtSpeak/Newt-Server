@@ -28,10 +28,8 @@ func (h *api) publishGuildJoined(user model.User, member model.Member, isJoin bo
 	if h.deps.Bus == nil {
 		return
 	}
-	// 用户端语义：快照按普通用户身份组装（系统管理员不享受后台短路）。
-	asMember := user
-	asMember.SystemAdmin = false
-	if payload, err := snapshot.NewGuildCreatePayload(h.deps.DB, asMember, member.GuildID); err == nil {
+	// 系统所有者保留 SystemAdmin，快照可见全部频道；普通用户按成员权限过滤。
+	if payload, err := snapshot.NewGuildCreatePayload(h.deps.DB, user, member.GuildID); err == nil {
 		h.deps.Bus.Publish(eventbus.Event{
 			Type: eventbus.EventGuildCreate, GuildID: &member.GuildID,
 			UserIDs: []uuid.UUID{user.ID}, Payload: payload,
@@ -46,9 +44,8 @@ func (h *api) publishGuildJoined(user model.User, member model.Member, isJoin bo
 }
 
 // guildCtx 加载当前用户在指定服务器的权限上下文（用户端语义）。
-// 关键差异：用户端一律按「普通用户身份」计算——即使账号是系统管理员，也不享受
-// 后台的全服可见/全权限短路（产品定义：系统管理员在用户端登录即普通用户）。
-// 非成员返回 404（perms.ErrNotFound 的防扫频语义：不可见即不存在）。
+// 系统所有者（system_admin）享受全权限短路（docs 04 FR-32），可管理未加入的服务器；
+// 普通用户非成员返回 404（perms.ErrNotFound 的防扫频语义：不可见即不存在）。
 func (h *api) guildCtx(c *gin.Context) (*perms.GuildContext, model.User, bool) {
 	user := currentUser(c)
 	guildID, err := uuid.Parse(c.Param("guildID"))
@@ -56,9 +53,7 @@ func (h *api) guildCtx(c *gin.Context) (*perms.GuildContext, model.User, bool) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "服务器不存在")
 		return nil, user, false
 	}
-	asMember := user
-	asMember.SystemAdmin = false // 用户端不识别系统管理员身份
-	ctx, err := perms.LoadGuild(h.deps.DB, asMember, guildID)
+	ctx, err := perms.LoadGuild(h.deps.DB, user, guildID)
 	if err != nil {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "服务器不存在")
 		return nil, user, false
@@ -67,15 +62,20 @@ func (h *api) guildCtx(c *gin.Context) (*perms.GuildContext, model.User, bool) {
 }
 
 // myGuilds GET /gapi/v1/users/@me/guilds：我加入的服务器列表。
-// 只按成员关系过滤，系统管理员也看不到未加入的服务器（用户端普通用户语义）。
+// 系统所有者返回平台全部服务器（docs 04 FR-32 管理视图）；普通用户仅成员关系。
 // 每条附带 banners（多 banner 列表，服务器外观专项）；banner 图片 URL 为
 // /public-assets 公开路径（平面中立前缀，与用户头像同约定），不涉及后台前缀。
 func (h *api) myGuilds(c *gin.Context) {
 	user := currentUser(c)
 	var guilds []model.Guild
-	err := h.deps.DB.Joins("JOIN members ON members.guild_id = guilds.id").
-		Where("members.user_id = ?", user.ID).
-		Order("guilds.created_at DESC").Find(&guilds).Error
+	var err error
+	if user.SystemAdmin {
+		err = h.deps.DB.Order("created_at DESC").Find(&guilds).Error
+	} else {
+		err = h.deps.DB.Joins("JOIN members ON members.guild_id = guilds.id").
+			Where("members.user_id = ?", user.ID).
+			Order("guilds.created_at DESC").Find(&guilds).Error
+	}
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取服务器列表失败")
 		return
@@ -132,17 +132,24 @@ func (h *api) listChannels(c *gin.Context) {
 }
 
 type memberSummary struct {
-	ID       uuid.UUID   `json:"id"`
-	UserID   uuid.UUID   `json:"user_id"`
-	Username string      `json:"username"`
-	Nickname string      `json:"nickname"`
-	IsOwner  bool        `json:"is_owner"`
-	RoleIDs  []uuid.UUID `json:"role_ids"`
+	ID             uuid.UUID   `json:"id"`
+	UserID         uuid.UUID   `json:"user_id"`
+	Username       string      `json:"username"`
+	// DisplayName 系统显示名（全局，非服内昵称）；展示优先级：nickname > display_name > username。
+	DisplayName    string      `json:"display_name"`
+	Nickname       string      `json:"nickname"`
+	AvatarURL      string      `json:"avatar_url"`
+	AvatarAnimated bool        `json:"avatar_animated"`
+	BannerURL      string      `json:"banner_url"`
+	Bio            string      `json:"bio"`
+	IsOwner        bool        `json:"is_owner"`
+	RoleIDs        []uuid.UUID `json:"role_ids"`
 }
 
 // listMembers GET /gapi/v1/guilds/{gid}/members：服务器成员列表（需本人是成员）。
 // 支持游标分页（Owl-Desktop docs 02 FR-24/FR-25 大服懒加载）：
 // ?limit=1..1000（缺省=全量，兼容旧客户端）、?after=<member_id>（按 created_at,id 游标）。
+// 附带用户全局资料（显示名/头像/横幅/签名），供成员列表与消息区渲染。
 func (h *api) listMembers(c *gin.Context) {
 	ctx, _, ok := h.guildCtx(c)
 	if !ok {
@@ -151,7 +158,12 @@ func (h *api) listMembers(c *gin.Context) {
 	guild := ctx.Guild
 	type row struct {
 		model.Member
-		Username string
+		Username       string
+		DisplayName    string
+		AvatarURL      string
+		AvatarAnimated bool
+		BannerURL      string
+		Bio            string
 	}
 	limit := 0
 	if raw := c.Query("limit"); raw != "" {
@@ -165,7 +177,9 @@ func (h *api) listMembers(c *gin.Context) {
 		}
 		limit = parsed
 	}
-	query := `SELECT members.*, users.username FROM members JOIN users ON users.id = members.user_id WHERE members.guild_id = ?`
+	query := `SELECT members.*, users.username, users.display_name, users.avatar_url,
+			users.avatar_animated, users.banner_url, users.bio
+		FROM members JOIN users ON users.id = members.user_id WHERE members.guild_id = ?`
 	args := []any{guild.ID}
 	if raw := c.Query("after"); raw != "" {
 		afterID, err := uuid.Parse(raw)
@@ -212,12 +226,17 @@ func (h *api) listMembers(c *gin.Context) {
 			roleIDs = []uuid.UUID{}
 		}
 		result = append(result, memberSummary{
-			ID:       r.Member.ID,
-			UserID:   r.Member.UserID,
-			Username: r.Username,
-			Nickname: r.Member.Nickname,
-			IsOwner:  r.Member.UserID == guild.OwnerUserID,
-			RoleIDs:  roleIDs,
+			ID:             r.Member.ID,
+			UserID:         r.Member.UserID,
+			Username:       r.Username,
+			DisplayName:    r.DisplayName,
+			Nickname:       r.Member.Nickname,
+			AvatarURL:      r.AvatarURL,
+			AvatarAnimated: r.AvatarAnimated,
+			BannerURL:      r.BannerURL,
+			Bio:            r.Bio,
+			IsOwner:        r.Member.UserID == guild.OwnerUserID,
+			RoleIDs:        roleIDs,
 		})
 	}
 	c.JSON(http.StatusOK, result)

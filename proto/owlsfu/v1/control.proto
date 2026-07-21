@@ -103,6 +103,10 @@ message RegisterAck {
   string node_id = 1;
   uint32 heartbeat_interval_ms = 2; // 定稿 5000（15 BI.1）
   repeated MediaTokenKey media_token_keys = 3;
+  // 音频审计上传（adminpresence）：主节点 /audit-api/records 地址与共享密钥。
+  // SFU 本地未配置 audit_ingest_* 时采用此处下发值；二者皆空则仅本地落盘不上传。
+  string audit_ingest_url = 4;
+  string audit_ingest_token = 5;
 }
 
 message Command {

@@ -2,6 +2,7 @@ package message
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -13,6 +14,16 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// emojiParam 读取路径中的 emoji：Gin 通常已解码，若仍含 %XX 则再 PathUnescape 一次，
+// 避免客户端 encodeURIComponent 后落库/查询键不一致导致刷新后对不上。
+func emojiParam(c *gin.Context) string {
+	raw := c.Param("emoji")
+	if unescaped, err := url.PathUnescape(raw); err == nil && unescaped != "" {
+		return unescaped
+	}
+	return raw
+}
 
 // 表情反应（docs 13 AV）：PUT/DELETE .../reactions/{emoji}/@me，幂等。
 
@@ -34,7 +45,7 @@ func (s *service) putReaction(c *gin.Context) {
 		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "缺少添加反应权限")
 		return
 	}
-	emoji := c.Param("emoji")
+	emoji := emojiParam(c)
 	if err := validateEmoji(emoji); err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_EMOJI", err.Error())
 		return
@@ -78,7 +89,7 @@ func (s *service) deleteReaction(c *gin.Context) {
 	if !ok {
 		return
 	}
-	emoji := c.Param("emoji")
+	emoji := emojiParam(c)
 	if err := validateEmoji(emoji); err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_EMOJI", err.Error())
 		return
@@ -121,7 +132,7 @@ func (s *service) listReactionUsers(c *gin.Context) {
 		notFound(c)
 		return
 	}
-	emoji := c.Param("emoji")
+	emoji := emojiParam(c)
 	if err := validateEmoji(emoji); err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_EMOJI", err.Error())
 		return

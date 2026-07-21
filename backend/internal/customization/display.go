@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 )
 
 // badgeView 成员展示聚合里的徽章条目。
@@ -29,7 +30,9 @@ type memberDisplay struct {
 	ID              uuid.UUID       `json:"id"`
 	UserID          uuid.UUID       `json:"user_id"`
 	Username        string          `json:"username"`
+	DisplayName     string          `json:"display_name"`
 	Nickname        string          `json:"nickname"`
+	Bio             string          `json:"bio"`
 	IsOwner         bool            `json:"is_owner"`
 	IsBot           bool            `json:"is_bot"`
 	AvatarURL       string          `json:"avatar_url"`
@@ -54,15 +57,18 @@ func (h *api) listMembersDisplay(c *gin.Context) {
 	type memberRow struct {
 		model.Member
 		Username       string
+		DisplayName    string
+		Bio            string
 		IsBot          bool
+		SystemAdmin    bool
 		AvatarURL      string
 		AvatarAnimated bool
 		BannerURL      string
 		AccentColor    string
 	}
 	var rows []memberRow
-	err := h.deps.DB.Raw(`SELECT members.*, users.username, users.is_bot,
-			users.avatar_url, users.avatar_animated, users.banner_url, users.accent_color
+	err := h.deps.DB.Raw(`SELECT members.*, users.username, users.display_name, users.bio, users.is_bot,
+			users.system_admin, users.avatar_url, users.avatar_animated, users.banner_url, users.accent_color
 		FROM members JOIN users ON users.id = members.user_id
 		WHERE members.guild_id = ? ORDER BY members.created_at ASC`, guild.ID).Scan(&rows).Error
 	if err != nil {
@@ -158,11 +164,21 @@ func (h *api) listMembersDisplay(c *gin.Context) {
 		if badges == nil {
 			badges = []badgeView{}
 		}
+		// 系统所有者自动前置平台徽章（不落库，docs 04 FR-32）。
+		if r.SystemAdmin {
+			so := platformbadge.SystemOwner()
+			badges = append([]badgeView{{
+				BadgeID: so.BadgeID, Name: so.Name, Description: so.Description,
+				Emoji: so.Emoji, Color: so.Color, GrantedAt: so.GrantedAt,
+			}}, badges...)
+		}
 		result = append(result, memberDisplay{
 			ID:              r.Member.ID,
 			UserID:          r.Member.UserID,
 			Username:        r.Username,
+			DisplayName:     r.DisplayName,
 			Nickname:        r.Member.Nickname,
+			Bio:             r.Bio,
 			IsOwner:         r.Member.UserID == guild.OwnerUserID,
 			IsBot:           r.IsBot,
 			AvatarURL:       r.AvatarURL,

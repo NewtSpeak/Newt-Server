@@ -37,7 +37,13 @@ func (a *dbAuthenticator) Authenticate(token string) (model.User, []uuid.UUID, e
 		return model.User{}, nil, errors.New("用户不存在")
 	}
 	var guildIDs []uuid.UUID
-	if err := a.db.Model(&model.Member{}).Where("user_id = ?", user.ID).Pluck("guild_id", &guildIDs).Error; err != nil {
+	// 系统所有者 READY 携带平台全部服务器快照（docs 04 FR-32）；普通用户仅成员关系。
+	if user.SystemAdmin {
+		err = a.db.Model(&model.Guild{}).Order("created_at DESC").Pluck("id", &guildIDs).Error
+	} else {
+		err = a.db.Model(&model.Member{}).Where("user_id = ?", user.ID).Pluck("guild_id", &guildIDs).Error
+	}
+	if err != nil {
 		return model.User{}, nil, err
 	}
 	return user, guildIDs, nil

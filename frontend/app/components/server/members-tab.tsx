@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
@@ -208,14 +209,16 @@ export function MembersTab({
                     }
                   />
                   <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>选择角色</DropdownMenuLabel>
-                    {assignable.map(role => (
-                      <DropdownMenuItem key={role.id} onClick={() => bindRole(member, role.id)}>
-                        <ShieldCheckIcon />
-                        <StyledName nameStyle={parseRoleStyle(role.style)}>{role.name}</StyledName>
-                        <span className="ml-auto font-mono text-xs text-muted-foreground">P{role.position}</span>
-                      </DropdownMenuItem>
-                    ))}
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>选择角色</DropdownMenuLabel>
+                      {assignable.map(role => (
+                        <DropdownMenuItem key={role.id} onClick={() => bindRole(member, role.id)}>
+                          <ShieldCheckIcon />
+                          <StyledName nameStyle={parseRoleStyle(role.style)}>{role.name}</StyledName>
+                          <span className="ml-auto font-mono text-xs text-muted-foreground">P{role.position}</span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>

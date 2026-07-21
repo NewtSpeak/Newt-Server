@@ -111,6 +111,8 @@ func Register(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 	if err != nil {
 		return err
 	}
+	// 供 adminpresence PostAsUser 复用 messageView / 提及计数 / 索引（与 createMessage 对齐）。
+	postSideEffects = svc
 	svc.mountBackend(v1, deps.Auth)
 	svc.startGC()
 	return nil

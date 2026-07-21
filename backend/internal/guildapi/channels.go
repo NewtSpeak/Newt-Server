@@ -16,6 +16,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// errInvalidParent 批量排序时 parent_id 非法（事务内哨兵，映射为 400）。
+var errInvalidParent = errors.New("invalid parent category")
+
 type createChannelRequest struct {
 	Name     string            `json:"name" binding:"required,min=1,max=100"`
 	Type     model.ChannelType `json:"type" binding:"required,oneof=TEXT VOICE CATEGORY"`
@@ -68,10 +71,18 @@ func (h *api) createChannel(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "rate_limit_per_user 仅文本频道可设")
 		return
 	}
+	// 未显式指定 position 时，追加到本服末尾（避免新建频道全为 0 导致排序不稳定）。
+	position := input.Position
+	if position == 0 {
+		var maxPosition int
+		_ = h.deps.DB.Model(&model.Channel{}).Where("guild_id = ?", ctx.Guild.ID).
+			Select("COALESCE(MAX(position), -1)").Scan(&maxPosition)
+		position = maxPosition + 1
+	}
 	channel := model.Channel{
 		ID: uuid.New(), GuildID: ctx.Guild.ID,
 		Name: strings.TrimSpace(input.Name), Type: input.Type,
-		Topic: strings.TrimSpace(input.Topic), Position: input.Position,
+		Topic: strings.TrimSpace(input.Topic), Position: position,
 		ParentID: input.ParentID, UserLimit: input.UserLimit,
 		RateLimitPerUser: input.RateLimitPerUser,
 	}
@@ -231,18 +242,35 @@ func (h *api) deleteChannel(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// channelPositionEntry 批量排序条目（Owl-Desktop docs 03 FR-12）。
+// ParentID：JSON null / 省略均表示根级（无分类）；分类频道强制 parent_id=null。
+// 客户端提交「受影响项」或「全量可见频道」均可；事务内原子写入。
 type channelPositionEntry struct {
-	ID       uuid.UUID `json:"id" binding:"required"`
-	Position int       `json:"position" binding:"gte=0"`
+	ID       uuid.UUID  `json:"id" binding:"required"`
+	Position int        `json:"position" binding:"gte=0"`
+	// ParentID 所属分类；nil = 根级。跨分类拖拽时一并更新。
+	ParentID *uuid.UUID `json:"parent_id"`
 }
 
-// reorderChannels PATCH /guilds/{gid}/channels（需 MANAGE_CHANNELS）：批量排序。
-// body 为 [{id, position}] 数组；全部频道必须属于本服，事务内整体生效。
-// 每个被移动的频道发一条 CHANNEL_UPDATE（按可见性过滤）。
+// parentIDEqual 比较两个 *uuid.UUID（含双方 nil）。
+func parentIDEqual(a, b *uuid.UUID) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// reorderChannels PATCH /guilds/{gid}/channels（需 MANAGE_CHANNELS）：批量排序 + 跨分类移动。
+// body 为 [{id, position, parent_id?}] 数组；全部频道必须属于本服，事务内整体生效。
+// 每个实际变更的频道发一条 CHANNEL_UPDATE（含最新 position / parent_id，按可见性过滤），
+// 供所有在线客户端实时同步列表顺序。
 func (h *api) reorderChannels(c *gin.Context) {
 	var input []channelPositionEntry
 	if err := c.ShouldBindJSON(&input); err != nil || len(input) == 0 {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "需要非空的 [{id, position}] 数组")
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "需要非空的 [{id, position, parent_id?}] 数组")
 		return
 	}
 	ctx, user, ok := h.requireGuildPermission(c, rbac.ManageChannels)
@@ -250,20 +278,61 @@ func (h *api) reorderChannels(c *gin.Context) {
 		return
 	}
 	guildID := ctx.Guild.ID
+
+	// 预校验 parent_id：指向本服 CATEGORY，且分类自身不可嵌套。
+	for _, entry := range input {
+		if entry.ParentID == nil {
+			continue
+		}
+		if *entry.ParentID == entry.ID {
+			fail(c, http.StatusBadRequest, "INVALID_PARENT", "频道不能以自身为分类")
+			return
+		}
+	}
+
 	moved := make([]model.Channel, 0, len(input))
 	err := h.deps.DB.Transaction(func(tx *gorm.DB) error {
+		// 缓存本服 CATEGORY id，避免循环内 N+1。
+		var categories []model.Channel
+		if err := tx.Select("id").Where("guild_id = ? AND type = ?", guildID, model.ChannelCategory).
+			Find(&categories).Error; err != nil {
+			return err
+		}
+		categorySet := make(map[uuid.UUID]struct{}, len(categories))
+		for _, cat := range categories {
+			categorySet[cat.ID] = struct{}{}
+		}
+
 		for _, entry := range input {
 			var channel model.Channel
 			if err := tx.First(&channel, "id = ? AND guild_id = ?", entry.ID, guildID).Error; err != nil {
 				return err
 			}
-			if channel.Position == entry.Position {
+			// 分类不可再挂 parent。
+			parentID := entry.ParentID
+			if channel.Type == model.ChannelCategory {
+				parentID = nil
+			} else if parentID != nil {
+				if _, ok := categorySet[*parentID]; !ok {
+					return errInvalidParent
+				}
+			}
+
+			changed := channel.Position != entry.Position || !parentIDEqual(channel.ParentID, parentID)
+			if !changed {
 				continue
 			}
-			if err := tx.Model(&model.Channel{}).Where("id = ?", channel.ID).Update("position", entry.Position).Error; err != nil {
+			// Select 强制写入 parent_id=NULL（GORM Updates 默认跳过 nil 字段）。
+			if err := tx.Model(&model.Channel{}).Where("id = ?", channel.ID).
+				Select("position", "parent_id").
+				Updates(map[string]any{
+					"position":  entry.Position,
+					"parent_id": parentID,
+				}).Error; err != nil {
 				return err
 			}
 			channel.Position = entry.Position
+			channel.ParentID = parentID
 			moved = append(moved, channel)
 		}
 		return nil
@@ -273,14 +342,25 @@ func (h *api) reorderChannels(c *gin.Context) {
 			fail(c, http.StatusNotFound, "NOT_FOUND", "存在不属于本服务器的频道")
 			return
 		}
+		if errors.Is(err, errInvalidParent) {
+			fail(c, http.StatusBadRequest, "INVALID_PARENT", "parent_id 必须指向本服务器的分类频道")
+			return
+		}
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存频道排序失败")
 		return
 	}
-	positions := map[string]any{}
+	detail := make([]map[string]any, 0, len(moved))
 	for _, channel := range moved {
-		positions[channel.ID.String()] = channel.Position
+		item := map[string]any{"id": channel.ID.String(), "position": channel.Position}
+		if channel.ParentID != nil {
+			item["parent_id"] = channel.ParentID.String()
+		} else {
+			item["parent_id"] = nil
+		}
+		detail = append(detail, item)
 	}
-	h.audit(ctx, user, "rbac.channel_reorder", "guild", guildID.String(), map[string]any{"positions": positions})
+	h.audit(ctx, user, "rbac.channel_reorder", "guild", guildID.String(), map[string]any{"items": detail})
+	// 逐频道 CHANNEL_UPDATE：客户端 upsert 后按 position/parent_id 重排。
 	for _, channel := range moved {
 		channelID := channel.ID
 		h.publish(eventbus.Event{

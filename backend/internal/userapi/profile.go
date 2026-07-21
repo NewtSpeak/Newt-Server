@@ -8,10 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 )
 
 // me GET /users/@me：当前用户完整资料（含 email 等私有字段，本人可见）。
-func (h *api) me(c *gin.Context) { c.JSON(http.StatusOK, h.deps.CurrentUser(c)) }
+// 系统所有者自动附带 platform badge（登录与刷新后保持一致）。
+func (h *api) me(c *gin.Context) {
+	c.JSON(http.StatusOK, platformbadge.ViewOf(h.deps.CurrentUser(c)))
+}
 
 type patchMeRequest struct {
 	// DisplayName 显示名（1–32 字符，docs 01 FR-12）；传空字符串清除（回退用户名展示）。
@@ -62,12 +66,16 @@ func (h *api) patchMe(c *gin.Context) {
 }
 
 // publicProfile 公开资料投影：不含 email / system_admin 等私有字段。
+// 与 USER_UPDATE 载荷字段对齐，便于客户端资料卡统一渲染。
 type publicProfile struct {
-	ID          uuid.UUID `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	Avatar      string    `json:"avatar"` // 头像可访问 URL（/public-assets/profile/...），空串表示未设置
-	Bio         string    `json:"bio"`
+	ID             uuid.UUID `json:"id"`
+	Username       string    `json:"username"`
+	DisplayName    string    `json:"display_name"`
+	Avatar         string    `json:"avatar"` // 头像可访问 URL（/public-assets/profile/...），空串表示未设置
+	AvatarAnimated bool      `json:"avatar_animated"`
+	Banner         string    `json:"banner"`
+	AccentColor    string    `json:"accent_color"`
+	Bio            string    `json:"bio"`
 }
 
 // publicProfile GET /users/:id：查看他人公开资料。
@@ -103,6 +111,7 @@ func (h *api) publicProfile(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, publicProfile{
 		ID: target.ID, Username: target.Username, DisplayName: target.DisplayName,
-		Avatar: target.AvatarURL, Bio: target.Bio,
+		Avatar: target.AvatarURL, AvatarAnimated: target.AvatarAnimated,
+		Banner: target.BannerURL, AccentColor: target.AccentColor, Bio: target.Bio,
 	})
 }

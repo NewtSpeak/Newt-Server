@@ -236,48 +236,34 @@ func errCode(body map[string]any) string {
 }
 
 // ---------------------------------------------------------------------------
-// 1. client 平面无 SystemAdmin 短路；后台平面短路保持
+// 1. client 平面系统所有者（system_admin）全服短路（docs 04 FR-32）
 // ---------------------------------------------------------------------------
 
-func TestClientPlaneNoSystemAdminShortcut(t *testing.T) {
+func TestClientPlaneSystemOwnerShortcut(t *testing.T) {
 	env := newEnv(t)
 	owner := env.signup(t)
 	guildID := env.createGuild(t, owner)
 
 	sysadmin := env.signup(t)
 	if err := env.db.Model(&model.User{}).Where("id = ?", sysadmin.ID).Update("system_admin", true).Error; err != nil {
-		t.Fatalf("提升系统管理员失败: %v", err)
+		t.Fatalf("提升系统所有者失败: %v", err)
 	}
 
-	// client 平面：系统管理员非成员 → 一律 404（不可见即不存在，无短路）。
-	for _, probe := range []struct{ method, path string }{
-		{http.MethodGet, fmt.Sprintf("/gapi/v1/guilds/%s/roles", guildID)},
-		{http.MethodPatch, fmt.Sprintf("/gapi/v1/guilds/%s", guildID)},
-		{http.MethodGet, fmt.Sprintf("/gapi/v1/guilds/%s/bans", guildID)},
-		{http.MethodGet, fmt.Sprintf("/gapi/v1/guilds/%s/restrictions", guildID)},
-		{http.MethodGet, fmt.Sprintf("/gapi/v1/guilds/%s/audit-logs", guildID)},
-		{http.MethodGet, fmt.Sprintf("/gapi/v1/guilds/%s/node-pool", guildID)},
-	} {
-		rec, _ := env.do(t, probe.method, probe.path, sysadmin.Token, map[string]any{"name": "劫持"})
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("client 平面系统管理员非成员 %s %s 返回 %d，期待 404", probe.method, probe.path, rec.Code)
-		}
+	// client 平面：系统所有者即使非成员也可读/管理任意服。
+	rec, _ := env.do(t, http.MethodGet, fmt.Sprintf("/gapi/v1/guilds/%s/roles", guildID), sysadmin.Token, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("client 平面系统所有者 GET roles 返回 %d，期待 200", rec.Code)
+	}
+	rec, _ = env.do(t, http.MethodPatch, fmt.Sprintf("/gapi/v1/guilds/%s", guildID), sysadmin.Token, map[string]any{"name": "系统管改名"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("client 平面系统所有者 PATCH guild 返回 %d，期待 200: %s", rec.Code, rec.Body.String())
+	}
+	rec, _ = env.do(t, http.MethodGet, fmt.Sprintf("/gapi/v1/guilds/%s/bans", guildID), sysadmin.Token, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("client 平面系统所有者 GET bans 返回 %d，期待 200", rec.Code)
 	}
 
-	// 成为普通成员后：无 MANAGE_* 权限 → 403（仍无短路）。
-	env.join(t, guildID, sysadmin)
-	rec, body := env.do(t, http.MethodPatch, fmt.Sprintf("/gapi/v1/guilds/%s", guildID), sysadmin.Token, map[string]any{"name": "劫持改名"})
-	if rec.Code != http.StatusForbidden || errCode(body) != "MISSING_PERMISSION" {
-		t.Fatalf("client 平面系统管理员成员 PATCH guild 返回 %d/%s，期待 403/MISSING_PERMISSION", rec.Code, errCode(body))
-	}
-	rec, _ = env.do(t, http.MethodPost, fmt.Sprintf("/gapi/v1/guilds/%s/roles", guildID), sysadmin.Token, map[string]any{
-		"name": "越权角色", "permissions": int64(uint64(rbac.Administrator)), "position": 1,
-	})
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("client 平面系统管理员建角色返回 %d，期待 403", rec.Code)
-	}
-
-	// 后台平面（aud=admin token）：SystemAdmin 短路保持，可直接管理任意服。
+	// 后台平面短路保持。
 	adminToken, _, err := env.tokens.AccessToken(sysadmin.ID)
 	if err != nil {
 		t.Fatalf("签发后台 token 失败: %v", err)

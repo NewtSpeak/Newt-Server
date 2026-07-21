@@ -131,13 +131,12 @@ func (s *Service) placeOnNode(vs *model.VoiceState, exists bool, guildID, channe
 	}
 	s.publishState(*vs, "")
 	s.publishChannelStatus(guildID, channelID)
-	// 频道音频审计提示（adminpresence 专项）：审计开启且需提示时，仅向进房者下发
-	// CHANNEL_AUDIT_NOTICE（notify=false 即静默审计，不下发提示）。
-	if AuditPredicate(guildID, channelID) && AuditNotifyPredicate(guildID, channelID) {
-		s.publishToUser(eventbus.EventChannelAuditNotice, vs.UserID, guildID, map[string]any{
-			"guild_id": guildID, "channel_id": channelID, "audited": true,
-		})
-	}
+	// 频道音频审计提示（adminpresence 专项）：进房时始终下发 CHANNEL_AUDIT_NOTICE，
+	// audited=record∧notify（静默审计 / 未开启录制均为 false，客户端据此显示或清除横幅）。
+	s.publishToUser(eventbus.EventChannelAuditNotice, vs.UserID, guildID, map[string]any{
+		"guild_id": guildID, "channel_id": channelID,
+		"audited": AuditPredicate(guildID, channelID) && AuditNotifyPredicate(guildID, channelID),
+	})
 	// 舞台联动（docs 11 Z）：>50 强制 STAGE、第 51+ 人容量禁说 + 自动入队（同步处理，事件订阅为兜底）。
 	stage.OnVoiceJoin(s.db, s.bus, guildID, channelID, vs.UserID)
 	return joinResult{
@@ -148,6 +147,8 @@ func (s *Service) placeOnNode(vs *model.VoiceState, exists bool, guildID, channe
 
 // recomputeCapsDirty 处理 InternalCapsDirty：重算目标用户（或整频道）caps，
 // 推送 SFU（UpdateParticipantCaps）与客户端（VOICE_CAPS_UPDATE）；已无 join 资格则踢出（docs 05 §7.2）。
+// 当 reason=audit_config_changed 时，额外在位重签 Media Token（含最新 audit claim）并
+// 推送 VOICE_SERVER_UPDATE + CHANNEL_AUDIT_NOTICE，使 SFU 立即开/停录、客户端显示提示。
 func (s *Service) recomputeCapsDirty(payload eventbus.CapsDirtyPayload) {
 	guildID, err := uuid.Parse(payload.GuildID)
 	if err != nil {
@@ -172,6 +173,7 @@ func (s *Service) recomputeCapsDirty(payload eventbus.CapsDirtyPayload) {
 	if err := query.Find(&states).Error; err != nil {
 		return
 	}
+	auditDirty := payload.Reason == "audit_config_changed"
 	for i := range states {
 		vs := states[i]
 		caps, err := s.capsFor(guildID, channelID, vs.UserID, vs.ServerMute)
@@ -188,7 +190,43 @@ func (s *Service) recomputeCapsDirty(payload eventbus.CapsDirtyPayload) {
 		s.publishToUser(eventbus.EventVoiceCapsUpdate, vs.UserID, guildID, voiceCapsUpdatePayload{
 			GuildID: guildID, ChannelID: channelID, UserID: vs.UserID, Caps: caps,
 		})
+		if auditDirty {
+			s.reissueTokenForAudit(vs, guildID, channelID, caps)
+		}
 	}
+}
+
+// reissueTokenForAudit 审计配置变更后：同 sid 在位重签 Media Token（含 audit/hidden claim），
+// 经 VOICE_SERVER_UPDATE 推给客户端 → SFU 重复 auth 刷新 claim 并开/停录；
+// 同时按 notify 裁决下发 CHANNEL_AUDIT_NOTICE（audited=true/false）。
+func (s *Service) reissueTokenForAudit(vs model.VoiceState, guildID, channelID uuid.UUID, caps []string) {
+	if vs.NodeID == nil || vs.VoiceSessionID == nil || vs.ChannelID == nil {
+		return
+	}
+	token, expiresAt, err := s.tokens.Sign(mediatoken.Claims{
+		UID: vs.UserID.String(), GID: guildID.String(), CID: channelID.String(),
+		NID: vs.NodeID.String(), RID: channelID.String(), SID: vs.VoiceSessionID.String(),
+		Caps: caps, Bot: s.userIsBot(vs.UserID),
+		Hidden: StealthPredicate(guildID, vs.UserID),
+		Audit:  AuditPredicate(guildID, channelID),
+	})
+	if err != nil {
+		return
+	}
+	info, err := sfuctl.Dir().Node(*vs.NodeID)
+	if err != nil {
+		return
+	}
+	s.publishToUser(eventbus.EventVoiceServerUpdate, vs.UserID, guildID, voiceServerUpdatePayload{
+		GuildID: guildID, ChannelID: channelID, NodeID: *vs.NodeID, RoomID: channelID,
+		SFUEndpoint: info.WebRTCEndpoint, Token: token, Caps: caps,
+		SessionID: *vs.VoiceSessionID, ExpiresAt: expiresAt,
+	})
+	// 提示：record∧notify → audited=true；否则 false（关闭提示 / 静默审计 / 关闭录制）。
+	audited := AuditPredicate(guildID, channelID) && AuditNotifyPredicate(guildID, channelID)
+	s.publishToUser(eventbus.EventChannelAuditNotice, vs.UserID, guildID, map[string]any{
+		"guild_id": guildID, "channel_id": channelID, "audited": audited,
+	})
 }
 
 // actorOutranks 管理动作层级校验（docs 02 §8、05 §8.1）：

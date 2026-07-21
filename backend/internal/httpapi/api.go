@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/security"
 	"gorm.io/gorm"
@@ -238,14 +239,16 @@ func (a *API) logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (a *API) me(c *gin.Context) { c.JSON(http.StatusOK, currentUser(c)) }
+func (a *API) me(c *gin.Context) {
+	c.JSON(http.StatusOK, platformbadge.ViewOf(currentUser(c)))
+}
 
 type tokenResponse struct {
-	AccessToken      string     `json:"access_token"`
-	RefreshToken     string     `json:"refresh_token"`
-	AccessExpiresAt  time.Time  `json:"access_expires_at"`
-	RefreshExpiresAt time.Time  `json:"refresh_expires_at"`
-	User             model.User `json:"user"`
+	AccessToken      string                 `json:"access_token"`
+	RefreshToken     string                 `json:"refresh_token"`
+	AccessExpiresAt  time.Time              `json:"access_expires_at"`
+	RefreshExpiresAt time.Time              `json:"refresh_expires_at"`
+	User             platformbadge.UserView `json:"user"`
 }
 
 // issueTokens 登录/注册路径：开启新的会话链。
@@ -277,7 +280,11 @@ func (a *API) issueTokensForSession(c *gin.Context, status int, user model.User,
 		fail(c, 500, "DATABASE_ERROR", "保存刷新令牌失败")
 		return
 	}
-	c.JSON(status, tokenResponse{access, refresh, accessExpiry, refreshExpiry, user})
+	c.JSON(status, tokenResponse{
+		AccessToken: access, RefreshToken: refresh,
+		AccessExpiresAt: accessExpiry, RefreshExpiresAt: refreshExpiry,
+		User: platformbadge.ViewOf(user),
+	})
 }
 
 func (a *API) requireAuth() gin.HandlerFunc {

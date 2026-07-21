@@ -18,6 +18,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -213,10 +214,44 @@ func TestClientTextFlow(t *testing.T) {
 		t.Fatalf("编辑历史返回 %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 7. 表情反应幂等 PUT/DELETE。
+	// 7. 表情反应幂等 PUT/DELETE，且列表/单条拉取应带回 reactions（刷新后客户端可恢复）。
 	rec, _ = doJSONReq(t, router, http.MethodPut, base+"/messages/"+messageID+"/reactions/👍/@me", token, nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("添加反应返回 %d: %s", rec.Code, rec.Body.String())
+	}
+	// 编码路径（与桌面端 encodeURIComponent 一致）也应幂等成功。
+	rec, _ = doJSONReq(t, router, http.MethodPut, base+"/messages/"+messageID+"/reactions/"+url.PathEscape("👍")+"/@me", token, nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("编码路径再次添加反应返回 %d: %s", rec.Code, rec.Body.String())
+	}
+	rec, listedAfterReact := doJSONReq(t, router, http.MethodGet, base+"/messages", token, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("添加反应后拉列表返回 %d: %s", rec.Code, rec.Body.String())
+	}
+	foundReaction := false
+	for _, item := range listedAfterReact["messages"].([]any) {
+		msg := item.(map[string]any)
+		if msg["id"] != messageID {
+			continue
+		}
+		reactions, _ := msg["reactions"].([]any)
+		for _, raw := range reactions {
+			r := raw.(map[string]any)
+			if r["emoji"] == "👍" && r["count"].(float64) == 1 && r["me"] == true {
+				foundReaction = true
+				break
+			}
+		}
+	}
+	if !foundReaction {
+		t.Fatalf("消息列表未带回反应聚合: %s", rec.Body.String())
+	}
+	rec, oneAfterReact := doJSONReq(t, router, http.MethodGet, base+"/messages/"+messageID, token, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("添加反应后拉单条返回 %d: %s", rec.Code, rec.Body.String())
+	}
+	if reactions, _ := oneAfterReact["reactions"].([]any); len(reactions) == 0 {
+		t.Fatalf("单条消息未带回反应: %s", rec.Body.String())
 	}
 	rec, _ = doJSONReq(t, router, http.MethodDelete, base+"/messages/"+messageID+"/reactions/👍/@me", token, nil)
 	if rec.Code != http.StatusNoContent {

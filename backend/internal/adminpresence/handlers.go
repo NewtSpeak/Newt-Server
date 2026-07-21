@@ -21,7 +21,7 @@ func (h *api) getPlatformAudit(c *gin.Context) {
 	if _, ok := h.requireSystemAdmin(c); !ok {
 		return
 	}
-	c.JSON(http.StatusOK, h.loadPlatformAudit())
+	c.JSON(http.StatusOK, h.platformAuditResponse(h.loadPlatformAudit()))
 }
 
 type platformAuditRequest struct {
@@ -55,13 +55,17 @@ func (h *api) putPlatformAudit(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存平台审计配置失败")
 		return
 	}
+	// 重新读回，确保响应与后续裁决使用库中最终值（含 UpdatedAt）。
+	cfg = h.loadPlatformAudit()
+	// 平台默认变更 → 所有「无频道覆盖」且当前有人的语音频道重算 audit claim / 提示。
+	h.publishAuditDirtyForInheritingChannels()
 	actorID := user.ID
 	audit.Log(h.deps.DB, audit.Entry{
 		ActorID: &actorID, ActorType: "system_admin",
 		Action: "adminpresence.platform_audit_update", TargetType: "platform", TargetID: "1",
 		Detail: map[string]any{"record_default": cfg.RecordDefault, "notify_default": cfg.NotifyDefault},
 	})
-	c.JSON(http.StatusOK, cfg)
+	c.JSON(http.StatusOK, h.platformAuditResponse(cfg))
 }
 
 // getChannelAudit GET /admin/channels/{cid}/audit-config：频道有效审计裁决 + 是否独立配置。
@@ -279,6 +283,13 @@ func (h *api) putStealth(c *gin.Context) {
 // 审计录音列表 / 下载（系统管理员）
 // ---------------------------------------------------------------------------
 
+// auditRecordView 审计录音列表项：元数据 + 用户展示名（避免前端只能显示 UUID 前缀）。
+type auditRecordView struct {
+	model.AudioAuditRecord
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+}
+
 // listAuditRecords GET /admin/audit-records?guild_id=&channel_id=&user_id=&limit=。
 func (h *api) listAuditRecords(c *gin.Context) {
 	if _, ok := h.requireSystemAdmin(c); !ok {
@@ -303,7 +314,35 @@ func (h *api) listAuditRecords(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取审计录音失败")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"records": records})
+	// 批量补齐 username / display_name，供管理端展示「外观测试服 · yun_er」。
+	userIDs := make([]uuid.UUID, 0, len(records))
+	seen := map[uuid.UUID]struct{}{}
+	for _, rec := range records {
+		if _, ok := seen[rec.UserID]; ok {
+			continue
+		}
+		seen[rec.UserID] = struct{}{}
+		userIDs = append(userIDs, rec.UserID)
+	}
+	names := map[uuid.UUID]model.User{}
+	if len(userIDs) > 0 {
+		var users []model.User
+		if err := h.deps.DB.Select("id", "username", "display_name").Where("id IN ?", userIDs).Find(&users).Error; err == nil {
+			for _, u := range users {
+				names[u.ID] = u
+			}
+		}
+	}
+	views := make([]auditRecordView, 0, len(records))
+	for _, rec := range records {
+		view := auditRecordView{AudioAuditRecord: rec}
+		if u, ok := names[rec.UserID]; ok {
+			view.Username = u.Username
+			view.DisplayName = u.DisplayName
+		}
+		views = append(views, view)
+	}
+	c.JSON(http.StatusOK, gin.H{"records": views})
 }
 
 func parseUUID(c *gin.Context, name string) (uuid.UUID, bool) {

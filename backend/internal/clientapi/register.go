@@ -98,12 +98,10 @@ func Register(root *gin.RouterGroup, deps appdeps.Deps) error {
 	keysync.RegisterClient(authed, clientDeps)
 
 	// 服务器管理端点投影（角色/频道/覆盖/guild 生命周期/治理/Restriction/节点池/
-	// 审计/语音管理）：普通用户（服务器所有者/管理员）在桌面客户端管理自己的服务器。
-	// 关键安全约束：这些模块的 CurrentUser 一律剥离 SystemAdmin 标志——client 平面
-	// 绝无系统管理员短路，全部走标准 RBAC 层级校验（系统管理员在用户端即普通用户，
-	// 与 guildCtx 的既有语义一致）。
+	// 审计/语音管理）：服主/管理员管理本服；系统所有者（system_admin）保留全服短路
+	//（docs 04 FR-32），可打开任意服务器的管理员视图并执行治理操作（审计记 system_admin）。
 	mgmtDeps := clientDeps
-	mgmtDeps.CurrentUser = currentUserWithoutSystemAdmin
+	// 保留 CurrentUser 中的 SystemAdmin，与 guildCtx / perms.LoadGuild 语义一致。
 	if err := guildapi.Register(root, mgmtDeps); err != nil {
 		return err
 	}

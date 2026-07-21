@@ -1,10 +1,9 @@
 // Package guildapi 服务器结构管理 REST API（角色 / 频道 / 权限覆盖 / 服务器生命周期），
 // 从 httpapi 的后台专属实现中抽出为共享 handler，双认证平面复用同一套代码：
 //   - 后台（/api/v1，aud=admin）：deps.CurrentUser 返回真实用户，SystemAdmin 经
-//     perms.LoadGuild 获得全服可见/全权限短路（后台语义不变）；
-//   - 用户端（/gapi/v1，aud=client）：clientapi 注入的 CurrentUser 强制清除
-//     SystemAdmin 标志，所有操作走标准 RBAC + 层级校验（产品定义：系统管理员
-//     用用户端凭证登录即普通用户，client 平面绝无 SystemAdmin 短路）。
+//     perms.LoadGuild 获得全服可见/全权限短路；
+//   - 用户端（/gapi/v1，aud=client）：同样保留 SystemAdmin——系统所有者在桌面端
+//     可管理全部服务器并打开管理员视图（docs 04 FR-32）。
 //
 // 错误语义遵循仓库约定：不可见即不存在（无 VIEW_CHANNEL / 非成员一律 404，
 // docs 06 议题 8 防扫频）；有可见性但权限不足返回 403。

@@ -893,7 +893,13 @@ export const putInvitePortal = (body: Partial<InvitePortalConfig>) =>
 // 系统管理员临场 / 音频审计（adminpresence）
 // ---------------------------------------------------------------------------
 
-export type PlatformAuditConfig = { record_default: boolean; notify_default: boolean }
+export type PlatformAuditConfig = {
+  record_default: boolean
+  notify_default: boolean
+  /** 主节点是否配置了 AUDIT_INGEST_TOKEN（SFU 上传录音所需） */
+  ingest_enabled?: boolean
+  updated_at?: string
+}
 export type ChannelAuditConfig = {
   channel_id: string
   guild_id?: string
@@ -906,6 +912,10 @@ export type AuditRecord = {
   guild_id: string
   channel_id: string
   user_id: string
+  /** 说话者用户名（列表接口批量补齐） */
+  username?: string
+  /** 说话者显示名（可空） */
+  display_name?: string
   session_id: string
   node_id: string
   mime: string

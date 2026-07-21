@@ -143,8 +143,10 @@ func (s *Service) handleJoin(c *gin.Context) {
 	// 进服首次出现（docs 12 5A.1 FIRST_GUILD_JOIN 场景判定）：该服从未有过
 	// VoiceState 行 = 从未连过麦。必须在建行/leave 编排之前捕获。
 	firstEverJoin := !exists
-	// 同 guild 同时仅一个语音频道：已在任何频道先内部 leave（docs 05 §6；
-	// 重进同频道也先摘旧会话，避免调度换点后旧节点残留参与者）。
+	// 同 guild 同时仅一个语音频道：
+	//   - 切到其他频道：完整 leave（广播 channel_id=null）+ 再进；
+	//   - 重进同频道（刷新页/断线 rejoin）：只摘 SFU 旧会话，不广播 leave，
+	//     避免客户端把「摘旧」当成踢出而清掉进行中的 join（刷新后进不去）。
 	var previousChannelID *uuid.UUID
 	move := false
 	if vs.ChannelID != nil {
@@ -152,10 +154,18 @@ func (s *Service) handleJoin(c *gin.Context) {
 		if prev != input.ChannelID {
 			previousChannelID = &prev
 			move = true
-		}
-		if err := s.internalLeave(&vs, "MOVED", ""); err != nil {
-			fail(c, http.StatusInternalServerError, "LEAVE_FAILED", "离开原语音频道失败")
-			return
+			if err := s.internalLeave(&vs, "MOVED", ""); err != nil {
+				fail(c, http.StatusInternalServerError, "LEAVE_FAILED", "离开原语音频道失败")
+				return
+			}
+		} else {
+			// 同频道重进：静默摘 SFU + 取消在途迁移；内存清会话字段，placeOnNode 会覆写落库。
+			s.engine.cancelActive(vs.GuildID, vs.UserID)
+			if vs.NodeID != nil {
+				_ = sfuctl.Ctl().DisconnectUser(*vs.NodeID, prev, vs.UserID, "MOVED")
+			}
+			vs.NodeID, vs.RoomID, vs.VoiceSessionID = nil, nil, nil
+			vs.Connected = false
 		}
 	}
 
@@ -729,24 +739,43 @@ func (s *Service) handleListVoiceStates(c *gin.Context) {
 		fail(c, http.StatusNotFound, "RESOURCE_NOT_FOUND", "资源不存在或不可见")
 		return
 	}
-	var states []model.VoiceState
-	if err := s.db.Where("guild_id = ? AND channel_id = ?", guildID, channelID).
-		Order("joined_at ASC").Find(&states).Error; err != nil {
+	// 联表用户资料 + 服内昵称，客户端语音树无需再依赖成员缓存才能显示名字/头像。
+	type stateRow struct {
+		model.VoiceState
+		Username    string
+		DisplayName string
+		AvatarURL   string
+		Nickname    string
+	}
+	var rows []stateRow
+	err = s.db.Raw(`
+		SELECT voice_states.*, users.username, users.display_name, users.avatar_url,
+			COALESCE(members.nickname, '') AS nickname
+		FROM voice_states
+		JOIN users ON users.id = voice_states.user_id
+		LEFT JOIN members ON members.guild_id = voice_states.guild_id AND members.user_id = voice_states.user_id
+		WHERE voice_states.guild_id = ? AND voice_states.channel_id = ?
+		ORDER BY voice_states.joined_at ASC NULLS LAST, voice_states.created_at ASC
+	`, guildID, channelID).Scan(&rows).Error
+	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "查询语音状态失败")
 		return
 	}
 	// 隐身临场（adminpresence）：非系统管理员看不到隐身管理员的语音会话。
-	if !user.SystemAdmin {
-		filtered := states[:0]
-		for _, vs := range states {
-			if StealthPredicate(guildID, vs.UserID) {
-				continue
-			}
-			filtered = append(filtered, vs)
+	views := make([]voiceStateView, 0, len(rows))
+	for _, row := range rows {
+		if !user.SystemAdmin && StealthPredicate(guildID, row.UserID) {
+			continue
 		}
-		states = filtered
+		views = append(views, voiceStateView{
+			VoiceState:  row.VoiceState,
+			Username:    row.Username,
+			DisplayName: row.DisplayName,
+			AvatarURL:   row.AvatarURL,
+			Nickname:    row.Nickname,
+		})
 	}
-	c.JSON(http.StatusOK, gin.H{"voice_states": states})
+	c.JSON(http.StatusOK, gin.H{"voice_states": views})
 }
 
 // ---------------------------------------------------------------------------

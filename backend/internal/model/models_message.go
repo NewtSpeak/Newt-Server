@@ -60,6 +60,9 @@ type MessageType string
 const (
 	MessageDefault MessageType = "DEFAULT"
 	MessageSystem  MessageType = "SYSTEM"
+	// MessageSystemAdmin 系统管理员临场发言（adminpresence 文本频道）：
+	// 客户端以金色皇冠头像 +「@ 系统超级管理员」徽章渲染，不依赖成员资料。
+	MessageSystemAdmin MessageType = "SYSTEM_ADMIN"
 )
 
 // Message 消息主表（AQ.1）。

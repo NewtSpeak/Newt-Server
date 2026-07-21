@@ -12,6 +12,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/moderation"
 	"github.com/owlspeak/owl-server/backend/internal/platformadmin"
+	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 	"github.com/owlspeak/owl-server/backend/internal/registrationinvite"
 	"github.com/owlspeak/owl-server/backend/internal/security"
 	"gorm.io/gorm"
@@ -120,8 +121,9 @@ type loginRequest struct {
 	Password   string `json:"password" binding:"required"`
 }
 
-// login POST /gapi/v1/auth/login：任何账号（含系统管理员）均可在用户端登录，
-// 但只签发 aud=client 的凭证——系统管理员在用户端也只是普通用户身份。
+// login POST /gapi/v1/auth/login：任何账号（含系统所有者）均可在用户端登录，
+// 签发 aud=client 凭证。系统所有者（system_admin）在登录响应中附带徽章，
+// 并在用户端享有全部服务器管理权限（docs 04 FR-32）。
 func (h *api) login(c *gin.Context) {
 	var input loginRequest
 	if !bind(c, &input) {
@@ -196,11 +198,11 @@ func (h *api) logout(c *gin.Context) {
 }
 
 type tokenResponse struct {
-	AccessToken      string     `json:"access_token"`
-	RefreshToken     string     `json:"refresh_token"`
-	AccessExpiresAt  time.Time  `json:"access_expires_at"`
-	RefreshExpiresAt time.Time  `json:"refresh_expires_at"`
-	User             model.User `json:"user"`
+	AccessToken      string               `json:"access_token"`
+	RefreshToken     string               `json:"refresh_token"`
+	AccessExpiresAt  time.Time            `json:"access_expires_at"`
+	RefreshExpiresAt time.Time            `json:"refresh_expires_at"`
+	User             platformbadge.UserView `json:"user"`
 }
 
 // issueTokens 签发用户端（aud=client）access/refresh token 对并落库（登录/注册开启新会话链）。
@@ -209,6 +211,7 @@ func (h *api) issueTokens(c *gin.Context, status int, user model.User) {
 }
 
 // issueTokensForSession 按指定会话链签发 token 对（refresh 轮换时继承旧链）。
+// 系统所有者登录时 user.badges 自动附带「系统所有者」徽章。
 func (h *api) issueTokensForSession(c *gin.Context, status int, user model.User, sessionID uuid.UUID, sessionCreatedAt time.Time) {
 	access, accessExpiry, err := h.tokens.AccessTokenForSession(user.ID, security.AudienceClient, sessionID.String())
 	if err != nil {
@@ -232,5 +235,9 @@ func (h *api) issueTokensForSession(c *gin.Context, status int, user model.User,
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存刷新令牌失败")
 		return
 	}
-	c.JSON(status, tokenResponse{access, refresh, accessExpiry, refreshExpiry, user})
+	c.JSON(status, tokenResponse{
+		AccessToken: access, RefreshToken: refresh,
+		AccessExpiresAt: accessExpiry, RefreshExpiresAt: refreshExpiry,
+		User: platformbadge.ViewOf(user),
+	})
 }

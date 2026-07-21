@@ -32,6 +32,7 @@ func bind(c *gin.Context, target any) bool {
 }
 
 // guildCtx 加载当前用户在路径服务器内的权限上下文；不可见一律 404（防扫频）。
+// 系统所有者（system_admin）在用户端亦保留全权限短路（docs 04 FR-32）。
 func (h *api) guildCtx(c *gin.Context) (*perms.GuildContext, model.User, bool) {
 	user := h.deps.CurrentUser(c)
 	guildID, err := uuid.Parse(c.Param("guildID"))
@@ -39,11 +40,7 @@ func (h *api) guildCtx(c *gin.Context) (*perms.GuildContext, model.User, bool) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "服务器不存在")
 		return nil, user, false
 	}
-	asUser := user
-	if h.clientPlane {
-		asUser.SystemAdmin = false
-	}
-	ctx, err := perms.LoadGuild(h.deps.DB, asUser, guildID)
+	ctx, err := perms.LoadGuild(h.deps.DB, user, guildID)
 	if err != nil {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "服务器不存在")
 		return nil, user, false

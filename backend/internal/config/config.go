@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -43,8 +45,12 @@ type Config struct {
 	// 用于拼接邀请分享链接与深链参数；为空时按请求 Host 推导。
 	PublicBaseURL string
 	// AuditIngestToken SFU 节点上传审计录音（/audit-api）用的共享密钥（Bearer）。
-	// 为空时审计上传端点关闭（返回 503），录音功能不可用。
+	// 为空时：development 环境会从 JWT_SECRET 派生稳定密钥（开箱即用）；
+	// production 为空则审计上传端点关闭（返回 503）。
 	AuditIngestToken string
+	// AuditIngestURL 完整上传地址（PublicBaseURL + /audit-api/records），
+	// 经 RegisterAck 下发给 SFU；仅只读派生字段。
+	AuditIngestURL string
 
 	// ---- 过载自动迁移（docs 09 I.3–I.5，默认关）----
 	// VoiceOverloadAutoMigrate 自动迁移开关（I.3 定稿默认关，系统管/部署可开）。
@@ -63,6 +69,23 @@ type Config struct {
 	// MetricsAddress Prometheus /metrics 监听地址（仅应绑定内网/本机，如
 	// "127.0.0.1:9091"）；为空时不启动 metrics 端点。
 	MetricsAddress string
+
+	// ---- 内嵌本地 SFU（启动时自动拉起，减轻心智负担）----
+	// EmbeddedSFU 是否在进程内自动创建占位并拉起本机 owl-sfu 子进程。
+	// development 默认 true；production 默认 false（可用 EMBEDDED_SFU=true 显式开启）。
+	EmbeddedSFU bool
+	// EmbeddedSFUBin owl-sfu 可执行文件路径；空则自动搜索 / 按需编译 monorepo 中的 Owl-SFU。
+	EmbeddedSFUBin string
+	// EmbeddedSFUWSSListen 内嵌 SFU 信令监听（默认 :8445）。
+	EmbeddedSFUWSSListen string
+	// EmbeddedSFUMediaUDP 内嵌 SFU 媒体 UDP 端口（默认 3478）。
+	EmbeddedSFUMediaUDP int
+	// EmbeddedSFUPublicIP 上报给客户端的媒体 IP（默认 127.0.0.1）。
+	EmbeddedSFUPublicIP string
+	// EmbeddedSFUAdvertiseWSS 下发给客户端的 WSS URL；空则按 PublicIP + WSS 端口推导。
+	EmbeddedSFUAdvertiseWSS string
+	// EmbeddedSFUNoTLS 内嵌 SFU 是否禁用信令 TLS（开发默认 true）。
+	EmbeddedSFUNoTLS bool
 }
 
 func Load() (Config, error) {
@@ -104,6 +127,13 @@ func Load() (Config, error) {
 
 		// Prometheus /metrics（docs 09 §11 迁移观测）：默认关闭；部署时应仅绑定内网。
 		MetricsAddress: env("METRICS_ADDRESS", ""),
+
+		// 内嵌本地 SFU：开发默认开；二进制/端口可用环境变量覆盖。
+		EmbeddedSFUBin:          os.Getenv("EMBEDDED_SFU_BIN"),
+		EmbeddedSFUWSSListen:    env("EMBEDDED_SFU_WSS_LISTEN", ":8445"),
+		EmbeddedSFUMediaUDP:     intEnv("EMBEDDED_SFU_MEDIA_UDP", 3478),
+		EmbeddedSFUPublicIP:     env("EMBEDDED_SFU_PUBLIC_IP", "127.0.0.1"),
+		EmbeddedSFUAdvertiseWSS: os.Getenv("EMBEDDED_SFU_ADVERTISE_WSS"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL 不能为空，Owl-Server 仅支持 PostgreSQL")
@@ -111,7 +141,62 @@ func Load() (Config, error) {
 	if len(cfg.JWTSecret) < 32 {
 		return Config{}, fmt.Errorf("JWT_SECRET 至少需要 32 个字符")
 	}
+	// 开发环境：未显式配置时自动就绪审计上传管线（派生 token + 本机 PublicBaseURL）。
+	// 生产必须显式设置 AUDIT_INGEST_TOKEN（及 PUBLIC_BASE_URL）才会开启上传。
+	isDev := cfg.Environment == "development" || cfg.Environment == "dev"
+	if cfg.AuditIngestToken == "" && isDev {
+		cfg.AuditIngestToken = deriveAuditIngestToken(cfg.JWTSecret)
+	}
+	if cfg.PublicBaseURL == "" && isDev {
+		cfg.PublicBaseURL = deriveDevPublicBaseURL(cfg.Address)
+	}
+	if cfg.AuditIngestToken != "" && cfg.PublicBaseURL != "" {
+		cfg.AuditIngestURL = strings.TrimRight(cfg.PublicBaseURL, "/") + "/audit-api/records"
+	}
+	// 内嵌 SFU：development 默认开启；production 默认关（EMBEDDED_SFU=true 可开）。
+	cfg.EmbeddedSFU = boolEnv("EMBEDDED_SFU", isDev)
+	cfg.EmbeddedSFUNoTLS = boolEnv("EMBEDDED_SFU_NO_TLS", isDev || cfg.EmbeddedSFU)
+	if cfg.EmbeddedSFUAdvertiseWSS == "" {
+		port := listenPort(cfg.EmbeddedSFUWSSListen, "8445")
+		scheme := "wss"
+		if cfg.EmbeddedSFUNoTLS {
+			scheme = "ws"
+		}
+		cfg.EmbeddedSFUAdvertiseWSS = fmt.Sprintf("%s://%s:%s/ws", scheme, cfg.EmbeddedSFUPublicIP, port)
+	}
 	return cfg, nil
+}
+
+// listenPort 从 ":8445" / "0.0.0.0:8445" 取出端口号。
+func listenPort(listen, fallback string) string {
+	listen = strings.TrimSpace(listen)
+	if listen == "" {
+		return fallback
+	}
+	if i := strings.LastIndex(listen, ":"); i >= 0 && i+1 < len(listen) {
+		return listen[i+1:]
+	}
+	return fallback
+}
+
+// deriveAuditIngestToken 由 JWT_SECRET 派生稳定的 32 字符 hex 密钥（跨重启一致，
+// 便于开发环境 SFU 经 RegisterAck 自动对齐，无需双端手写同一 secret）。
+func deriveAuditIngestToken(jwtSecret string) string {
+	sum := sha256.Sum256([]byte("owl-audit-ingest-v1\n" + jwtSecret))
+	return hex.EncodeToString(sum[:16])
+}
+
+// deriveDevPublicBaseURL 从 APP_ADDRESS 推导本机 HTTP 根地址（仅 development）。
+func deriveDevPublicBaseURL(address string) string {
+	hostPort := strings.TrimSpace(address)
+	if hostPort == "" {
+		return "http://127.0.0.1:8080"
+	}
+	// ":8080" → "127.0.0.1:8080"；已含 host 则原样使用。
+	if strings.HasPrefix(hostPort, ":") {
+		hostPort = "127.0.0.1" + hostPort
+	}
+	return "http://" + hostPort
 }
 
 func env(key, fallback string) string {

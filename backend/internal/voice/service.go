@@ -54,9 +54,24 @@ type Service struct {
 // ---------------------------------------------------------------------------
 
 // voiceStateEventPayload VOICE_STATE_UPDATE 载荷；Reason 仅踢出等场景携带。
+// Username / DisplayName / AvatarURL / Nickname 为展示字段（非 VoiceState 表列），
+// 供客户端语音树在成员缓存未就绪时仍能渲染头像与昵称。
 type voiceStateEventPayload struct {
 	model.VoiceState
-	Reason string `json:"reason,omitempty"`
+	Username    string `json:"username,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
+	Nickname    string `json:"nickname,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// voiceStateView REST 列表用：VoiceState + 用户展示字段。
+type voiceStateView struct {
+	model.VoiceState
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+	Nickname    string `json:"nickname"`
 }
 
 // voiceServerUpdatePayload VOICE_SERVER_UPDATE 载荷（进房辅助路径 / 热迁移，docs 05 §11）。
@@ -97,7 +112,25 @@ type voiceMigratedPayload struct {
 	NodeID      uuid.UUID `json:"node_id"`
 }
 
+func (s *Service) enrichVoiceState(vs model.VoiceState, reason string) voiceStateEventPayload {
+	payload := voiceStateEventPayload{VoiceState: vs, Reason: reason}
+	var user model.User
+	if err := s.db.Select("username", "display_name", "avatar_url").
+		First(&user, "id = ?", vs.UserID).Error; err == nil {
+		payload.Username = user.Username
+		payload.DisplayName = user.DisplayName
+		payload.AvatarURL = user.AvatarURL
+	}
+	var member model.Member
+	if err := s.db.Select("nickname").
+		First(&member, "guild_id = ? AND user_id = ?", vs.GuildID, vs.UserID).Error; err == nil {
+		payload.Nickname = member.Nickname
+	}
+	return payload
+}
+
 func (s *Service) publishState(vs model.VoiceState, reason string) {
+	payload := s.enrichVoiceState(vs, reason)
 	// 隐身临场（adminpresence）：管理员在房时不向全服广播其语音状态，只回给本人，
 	// 避免其出现在其他成员的语音列表/事件里（与 SFU hidden claim 抑制广播配合）。
 	if vs.ChannelID != nil && StealthPredicate(vs.GuildID, vs.UserID) {
@@ -105,7 +138,7 @@ func (s *Service) publishState(vs model.VoiceState, reason string) {
 			Type:    eventbus.EventVoiceStateUpdate,
 			GuildID: &vs.GuildID,
 			UserIDs: []uuid.UUID{vs.UserID},
-			Payload: voiceStateEventPayload{VoiceState: vs, Reason: reason},
+			Payload: payload,
 		})
 		return
 	}
@@ -113,8 +146,18 @@ func (s *Service) publishState(vs model.VoiceState, reason string) {
 		Type:      eventbus.EventVoiceStateUpdate,
 		GuildID:   &vs.GuildID,
 		ChannelID: vs.ChannelID,
-		Payload:   voiceStateEventPayload{VoiceState: vs, Reason: reason},
+		Payload:   payload,
 	})
+}
+
+// PublishConnectedChange 供 sfucontrol RoomEvent 回调：SFU 上报 PARTICIPANT_JOINED/LEFT
+// 更新 VoiceState.connected 后广播 VOICE_STATE_UPDATE，刷新后名单/连接态可实时同步。
+// sharedService 未装配时为 no-op。
+func PublishConnectedChange(vs model.VoiceState) {
+	if sharedService == nil {
+		return
+	}
+	sharedService.publishState(vs, "")
 }
 
 // publishChannelStatus 语音频道人数变化时广播 VOICE_CHANNEL_STATUS

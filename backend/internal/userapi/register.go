@@ -11,6 +11,8 @@
 //	PATCH  /users/@me                  修改 display_name（1–32）/ bio（≤190）
 //	POST   /users/@me/avatar           上传头像（multipart file 字段，≤8MB，png/jpeg/webp/gif）
 //	DELETE /users/@me/avatar           移除头像
+//	POST   /users/@me/banner           上传个人横幅（multipart file 字段，≤12MB）
+//	DELETE /users/@me/banner           移除个人横幅
 //	PATCH  /users/@me/password         修改密码（旧密码验证；吊销除当前会话外全部 refresh token）
 //	GET    /users/@me/sessions         列出活跃登录会话（脱敏）
 //	DELETE /users/@me/sessions/:id     吊销指定会话（id 为会话链 session_id）
@@ -41,6 +43,8 @@ func Register(group *gin.RouterGroup, deps appdeps.Deps) error {
 	me.DELETE("", h.deleteAccount)
 	me.POST("/avatar", h.uploadAvatar)
 	me.DELETE("/avatar", h.deleteAvatar)
+	me.POST("/banner", h.uploadBanner)
+	me.DELETE("/banner", h.deleteBanner)
 	me.PATCH("/password", h.changePassword)
 	me.GET("/sessions", h.listSessions)
 	me.DELETE("/sessions", h.revokeOtherSessions)

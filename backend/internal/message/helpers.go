@@ -130,11 +130,13 @@ type attachmentView struct {
 }
 
 // reactionSummary 消息响应中的反应聚合（Owl-Desktop docs 05 FR-26）：
-// 每种 emoji 一条，count 为总数，me 标记调用者是否已反应（渲染高亮）。
+// 每种 emoji 一条，count 为总数；me 仅在传入 viewer 时填充（REST 列表/单条），
+// Gateway 广播的 MESSAGE_CREATE/UPDATE 无 per-recipient viewer，省略 me，
+// 避免客户端把广播侧的 false 当成「我未反应」而清掉本地高亮。
 type reactionSummary struct {
 	Emoji string `json:"emoji"`
 	Count int    `json:"count"`
-	Me    bool   `json:"me"`
+	Me    *bool  `json:"me,omitempty"`
 }
 
 // messageView 消息响应体：消息本体 + 作者用户名 + 附件元数据列表 + 反应聚合。
@@ -240,9 +242,12 @@ func (s *service) messageViews(messages []model.Message, viewer ...uuid.UUID) ([
 	}
 	reactionGroups := make(map[int64][]reactionSummary)
 	for _, row := range countRows {
-		reactionGroups[row.MessageID] = append(reactionGroups[row.MessageID], reactionSummary{
-			Emoji: row.Emoji, Count: row.Count, Me: mine[row.MessageID][row.Emoji],
-		})
+		summary := reactionSummary{Emoji: row.Emoji, Count: row.Count}
+		if viewerID != uuid.Nil {
+			me := mine[row.MessageID][row.Emoji]
+			summary.Me = &me
+		}
+		reactionGroups[row.MessageID] = append(reactionGroups[row.MessageID], summary)
 	}
 	for _, message := range messages {
 		var card json.RawMessage

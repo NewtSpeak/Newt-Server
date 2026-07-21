@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
 )
 
@@ -107,10 +107,10 @@ type presenceUpdateData struct {
 //   - ReadStates 该用户全部可见频道的已读状态（docs 15 §7-1：{channel_id,
 //     last_read_message_id, mention_count}，没有记录的频道省略）。
 type readyData struct {
-	SessionID  string               `json:"session_id"`
-	User       model.User           `json:"user"`
-	GuildIDs   []uuid.UUID          `json:"guild_ids"`
-	Guilds     []snapshot.Guild     `json:"guilds"`
-	Presences  []snapshot.Presence  `json:"presences"`
-	ReadStates []snapshot.ReadState `json:"read_states"`
+	SessionID  string                 `json:"session_id"`
+	User       platformbadge.UserView `json:"user"`
+	GuildIDs   []uuid.UUID            `json:"guild_ids"`
+	Guilds     []snapshot.Guild       `json:"guilds"`
+	Presences  []snapshot.Presence    `json:"presences"`
+	ReadStates []snapshot.ReadState   `json:"read_states"`
 }

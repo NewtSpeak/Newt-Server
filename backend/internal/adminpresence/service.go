@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"gorm.io/gorm"
 )
@@ -43,6 +44,49 @@ func (h *api) loadPlatformAudit() model.PlatformAuditConfig {
 	cfg := model.PlatformAuditConfig{ID: 1, RecordDefault: false, NotifyDefault: true}
 	_ = h.deps.DB.First(&cfg, "id = 1").Error
 	return cfg
+}
+
+// platformAuditResponse 管理端展示：配置 + 上传管线是否就绪（SFU 依赖 AUDIT_INGEST_TOKEN）。
+func (h *api) platformAuditResponse(cfg model.PlatformAuditConfig) gin.H {
+	return gin.H{
+		"record_default": cfg.RecordDefault,
+		"notify_default": cfg.NotifyDefault,
+		"updated_at":     cfg.UpdatedAt,
+		// ingest_enabled：主节点是否接受 SFU 上传；false 时录音只会落在 SFU 本地。
+		"ingest_enabled": h.deps.Cfg.AuditIngestToken != "",
+	}
+}
+
+// publishAuditDirtyForInheritingChannels 平台默认变更后，对所有「无频道独立覆盖」
+// 且当前有人的语音频道广播 InternalCapsDirty(reason=audit_config_changed)，
+// 由 voice 模块在位重签 token 并下发 CHANNEL_AUDIT_NOTICE。
+func (h *api) publishAuditDirtyForInheritingChannels() {
+	type occupied struct {
+		ChannelID uuid.UUID
+		GuildID   uuid.UUID
+	}
+	var rows []occupied
+	// 当前在房频道（channel_id 非空）去重。
+	if err := h.deps.DB.Model(&model.VoiceState{}).
+		Select("DISTINCT channel_id AS channel_id, guild_id").
+		Where("channel_id IS NOT NULL").
+		Scan(&rows).Error; err != nil {
+		return
+	}
+	for _, row := range rows {
+		// 有频道覆盖 → 不受平台默认影响，跳过。
+		var override model.ChannelAuditConfig
+		if h.deps.DB.First(&override, "channel_id = ?", row.ChannelID).Error == nil {
+			continue
+		}
+		h.deps.Bus.Publish(eventbus.Event{
+			Type: eventbus.InternalCapsDirty,
+			Payload: eventbus.CapsDirtyPayload{
+				GuildID: row.GuildID.String(), ChannelID: row.ChannelID.String(),
+				Reason: "audit_config_changed",
+			},
+		})
+	}
 }
 
 // channelAuditEffective 计算某频道最终审计裁决：频道有独立记录时覆盖平台默认。
