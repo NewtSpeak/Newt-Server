@@ -19,6 +19,7 @@ import (
 
 // 未读与提及计数（docs 15 §3.1 / §7-1）：
 //   - ack 端点推进 last_read_message_id（只前进不后退）并清零 mention_count；
+//   - 本人发消息时自动推进已读至本条（markAuthorReadOnSend），避免刷新后仍显示未读；
 //   - MESSAGE_CREATE 时为被提及者批量递增 mention_count（见 bumpMentionCounts）；
 //   - ack 后向本人全部端定向发 READ_STATE_UPDATE（跨端角标同步）。
 
@@ -49,10 +50,15 @@ func (s *service) publishReadState(state model.ReadState, at time.Time) {
 // advanceReadState ack 核心：推进 last_read（GREATEST 只前进不后退）并清零 mention_count，
 // 返回落库后的最终行（RETURNING）。
 func (s *service) advanceReadState(userID uuid.UUID, channel model.Channel, messageID int64, now time.Time) (model.ReadState, error) {
+	// 私信频道 Channel.GuildID 可能为零 UUID，与消息落库语义一致。
+	guildID := channel.GuildID
+	if channel.Type.IsPrivate() {
+		guildID = uuid.Nil
+	}
 	state := model.ReadState{
 		UserID:            userID,
 		ChannelID:         channel.ID,
-		GuildID:           channel.GuildID,
+		GuildID:           guildID,
 		LastReadMessageID: messageID,
 		MentionCount:      0,
 		UpdatedAt:         now,
@@ -66,6 +72,23 @@ func (s *service) advanceReadState(userID uuid.UUID, channel model.Channel, mess
 		}),
 	}, clause.Returning{}).Create(&state).Error
 	return state, err
+}
+
+// markAuthorReadOnSend 作者发出普通消息后，服务端自动将本人 last_read 推进到本条并清零 mention。
+//
+// 背景：客户端对「自己发的」会本地乐观已读，但若本地游标已追上最新，ack() 会短路不上报；
+// 刷新后 READY 以服务端 read_states 为准，本人消息会被算进 unread_count。发送路径落库可保证
+// 刷新/跨端一致（对齐 Discord：发消息即读到频道头）。
+// SYSTEM_ADMIN 临场发言不调用本函数（公告语义，作者端也应显示未读，见 adminpost）。
+// 失败只记日志，不阻断发消息主流程。
+func (s *service) markAuthorReadOnSend(userID uuid.UUID, channel model.Channel, messageID int64) {
+	now := time.Now().UTC()
+	state, err := s.advanceReadState(userID, channel, messageID, now)
+	if err != nil {
+		log.Printf("message: 作者自动已读失败（channel=%s message=%d）: %v", channel.ID, messageID, err)
+		return
+	}
+	s.publishReadState(state, now)
 }
 
 // ackMessage POST /channels/{id}/messages/{mid}/ack：本人已读推进。
@@ -327,6 +350,16 @@ func (s *service) bumpMentionCounts(message model.Message) {
 
 // mentionRecipients 计算应递增计数的用户集合（去重、排除作者、按频道可见性过滤）。
 func (s *service) mentionRecipients(message model.Message) ([]uuid.UUID, error) {
+	// 私信：仅 recipients 中被 @ 的用户（无 everyone/role）。
+	if message.GuildID == uuid.Nil {
+		ids := make([]uuid.UUID, 0, len(message.Mentions))
+		for _, userID := range message.Mentions {
+			if userID != message.AuthorID {
+				ids = append(ids, userID)
+			}
+		}
+		return ids, nil
+	}
 	// mention_everyone：直接取频道可见成员（已含 Restriction 收紧），其余提及无需再并入。
 	if message.MentionEveryone {
 		viewers, err := snapshot.ChannelViewers(s.db, message.GuildID, message.ChannelID)

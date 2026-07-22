@@ -17,6 +17,7 @@ import { toast } from "sonner"
 
 import { SimpleSelect } from "~/components/simple-select"
 import { Button } from "~/components/ui/button"
+import { isGuildMediaVideo } from "~/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card"
 import {
   Dialog,
@@ -129,17 +130,30 @@ function BrandingCard({ guild, onChanged }: { guild: Guild; onChanged: () => voi
           <ImageIcon className="size-4" />
           图标与横幅
         </CardTitle>
-        <CardDescription>PNG/JPEG/WebP/GIF，单张不超过 8MB；图标显示在服务器栏，横幅显示在邀请页与频道顶部。</CardDescription>
+        <CardDescription>
+          PNG/JPEG/WebP/GIF/MP4，单张不超过 8MB；图标显示在服务器栏，横幅显示在邀请页与频道顶部。视频默认静音，悬停播放声音。
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {rows.map(row => (
           <div key={row.kind} className="flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3">
             {row.url ? (
-              <img
-                src={row.url}
-                alt={row.label}
-                className={row.kind === "icon" ? "size-10 rounded-full border object-cover" : "h-10 w-24 rounded-md border object-cover"}
-              />
+              isGuildMediaVideo(row.url) ? (
+                <video
+                  src={row.url}
+                  muted
+                  loop
+                  autoPlay
+                  playsInline
+                  className={row.kind === "icon" ? "size-10 rounded-full border object-cover" : "h-10 w-24 rounded-md border object-cover"}
+                />
+              ) : (
+                <img
+                  src={row.url}
+                  alt={row.label}
+                  className={row.kind === "icon" ? "size-10 rounded-full border object-cover" : "h-10 w-24 rounded-md border object-cover"}
+                />
+              )
             ) : (
               <div className={`grid place-items-center border border-dashed text-[10px] text-muted-foreground ${row.kind === "icon" ? "size-10 rounded-full" : "h-10 w-24 rounded-md"}`}>
                 未设置
@@ -149,7 +163,7 @@ function BrandingCard({ guild, onChanged }: { guild: Guild; onChanged: () => voi
             <input
               ref={row.input}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
+              accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,.mp4"
               className="hidden"
               onChange={event => {
                 void onUpload(row.kind, event.target.files?.[0])
@@ -213,7 +227,7 @@ function BannersCard({ guildID, onChanged }: { guildID: string; onChanged: () =>
           Banner 图库
         </CardTitle>
         <CardDescription>
-          详情页顶部按顺序轮播展示（第 1 张为封面）；PNG/JPEG/WebP/GIF，单张不超过 8MB，最多 {limit} 张。
+          详情页顶部按顺序轮播展示（第 1 张为封面）；PNG/JPEG/WebP/GIF/MP4，单张不超过 8MB，最多 {limit} 张；视频默认静音，悬停播放声音。
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -224,9 +238,21 @@ function BannersCard({ guildID, onChanged }: { guildID: string; onChanged: () =>
         )}
         {banners.map((banner: GuildBanner, index: number) => (
           <div key={banner.id} className="flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3">
-            <img src={banner.url} alt={`banner ${index + 1}`} className="h-12 w-28 rounded-md border object-cover" />
+            {isGuildMediaVideo(banner.url) ? (
+              <video
+                src={banner.url}
+                muted
+                loop
+                autoPlay
+                playsInline
+                className="h-12 w-28 rounded-md border object-cover"
+              />
+            ) : (
+              <img src={banner.url} alt={`banner ${index + 1}`} className="h-12 w-28 rounded-md border object-cover" />
+            )}
             <p className="min-w-0 flex-1 text-sm text-muted-foreground">
               第 <span className="tabular-nums">{index + 1}</span> 张{index === 0 && "（封面）"}
+              {isGuildMediaVideo(banner.url) ? " · 视频" : ""}
             </p>
             <div className="flex items-center gap-1">
               <Button
@@ -263,7 +289,7 @@ function BannersCard({ guildID, onChanged }: { guildID: string; onChanged: () =>
         <input
           ref={fileInput}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,.mp4"
           className="hidden"
           onChange={event => {
             const file = event.target.files?.[0]

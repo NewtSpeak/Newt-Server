@@ -96,9 +96,23 @@ func previewKind(mime string) string {
 }
 
 // validateEmoji 反应 emoji 校验（AV）：合法 UTF-8、非空、长度受限、不含空白与控制字符。
+// docs 17：自定义表情反应键形如 item:{snowflake}，单独放行。
 func validateEmoji(emoji string) error {
 	if emoji == "" || len(emoji) > maxEmojiBytes || !utf8.ValidString(emoji) {
 		return errBadEmoji
+	}
+	// 自定义贴图/小表情反应：item:1234567890
+	if strings.HasPrefix(emoji, "item:") {
+		raw := strings.TrimPrefix(emoji, "item:")
+		if raw == "" {
+			return errBadEmoji
+		}
+		for _, r := range raw {
+			if r < '0' || r > '9' {
+				return errBadEmoji
+			}
+		}
+		return nil
 	}
 	if utf8.RuneCountInString(emoji) > maxEmojiRunes {
 		return errBadEmoji

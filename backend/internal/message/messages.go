@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/owlspeak/owl-server/backend/internal/sticker"
 	"gorm.io/gorm"
 )
 
@@ -31,6 +33,14 @@ type createMessageRequest struct {
 	ReplyToID     string          `json:"reply_to_id"`    // 雪花 ID 字符串
 	AttachmentIDs []string        `json:"attachment_ids"` // presign 返回的附件 UUID
 	Nonce         string          `json:"nonce" binding:"max=64"`
+	// StickerItems 贴图消息（docs 17）：长度必须为 1；与正文/附件/卡片互斥。
+	// 每项至少提供 item_id；pack_id/mark 由服务端按权威数据回填。
+	StickerItems []stickerItemInput `json:"sticker_items"`
+}
+
+// stickerItemInput 发送贴图时的客户端引用。
+type stickerItemInput struct {
+	ItemID string `json:"item_id"`
 }
 
 // createMessage POST /channels/{id}/messages（AR.1）。
@@ -46,6 +56,10 @@ func (s *service) createMessage(c *gin.Context) {
 	}
 	if !rbac.Has(bits, rbac.SendMessages) {
 		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "缺少发送消息权限")
+		return
+	}
+	// 私信：屏蔽 / 请求箱频控 / hidden 重开 / 回复即接受
+	if !s.enforcePrivateSend(c, channel, s.currentUser(c).ID) {
 		return
 	}
 	// 慢速模式（docs 03 §8-9 / 05 FR-08）：频道配置 rate_limit_per_user 秒内每用户
@@ -79,7 +93,18 @@ func (s *service) createMessage(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_CARD", err.Error())
 		return
 	}
-	if err := validateContent(input.Content, len(input.AttachmentIDs), card != ""); err != nil {
+	isStickerMsg := len(input.StickerItems) > 0
+	if isStickerMsg {
+		// M.1–M.3：贴图消息禁止正文/附件/卡片混排，恰 1 张
+		if len(input.StickerItems) != 1 {
+			fail(c, http.StatusBadRequest, "INVALID_STICKER", "贴图消息必须恰好包含 1 张贴图")
+			return
+		}
+		if strings.TrimSpace(input.Content) != "" || len(input.AttachmentIDs) > 0 || card != "" {
+			fail(c, http.StatusBadRequest, "INVALID_STICKER", "贴图消息禁止与正文、附件或卡片混排")
+			return
+		}
+	} else if err := validateContent(input.Content, len(input.AttachmentIDs), card != ""); err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_MESSAGE", err.Error())
 		return
 	}
@@ -122,26 +147,83 @@ func (s *service) createMessage(c *gin.Context) {
 		return
 	}
 
+	guildID := channel.GuildID
+	if channel.Type.IsPrivate() {
+		guildID = uuid.Nil
+	}
+
+	// 贴图消息：校验可用集合 + kind=sticker，写入 sticker_items 快照。
+	var stickerItemsJSON *string
+	msgType := model.MessageDefault
+	if isStickerMsg {
+		itemID, parseErr := strconv.ParseInt(strings.TrimSpace(input.StickerItems[0].ItemID), 10, 64)
+		if parseErr != nil || itemID <= 0 {
+			fail(c, http.StatusBadRequest, "INVALID_STICKER", "sticker_items[0].item_id 非法")
+			return
+		}
+		avail, availErr := sticker.ItemAvailableForSend(s.db, user.ID, guildID, itemID)
+		if availErr != nil {
+			fail(c, http.StatusForbidden, "STICKER_NOT_AVAILABLE", "贴图不在可用集合内")
+			return
+		}
+		if avail.Item.Kind != model.StickerKindSticker {
+			fail(c, http.StatusBadRequest, "INVALID_STICKER", "该项为小表情，不能作为贴图消息发送")
+			return
+		}
+		ref, refErr := sticker.ResolveItemRef(s.db, itemID)
+		if refErr != nil {
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解析贴图失败")
+			return
+		}
+		raw, _ := json.Marshal([]sticker.MessageStickerRef{ref})
+		s := string(raw)
+		stickerItemsJSON = &s
+		msgType = model.MessageSticker
+	} else {
+		// 正文内嵌自定义小表情 <e:item_id:mark>：须全部 ∈ 可用集合且 kind=emote
+		for _, emoteID := range sticker.ExtractCustomEmoteItemIDs(input.Content) {
+			avail, availErr := sticker.ItemAvailableForSend(s.db, user.ID, guildID, emoteID)
+			if availErr != nil {
+				fail(c, http.StatusForbidden, "EMOTE_NOT_AVAILABLE",
+					fmt.Sprintf("小表情 %d 不在可用集合内", emoteID))
+				return
+			}
+			if avail.Item.Kind != model.StickerKindEmote {
+				fail(c, http.StatusBadRequest, "INVALID_EMOTE",
+					fmt.Sprintf("条目 %d 不是小表情，不能内嵌到正文", emoteID))
+				return
+			}
+		}
+	}
+
 	// 服务端解析提及 wire format 并按 guild 校验（docs 05 FR-22、15 §7-2）；
-	// @everyone 是否生效取决于作者的 MENTION_EVERYONE 频道权限位。
-	mentions, err := s.resolveMentions(ctx.Guild.ID, input.Content, bits)
-	if err != nil {
-		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解析提及失败")
-		return
+	// DM 仅允许参与者 @（Server-16 BN.3）；@everyone 是否生效取决于 MENTION_EVERYONE。
+	var mentions resolvedMentions
+	if !isStickerMsg {
+		if channel.Type.IsPrivate() {
+			mentions, err = s.resolveMentionsDM(channel.ID, input.Content)
+		} else {
+			mentions, err = s.resolveMentions(ctx.Guild.ID, input.Content, bits)
+		}
+		if err != nil {
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解析提及失败")
+			return
+		}
 	}
 
 	message := model.Message{
 		ID:              s.ids.Next(),
-		GuildID:         ctx.Guild.ID,
+		GuildID:         guildID,
 		ChannelID:       channel.ID,
 		AuthorID:        user.ID,
-		Type:            model.MessageDefault,
+		Type:            msgType,
 		Content:         input.Content,
 		ReplyToID:       replyToID,
 		Nonce:           input.Nonce,
 		Mentions:        mentions.Users,
 		MentionRoles:    mentions.Roles,
 		MentionEveryone: mentions.Everyone,
+		StickerItems:    stickerItemsJSON,
 		CreatedAt:       now,
 	}
 	if card != "" {
@@ -180,6 +262,8 @@ func (s *service) createMessage(c *gin.Context) {
 		return
 	}
 	s.publishMessageEvent(eventbus.EventMessageCreate, message, view)
+	// 作者自动已读：刷新后 READY 不再把本人消息算作未读（docs 15 FR-01/FR-02）。
+	s.markAuthorReadOnSend(user.ID, channel, message.ID)
 	// 为被提及者（在线与离线）批量递增其该频道 mention_count（可见性过滤，docs 15 FR-04）。
 	s.bumpMentionCounts(message)
 	s.index.IndexMessage(message.ID)
@@ -339,7 +423,12 @@ func (s *service) editMessage(c *gin.Context) {
 	}
 	// 编辑后重新解析提及并更新落库字段（docs 15 FR-05：客户端按 MESSAGE_UPDATE
 	// 的最新 mentions 自行校正本地计数，服务端不追溯调整 mention_count）。
-	mentions, err := s.resolveMentions(ctx.Guild.ID, input.Content, bits)
+	var mentions resolvedMentions
+	if channel.Type.IsPrivate() {
+		mentions, err = s.resolveMentionsDM(channel.ID, input.Content)
+	} else {
+		mentions, err = s.resolveMentions(ctx.Guild.ID, input.Content, bits)
+	}
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解析提及失败")
 		return
@@ -418,22 +507,19 @@ func (s *service) deleteMessage(c *gin.Context) {
 		return
 	}
 	if !isAuthor {
-		// 管理删除他人消息属敏感操作，落审计。
-		audit.Log(s.db, audit.Entry{
-			ActorID: &user.ID, GuildID: &ctx.Guild.ID,
-			Action: "message.delete_by_moderator", TargetType: "message", TargetID: strconv.FormatInt(message.ID, 10),
-			Detail: map[string]any{"channel_id": channel.ID, "author_id": message.AuthorID},
-		})
+		// 管理删除他人消息属敏感操作，落审计（DM 无此路径：bits 不含 ManageMessages）。
+		if ctx != nil {
+			audit.Log(s.db, audit.Entry{
+				ActorID: &user.ID, GuildID: &ctx.Guild.ID,
+				Action: "message.delete_by_moderator", TargetType: "message", TargetID: strconv.FormatInt(message.ID, 10),
+				Detail: map[string]any{"channel_id": channel.ID, "author_id": message.AuthorID},
+			})
+		}
 	}
-	s.bus.Publish(eventbus.Event{
-		Type:      eventbus.EventMessageDelete,
-		GuildID:   &message.GuildID,
-		ChannelID: &message.ChannelID,
-		Payload: gin.H{
-			"id":         strconv.FormatInt(message.ID, 10),
-			"channel_id": message.ChannelID,
-			"guild_id":   message.GuildID,
-		},
+	s.publishChannelScopedEvent(eventbus.EventMessageDelete, message.GuildID, message.ChannelID, gin.H{
+		"id":         strconv.FormatInt(message.ID, 10),
+		"channel_id": message.ChannelID,
+		"guild_id":   message.GuildID,
 	})
 	s.index.RemoveMessage(message.ID)
 	c.Status(http.StatusNoContent)
@@ -460,7 +546,8 @@ func (s *service) listEdits(c *gin.Context) {
 		return
 	}
 	user := s.currentUser(c)
-	if message.AuthorID != user.ID && !rbac.Has(bits, rbac.ManageMessages) && !ctx.SystemAdmin {
+	isSysAdmin := ctx != nil && ctx.SystemAdmin
+	if message.AuthorID != user.ID && !rbac.Has(bits, rbac.ManageMessages) && !isSysAdmin {
 		notFound(c)
 		return
 	}
@@ -473,11 +560,30 @@ func (s *service) listEdits(c *gin.Context) {
 }
 
 // publishMessageEvent 广播消息事件；Gateway 按 GuildID+ChannelID 做频道可见性过滤后下发。
+// 私信域（GuildID=Nil）改为按 recipients 定向 UserIDs 推送。
 func (s *service) publishMessageEvent(eventType string, message model.Message, view messageView) {
+	s.publishChannelScopedEvent(eventType, message.GuildID, message.ChannelID, view)
+}
+
+// publishChannelScopedEvent 服频道走 Guild+Channel 广播；私信走 recipients 定向。
+func (s *service) publishChannelScopedEvent(eventType string, guildID, channelID uuid.UUID, payload any) {
+	if guildID == uuid.Nil {
+		userIDs := s.loadDMRecipientIDs(channelID)
+		if len(userIDs) == 0 {
+			return
+		}
+		s.bus.Publish(eventbus.Event{
+			Type:      eventType,
+			ChannelID: &channelID,
+			UserIDs:   userIDs,
+			Payload:   payload,
+		})
+		return
+	}
 	s.bus.Publish(eventbus.Event{
 		Type:      eventType,
-		GuildID:   &message.GuildID,
-		ChannelID: &message.ChannelID,
-		Payload:   view,
+		GuildID:   &guildID,
+		ChannelID: &channelID,
+		Payload:   payload,
 	})
 }

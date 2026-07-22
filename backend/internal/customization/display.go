@@ -137,27 +137,41 @@ func (h *api) listMembersDisplay(c *gin.Context) {
 		if roleIDs == nil {
 			roleIDs = []uuid.UUID{}
 		}
-		// 名字样式：绑定角色（含 @everyone）按层级从高到低找第一个非空样式。
+		// 名字样式：优先成员自选角色（须仍持有且 style 非空）；否则持有角色按 position 从高到低。
 		candidates := make([]model.Role, 0, len(roleIDs)+1)
+		held := make(map[uuid.UUID]struct{}, len(roleIDs)+1)
 		for _, roleID := range roleIDs {
 			if role, ok := roleByID[roleID]; ok {
 				candidates = append(candidates, role)
+				held[roleID] = struct{}{}
 			}
 		}
 		for _, role := range roles {
 			if role.IsEveryone {
 				candidates = append(candidates, role)
+				held[role.ID] = struct{}{}
 			}
 		}
 		sort.Slice(candidates, func(i, j int) bool { return candidates[i].Position > candidates[j].Position })
 		nameStyle := json.RawMessage("{}")
 		var styleRoleID *uuid.UUID
-		for _, role := range candidates {
-			if role.Style != "" && role.Style != "{}" {
-				nameStyle = json.RawMessage(role.Style)
-				id := role.ID
-				styleRoleID = &id
-				break
+		if r.Member.NameStyleRoleID != nil {
+			if _, ok := held[*r.Member.NameStyleRoleID]; ok {
+				if role, ok := roleByID[*r.Member.NameStyleRoleID]; ok && role.Style != "" && role.Style != "{}" {
+					nameStyle = json.RawMessage(role.Style)
+					id := role.ID
+					styleRoleID = &id
+				}
+			}
+		}
+		if styleRoleID == nil {
+			for _, role := range candidates {
+				if role.Style != "" && role.Style != "{}" {
+					nameStyle = json.RawMessage(role.Style)
+					id := role.ID
+					styleRoleID = &id
+					break
+				}
 			}
 		}
 		badges := badgesByUser[r.Member.UserID]

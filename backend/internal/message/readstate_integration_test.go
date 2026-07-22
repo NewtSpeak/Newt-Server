@@ -140,11 +140,17 @@ func TestMentionsAndReadStates(t *testing.T) {
 	if state, ok := readStateRow(t, db, userC, channelID); !ok || state.MentionCount != 1 {
 		t.Errorf("C 的 mention_count = %+v，期待 1（角色展开）", state)
 	}
-	if _, ok := readStateRow(t, db, owner.ID, channelID); ok {
-		t.Error("作者自己不应产生 mention_count 记录")
+	// 作者发消息后自动推进已读：有 read_state 行、mention_count=0、last_read=本条。
+	if state, ok := readStateRow(t, db, owner.ID, channelID); !ok {
+		t.Error("作者发消息后应落库已读状态（自动已读）")
+	} else if state.MentionCount != 0 {
+		t.Errorf("作者 mention_count = %d，期待 0（作者不计提及）", state.MentionCount)
+	} else if fmt.Sprint(state.LastReadMessageID) != msg1ID {
+		t.Errorf("作者 last_read = %d，期待 %s（自动已读到本条）", state.LastReadMessageID, msg1ID)
 	}
 
 	// 2. 无 MENTION_EVERYONE 权限的成员发 @everyone：字面量不生效、无人计数、正文保留。
+	//    B 此前有未读提及；本人发消息会自动已读并清零 mention_count。
 	rec, msgB := doJSONReq(t, router, http.MethodPost, base+"/messages", tokenB, map[string]string{"content": "@everyone 看我"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("B 发消息返回 %d: %s", rec.Code, rec.Body.String())
@@ -154,6 +160,12 @@ func TestMentionsAndReadStates(t *testing.T) {
 	}
 	if msgB["content"] != "@everyone 看我" {
 		t.Errorf("正文应原样保留: %v", msgB["content"])
+	}
+	msgBID := msgB["id"].(string)
+	if state, ok := readStateRow(t, db, userB, channelID); !ok || state.MentionCount != 0 {
+		t.Errorf("B 发消息后 mention_count = %+v，期待 0（自动已读清零）", state)
+	} else if fmt.Sprint(state.LastReadMessageID) != msgBID {
+		t.Errorf("B 发消息后 last_read = %d，期待 %s", state.LastReadMessageID, msgBID)
 	}
 	if state, _ := readStateRow(t, db, userC, channelID); state.MentionCount != 1 {
 		t.Errorf("无权限 @everyone 后 C 的 mention_count = %d，期待仍为 1", state.MentionCount)
@@ -168,14 +180,17 @@ func TestMentionsAndReadStates(t *testing.T) {
 		t.Errorf("服主 mention_everyone = %v，期待 true", msg3["mention_everyone"])
 	}
 	msg3ID := msg3["id"].(string)
-	if state, _ := readStateRow(t, db, userB, channelID); state.MentionCount != 2 {
-		t.Errorf("@everyone 后 B 的 mention_count = %d，期待 2", state.MentionCount)
+	// B 在步骤 2 已清零，此处仅本条 @everyone 贡献 1。
+	if state, _ := readStateRow(t, db, userB, channelID); state.MentionCount != 1 {
+		t.Errorf("@everyone 后 B 的 mention_count = %d，期待 1", state.MentionCount)
 	}
 	if state, _ := readStateRow(t, db, userC, channelID); state.MentionCount != 2 {
 		t.Errorf("@everyone 后 C 的 mention_count = %d，期待 2", state.MentionCount)
 	}
-	if _, ok := readStateRow(t, db, owner.ID, channelID); ok {
-		t.Error("@everyone 也不应给作者自己计数")
+	if state, ok := readStateRow(t, db, owner.ID, channelID); !ok || state.MentionCount != 0 {
+		t.Errorf("@everyone 后作者 mention_count = %+v，期待 0", state)
+	} else if fmt.Sprint(state.LastReadMessageID) != msg3ID {
+		t.Errorf("作者 last_read = %d，期待推进到 %s", state.LastReadMessageID, msg3ID)
 	}
 
 	// 4. 可见性过滤：B 被成员覆盖禁看后再被直接提及 → 不计数；C 正常 +1。
@@ -192,8 +207,8 @@ func TestMentionsAndReadStates(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("发消息返回 %d: %s", rec.Code, rec.Body.String())
 	}
-	if state, _ := readStateRow(t, db, userB, channelID); state.MentionCount != 2 {
-		t.Errorf("禁看期间 B 的 mention_count = %d，期待仍为 2（不可见不计数）", state.MentionCount)
+	if state, _ := readStateRow(t, db, userB, channelID); state.MentionCount != 1 {
+		t.Errorf("禁看期间 B 的 mention_count = %d，期待仍为 1（不可见不计数）", state.MentionCount)
 	}
 	if state, _ := readStateRow(t, db, userC, channelID); state.MentionCount != 3 {
 		t.Errorf("C 的 mention_count = %d，期待 3", state.MentionCount)
@@ -336,6 +351,11 @@ func TestMentionsAndReadStates(t *testing.T) {
 	}
 	if states[0].LastReadMessageID == 0 {
 		t.Error("BuildReadStates last_read_message_id 应为已 ack 的读位置")
+	}
+	// B 已读到 msg3，之后有 msg4 与「又来」两条消息；READY 必须下发精确条数，
+	// 不能只让客户端根据 last_message_id 退化显示为 1。
+	if states[0].UnreadCount != 2 {
+		t.Errorf("BuildReadStates unread_count = %d，期待 2", states[0].UnreadCount)
 	}
 	empty, err := snapshot.BuildReadStates(db, userB, nil)
 	if err != nil || len(empty) != 0 {

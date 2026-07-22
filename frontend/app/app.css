@@ -289,9 +289,13 @@
     background-position: 200% 50%;
   }
 }
+/* duration 可由行内 style.animationDuration 覆盖（RoleStyle.speed） */
 .name-gradient-animated {
   background-size: 200% 200%;
-  animation: owl-gradient-flow 3s linear infinite;
+  animation-name: owl-gradient-flow;
+  animation-duration: 4s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
@@ -63,16 +64,21 @@ func (s *service) postTyping(c *gin.Context) {
 		return
 	}
 	user := s.currentUser(c)
-	s.bus.Publish(eventbus.Event{
-		Type:      eventbus.EventTypingStart,
-		GuildID:   &channel.GuildID,
-		ChannelID: &channel.ID,
-		Payload: gin.H{
-			"channel_id": channel.ID,
-			"guild_id":   channel.GuildID,
-			"user_id":    user.ID,
-			"timestamp":  time.Now().UTC(),
-		},
-	})
+	payload := gin.H{
+		"channel_id": channel.ID,
+		"guild_id":   channel.GuildID,
+		"user_id":    user.ID,
+		"timestamp":  time.Now().UTC(),
+	}
+	if channel.Type.IsPrivate() {
+		s.publishChannelScopedEvent(eventbus.EventTypingStart, uuid.Nil, channel.ID, payload)
+	} else {
+		s.bus.Publish(eventbus.Event{
+			Type:      eventbus.EventTypingStart,
+			GuildID:   &channel.GuildID,
+			ChannelID: &channel.ID,
+			Payload:   payload,
+		})
+	}
 	c.Status(http.StatusNoContent)
 }

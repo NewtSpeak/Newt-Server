@@ -35,7 +35,9 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/security"
 	"github.com/owlspeak/owl-server/backend/internal/sfubridge"
 	"github.com/owlspeak/owl-server/backend/internal/sfunode"
+	"github.com/owlspeak/owl-server/backend/internal/social"
 	"github.com/owlspeak/owl-server/backend/internal/stage"
+	"github.com/owlspeak/owl-server/backend/internal/sticker"
 	"github.com/owlspeak/owl-server/backend/internal/userapi"
 	"github.com/owlspeak/owl-server/backend/internal/voice"
 	"github.com/owlspeak/owl-server/backend/internal/web"
@@ -144,7 +146,10 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 		// 用户账号自助端点（资料/头像/密码/会话/设置，docs 01/16）：双平面共享 handler，
 		// 后台平面在此挂载，用户端平面由 clientapi.Register 投影。
 		userapi.Register,
+		// 社交层（隐私/好友/通知收件箱，Server-16）；DM 频道后续补齐。
+		social.Register,
 		message.Register,
+		sticker.Register, // 贴图与表情包（docs 17）
 		gateway.Register,
 		auditapi.Register,
 		// AI 时代扩展功能（后台管理 API 部分）：
@@ -186,6 +191,10 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	}
 	// 入场语音包音频公开访问（/public-assets/voicepacks，docs 12 §5.1 客户端直拉）。
 	if err := message.RegisterPublicAssets(publicAssets, deps); err != nil {
+		return nil, err
+	}
+	// 贴图资产公开访问（/public-assets/stickers，docs 17 A1 内容 hash 文件名）。
+	if err := sticker.RegisterPublic(publicAssets, deps); err != nil {
 		return nil, err
 	}
 

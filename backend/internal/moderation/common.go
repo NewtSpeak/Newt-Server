@@ -45,6 +45,19 @@ func (h *api) highestRoleOf(memberID uuid.UUID) int {
 	return highest
 }
 
+// findMemberByPathID 解析路径段中的成员标识：优先 members.id，其次 user_id。
+// 文档写 :uid（用户 ID），历史客户端/部分调用也传成员记录 ID，两侧均接受。
+func (h *api) findMemberByPathID(guildID, pathID uuid.UUID) (model.Member, bool) {
+	var member model.Member
+	if err := h.deps.DB.First(&member, "id = ? AND guild_id = ?", pathID, guildID).Error; err == nil {
+		return member, true
+	}
+	if err := h.deps.DB.First(&member, "user_id = ? AND guild_id = ?", pathID, guildID).Error; err == nil {
+		return member, true
+	}
+	return member, false
+}
+
 // canGovern 治理层级判定（docs 02 §4）：系统管任意（所有者除外，由调用方先拦）；
 // 所有者任意；其余需最高角色 position 严格大于目标。
 func canGovern(ctx *perms.GuildContext, targetHighest int) bool {

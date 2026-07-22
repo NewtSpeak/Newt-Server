@@ -36,6 +36,8 @@ func registerGuildRoutes(group *gin.RouterGroup, deps appdeps.Deps, handlers *ap
 	// members/{memberID}：DELETE 为踢出（@me 时转主动退出），PATCH 为昵称管理。
 	guilds.DELETE("/members/:memberID", handlers.kickMember)
 	guilds.PATCH("/members/:memberID", handlers.updateNickname)
+	// 本人用户名样式来源角色偏好（不改变角色绑定）
+	guilds.PATCH("/members/:memberID/name-style", handlers.updateNameStylePreference)
 	guilds.PUT("/bans/:userID", handlers.banUser)
 	guilds.DELETE("/bans/:userID", handlers.unbanUser)
 	guilds.GET("/bans", handlers.listBans)

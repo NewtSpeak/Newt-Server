@@ -60,9 +60,15 @@ type MessageType string
 const (
 	MessageDefault MessageType = "DEFAULT"
 	MessageSystem  MessageType = "SYSTEM"
+	// MessageSticker 贴图消息（docs 17）：正文必须为空、恰一张 sticker，禁止附件/小表情混排。
+	MessageSticker MessageType = "STICKER"
 	// MessageSystemAdmin 系统管理员临场发言（adminpresence 文本频道）：
 	// 客户端以金色皇冠头像 +「@ 系统超级管理员」徽章渲染，不依赖成员资料。
 	MessageSystemAdmin MessageType = "SYSTEM_ADMIN"
+	// 群组私信系统灰条（Server-16 BN.5）
+	MessageSystemRecipientAdd      MessageType = "SYSTEM_RECIPIENT_ADD"
+	MessageSystemRecipientRemove   MessageType = "SYSTEM_RECIPIENT_REMOVE"
+	MessageSystemChannelNameChange MessageType = "SYSTEM_CHANNEL_NAME_CHANGE"
 )
 
 // Message 消息主表（AQ.1）。
@@ -95,7 +101,11 @@ type Message struct {
 	Card *string `gorm:"type:jsonb" json:"-"`
 	// StreamStatus 流式消息状态（bot 专项）：'' 普通消息 / STREAMING 流式进行中。
 	// 流式增量经 MESSAGE_STREAM_DELTA 事件下发，结束后本列清空并落最终正文。
-	StreamStatus string     `gorm:"size:16;not null;default:''" json:"stream_status,omitempty"`
+	StreamStatus string `gorm:"size:16;not null;default:''" json:"stream_status,omitempty"`
+	// StickerItems 贴图消息载荷（docs 17）：jsonb 数组，type=STICKER 时长度必须为 1。
+	// 形如 [{"item_id":"...","pack_id":"...","mark":"...","animated":false}]。
+	// 指针避免 GORM 把空字符串写进 jsonb 列；普通消息为 nil。
+	StickerItems *string    `gorm:"type:jsonb" json:"-"`
 	CreatedAt    time.Time  `gorm:"index:idx_message_created" json:"created_at"`
 	DeletedAt    *time.Time `gorm:"index:idx_message_deleted" json:"deleted_at,omitempty"`
 }

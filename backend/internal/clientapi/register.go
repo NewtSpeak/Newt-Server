@@ -23,6 +23,8 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/restriction"
 	"github.com/owlspeak/owl-server/backend/internal/security"
 	"github.com/owlspeak/owl-server/backend/internal/sfunode"
+	"github.com/owlspeak/owl-server/backend/internal/social"
+	"github.com/owlspeak/owl-server/backend/internal/sticker"
 	"github.com/owlspeak/owl-server/backend/internal/userapi"
 	"github.com/owlspeak/owl-server/backend/internal/voice"
 )
@@ -92,10 +94,18 @@ func Register(root *gin.RouterGroup, deps appdeps.Deps) error {
 	if err := userapi.Register(root, clientDeps); err != nil {
 		return err
 	}
+	// 社交层（隐私/好友/通知，Server-16）
+	if err := social.RegisterClient(root, clientDeps); err != nil {
+		return err
+	}
 	// AI 时代扩展功能的用户端端点（自定义资料、邀请免注册加入、密钥跨端同步）。
 	customization.RegisterClient(authed, clientDeps)
 	publicinvite.RegisterClient(authed, clientDeps)
 	keysync.RegisterClient(authed, clientDeps)
+	// 贴图与表情包（docs 17）：双平面共享 handler。
+	if err := sticker.RegisterClient(root, clientDeps); err != nil {
+		return err
+	}
 
 	// 服务器管理端点投影（角色/频道/覆盖/guild 生命周期/治理/Restriction/节点池/
 	// 审计/语音管理）：服主/管理员管理本服；系统所有者（system_admin）保留全服短路

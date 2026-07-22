@@ -11,6 +11,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/owlspeak/owl-server/backend/internal/sticker"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -49,6 +50,22 @@ func (s *service) putReaction(c *gin.Context) {
 	if err := validateEmoji(emoji); err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_EMOJI", err.Error())
 		return
+	}
+	// docs 17 R.5：自定义反应不要求在库；item 未 purged 即可追加。
+	itemID, isCustom, reactionKey := sticker.ParseReactionKey(emoji)
+	if isCustom {
+		if itemID == 0 {
+			fail(c, http.StatusBadRequest, "INVALID_EMOJI", "自定义反应 item_id 非法")
+			return
+		}
+		item, _, err := sticker.ItemResolvableForReaction(s.db, itemID)
+		if err != nil {
+			fail(c, http.StatusBadRequest, "INVALID_EMOJI", "自定义表情不存在")
+			return
+		}
+		// purged 仍允许追加（R.4/R.6 计数保留）；资源不可解析由客户端占位
+		_ = item
+		emoji = reactionKey
 	}
 	message, err := s.loadLiveMessage(channel.ID, messageID)
 	if err != nil {
@@ -94,6 +111,9 @@ func (s *service) deleteReaction(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_EMOJI", err.Error())
 		return
 	}
+	if _, isCustom, key := sticker.ParseReactionKey(emoji); isCustom {
+		emoji = key
+	}
 	message, err := s.loadLiveMessage(channel.ID, messageID)
 	if err != nil {
 		notFound(c)
@@ -137,6 +157,9 @@ func (s *service) listReactionUsers(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_EMOJI", err.Error())
 		return
 	}
+	if _, isCustom, key := sticker.ParseReactionKey(emoji); isCustom {
+		emoji = key
+	}
 	message, err := s.loadLiveMessage(channel.ID, messageID)
 	if err != nil {
 		notFound(c)
@@ -176,16 +199,11 @@ func (s *service) listReactionUsers(c *gin.Context) {
 }
 
 func (s *service) publishReactionEvent(eventType string, message model.Message, userID uuid.UUID, emoji string) {
-	s.bus.Publish(eventbus.Event{
-		Type:      eventType,
-		GuildID:   &message.GuildID,
-		ChannelID: &message.ChannelID,
-		Payload: gin.H{
-			"message_id": strconv.FormatInt(message.ID, 10),
-			"channel_id": message.ChannelID,
-			"guild_id":   message.GuildID,
-			"user_id":    userID,
-			"emoji":      emoji,
-		},
+	s.publishChannelScopedEvent(eventType, message.GuildID, message.ChannelID, gin.H{
+		"message_id": strconv.FormatInt(message.ID, 10),
+		"channel_id": message.ChannelID,
+		"guild_id":   message.GuildID,
+		"user_id":    userID,
+		"emoji":      emoji,
 	})
 }

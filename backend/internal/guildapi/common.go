@@ -139,6 +139,19 @@ func (h *api) highestRoleOf(memberID uuid.UUID) int {
 	return highest
 }
 
+// findMemberByPathID 解析路径段中的成员标识：优先 members.id，其次 user_id。
+// 文档写 :uid；角色绑定等历史路径也传成员记录 ID，两侧均接受。
+func (h *api) findMemberByPathID(guildID, pathID uuid.UUID) (model.Member, bool) {
+	var member model.Member
+	if err := h.deps.DB.First(&member, "id = ? AND guild_id = ?", pathID, guildID).Error; err == nil {
+		return member, true
+	}
+	if err := h.deps.DB.First(&member, "user_id = ? AND guild_id = ?", pathID, guildID).Error; err == nil {
+		return member, true
+	}
+	return member, false
+}
+
 // audit RBAC/结构变更审计写入（沿用 internal/audit 风格与 actor_type 判定）。
 func (h *api) audit(ctx *perms.GuildContext, user model.User, action, targetType, targetID string, detail map[string]any) {
 	actorID := user.ID

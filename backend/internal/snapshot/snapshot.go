@@ -217,37 +217,47 @@ func NewChannelPayload(db *gorm.DB, channel model.Channel) ChannelPayload {
 }
 
 // ReadState READY read_states 数组元素（docs 15 §7-1 / §8.1）：
-// 该用户在某可见频道的已读位置与未读提及数。没有记录的频道不出现在列表中
-//（客户端视为「从未读过 / 无提及」）。
+// 该用户在某可见频道的已读位置、未读提及数和普通未读条数。
+// 每个可见频道都会下发一条，即使该用户此前没有 read_states 记录；这样客户端
+// 重连后无需把「存在未读」退化为 1。
 type ReadState struct {
 	ChannelID         uuid.UUID `json:"channel_id"`
 	LastReadMessageID int64     `json:"last_read_message_id,string"`
 	MentionCount      int       `json:"mention_count"`
+	LastMessageID     int64     `json:"last_message_id,string"`
+	UnreadCount       int64     `json:"unread_count"`
 }
 
 // BuildReadStates 组装某用户的 READY read_states：只含给定（已按可见性过滤的）
-// 频道集合内已落库的记录——禁看/不可见频道即使有存量记录也不下发（docs 15 US-8）。
+// 频道集合——禁看/不可见频道即使有存量记录也不下发（docs 15 US-8）。
+// 普通未读数用 last_read_message_id 与消息雪花 ID 在同一条聚合查询中计算，避免
+// 客户端冷启动时只能得到「有未读」的保底值 1。
 func BuildReadStates(db *gorm.DB, userID uuid.UUID, channelIDs []uuid.UUID) ([]ReadState, error) {
 	states := []ReadState{}
 	if len(channelIDs) == 0 {
 		return states, nil
 	}
-	var rows []model.ReadState
-	if err := db.Where("user_id = ? AND channel_id IN ?", userID, channelIDs).Find(&rows).Error; err != nil {
+	if err := db.Table("channels AS channels").
+		Select(`
+			channels.id AS channel_id,
+			COALESCE(read_states.last_read_message_id, 0) AS last_read_message_id,
+			COALESCE(read_states.mention_count, 0) AS mention_count,
+			COALESCE(MAX(messages.id), 0) AS last_message_id,
+			COALESCE(SUM(CASE WHEN messages.id > COALESCE(read_states.last_read_message_id, 0) THEN 1 ELSE 0 END), 0) AS unread_count
+		`).
+		Joins("LEFT JOIN read_states AS read_states ON read_states.user_id = ? AND read_states.channel_id = channels.id", userID).
+		Joins("LEFT JOIN messages AS messages ON messages.channel_id = channels.id").
+		Where("channels.id IN ?", channelIDs).
+		Group("channels.id, read_states.last_read_message_id, read_states.mention_count").
+		Order("channels.id").
+		Scan(&states).Error; err != nil {
 		return nil, err
-	}
-	for _, row := range rows {
-		states = append(states, ReadState{
-			ChannelID:         row.ChannelID,
-			LastReadMessageID: row.LastReadMessageID,
-			MentionCount:      row.MentionCount,
-		})
 	}
 	return states, nil
 }
 
 // ChannelViewers 列出对某频道具备 VIEW_CHANNEL 的全部成员 user_id
-//（权限覆盖变更前后各算一次即可得到可见性增减集合）。
+// （权限覆盖变更前后各算一次即可得到可见性增减集合）。
 func ChannelViewers(db *gorm.DB, guildID, channelID uuid.UUID) ([]uuid.UUID, error) {
 	var users []model.User
 	err := db.Raw(`SELECT users.* FROM users JOIN members ON members.user_id = users.id WHERE members.guild_id = ?`, guildID).

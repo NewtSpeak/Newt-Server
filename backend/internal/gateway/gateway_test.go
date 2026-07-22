@@ -85,6 +85,10 @@ func (d *stubDirectory) GuildSnapshots(user model.User, guildIDs []uuid.UUID) ([
 	return result, nil
 }
 
+func (d *stubDirectory) SocialSnapshot(userID uuid.UUID) (any, any, any, int64) {
+	return []any{}, map[string]any{}, []any{}, int64(0)
+}
+
 // ---- 测试基础设施 ----
 
 func testOptions() options {

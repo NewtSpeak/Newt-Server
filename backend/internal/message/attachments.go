@@ -55,9 +55,14 @@ func (s *service) presignAttachment(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_SIZE", "size 需为正整数")
 		return
 	}
-	limit := s.uploadLimitBytes(ctx.Guild.ID)
+	// DM 走平台默认限额（Server-16 BN.3），服频道吃服级上限。
+	guildID := uuid.Nil
+	if !channel.Type.IsPrivate() {
+		guildID = ctx.Guild.ID
+	}
+	limit := s.uploadLimitBytes(guildID)
 	if input.Size > limit {
-		fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", fmt.Sprintf("附件大小超过本服上限 %d 字节", limit))
+		fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", fmt.Sprintf("附件大小超过上限 %d 字节", limit))
 		return
 	}
 	mime := strings.TrimSpace(input.MIME)
@@ -73,7 +78,7 @@ func (s *service) presignAttachment(c *gin.Context) {
 	now := time.Now().UTC()
 	attachment := model.Attachment{
 		ID:              uuid.New(),
-		GuildID:         ctx.Guild.ID,
+		GuildID:         guildID,
 		ChannelID:       channel.ID,
 		UploaderID:      user.ID,
 		Filename:        strings.TrimSpace(input.Filename),

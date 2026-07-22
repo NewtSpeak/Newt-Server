@@ -24,7 +24,7 @@ import (
 //  5. S→C DISPATCH {t: 事件名, s: 序列号, d: 载荷}
 //
 // 会话与回放：每个会话（session_id）在服务端保留事件回放环形缓冲
-//（默认每会话最近 512 条或 60s，二者取小，见 options）；连接断开后会话保留
+// （默认每会话最近 512 条或 60s，二者取小，见 options）；连接断开后会话保留
 // ResumeWindow（默认 60s）等待 RESUME，超时清理。
 const (
 	opHello        = "HELLO"
@@ -89,7 +89,7 @@ type resumeData struct {
 }
 
 // presenceUpdateData 上行 PRESENCE_UPDATE 载荷：本端期望状态
-//（online/idle/dnd/invisible）+ 可选自定义状态（文本/emoji/过期时间，docs 01 FR-23）。
+// （online/idle/dnd/invisible）+ 可选自定义状态（文本/emoji/过期时间，docs 01 FR-23）。
 type presenceUpdateData struct {
 	Status          string     `json:"status"`
 	CustomText      string     `json:"custom_text"`
@@ -105,7 +105,7 @@ type presenceUpdateData struct {
 //     他人 invisible 已掩码，本人条目为真实状态）——与 guilds[].presences 内容一致，
 //     提供扁平视图便于客户端一次性建 presence 缓存；
 //   - ReadStates 该用户全部可见频道的已读状态（docs 15 §7-1：{channel_id,
-//     last_read_message_id, mention_count}，没有记录的频道省略）。
+//     last_read_message_id, last_message_id, mention_count, unread_count}）。
 type readyData struct {
 	SessionID  string                 `json:"session_id"`
 	User       platformbadge.UserView `json:"user"`
@@ -113,4 +113,9 @@ type readyData struct {
 	Guilds     []snapshot.Guild       `json:"guilds"`
 	Presences  []snapshot.Presence    `json:"presences"`
 	ReadStates []snapshot.ReadState   `json:"read_states"`
+	// Server-16 BS.1 社交扩展（好友/隐私/私信列表/通知未读）
+	Relationships           any   `json:"relationships,omitempty"`
+	Privacy                 any   `json:"privacy,omitempty"`
+	PrivateChannels         any   `json:"private_channels,omitempty"`
+	NotificationUnreadCount int64 `json:"notification_unread_count"`
 }

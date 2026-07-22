@@ -69,6 +69,27 @@ type resolvedMentions struct {
 	Everyone bool
 }
 
+// resolveMentionsDM 私信域提及：仅参与者用户 @ 有效；无角色 / @everyone（Server-16 BN.3）。
+func (s *service) resolveMentionsDM(channelID uuid.UUID, content string) (resolvedMentions, error) {
+	tokens := parseMentionTokens(content)
+	result := resolvedMentions{
+		Users:    model.UUIDList{},
+		Roles:    model.UUIDList{},
+		Everyone: false,
+	}
+	if len(tokens.UserIDs) == 0 {
+		return result, nil
+	}
+	var recipientIDs []uuid.UUID
+	if err := s.db.Model(&model.ChannelRecipient{}).
+		Where("channel_id = ? AND user_id IN ?", channelID, tokens.UserIDs).
+		Pluck("user_id", &recipientIDs).Error; err != nil {
+		return result, err
+	}
+	result.Users = keepOrder(tokens.UserIDs, recipientIDs)
+	return result, nil
+}
+
 // resolveMentions 解析正文并按 guild 校验：
 //   - 用户提及必须确为该服成员（防跨服 ID 塞入 payload）；
 //   - 角色提及必须为该服角色，且排除 @everyone 角色（防经 <@&everyone_role_id>

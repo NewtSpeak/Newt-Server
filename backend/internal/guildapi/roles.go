@@ -30,7 +30,8 @@ func (h *api) listRoles(c *gin.Context) {
 type roleRequest struct {
 	Name        string `json:"name" binding:"required,min=1,max=100"`
 	Permissions int64  `json:"permissions"`
-	Position    int    `json:"position" binding:"gte=1"`
+	// position：自定义角色 ≥1；@everyone 固定 0（update 时允许 0，create 仍由 canGrant 拒绝 0 级）。
+	Position int `json:"position" binding:"gte=0"`
 	// 展示属性（Owl-Desktop docs 04 §8）：可选，缺省时保留原值（更新）或用零值（创建）。
 	Color       *string `json:"color" binding:"omitempty,max=16"`
 	Hoist       *bool   `json:"hoist"`
@@ -329,9 +330,9 @@ func (h *api) changeMemberRole(c *gin.Context, assign bool) {
 		fail(c, http.StatusBadRequest, "INVALID_ID", "成员或角色 ID 无效")
 		return
 	}
-	var member model.Member
+	member, memberOK := h.findMemberByPathID(ctx.Guild.ID, memberID)
 	var role model.Role
-	if h.deps.DB.First(&member, "id = ? AND guild_id = ?", memberID, ctx.Guild.ID).Error != nil ||
+	if !memberOK ||
 		h.deps.DB.First(&role, "id = ? AND guild_id = ?", roleID, ctx.Guild.ID).Error != nil {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "成员或角色不存在")
 		return

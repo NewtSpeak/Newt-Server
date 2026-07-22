@@ -701,22 +701,188 @@ const normalizeQuota = (raw: RawScreenQuota): ScreenQuota => ({
 
 export type RoleStyleType = "" | "solid" | "linear" | "radial"
 
-export type RoleStyle = {
+/** 文字/icon 共用表面样式字段 */
+export type RoleSurfaceStyle = {
   type: RoleStyleType
   colors?: string[]
   angle?: number
   shape?: "circle" | "ellipse"
   animated?: boolean
+  /** 流动动画周期（秒），0.5–20，默认 4 */
+  speed?: number
+}
+
+/** 文字装饰（用户名 / 徽章文本共用） */
+export type RoleTextDecor = {
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  strikethrough?: boolean
+}
+
+/** 角色徽章（消息流/成员列表标签） */
+export type RoleBadgeStyle = RoleTextDecor & {
+  enabled?: boolean
+  background?: RoleSurfaceStyle
+  /** 背景图（可与渐变叠加） */
+  background_image_url?: string
+  icon_url?: string
+  show_name?: boolean
+  text_color?: string
+}
+
+/**
+ * 角色名样式（Role.Style jsonb）：
+ * - 文字侧 type/colors/…/speed + bold/italic/underline/strikethrough
+ * - icon_sync / icon：色点
+ * - badge：徽章背景 + 自定义 icon + 文字装饰
+ */
+export type RoleStyle = RoleSurfaceStyle &
+  RoleTextDecor & {
+    icon_sync?: boolean
+    icon?: RoleSurfaceStyle
+    badge?: RoleBadgeStyle
+  }
+
+function parseSurface(raw: RoleSurfaceStyle | undefined | null): RoleSurfaceStyle | undefined {
+  if (!raw?.type) return undefined
+  if (raw.type !== "solid" && raw.type !== "linear" && raw.type !== "radial") return undefined
+  return {
+    type: raw.type,
+    colors: raw.colors,
+    angle: raw.angle,
+    shape: raw.shape,
+    animated: raw.animated,
+    speed: raw.speed,
+  }
+}
+
+function parseTextDecor(raw: RoleTextDecor | undefined | null): RoleTextDecor {
+  return {
+    bold: raw?.bold || undefined,
+    italic: raw?.italic || undefined,
+    underline: raw?.underline || undefined,
+    strikethrough: raw?.strikethrough || undefined,
+  }
 }
 
 export function parseRoleStyle(raw: string | undefined | null): RoleStyle {
   if (!raw) return { type: "" }
   try {
     const parsed = JSON.parse(raw) as RoleStyle
-    return parsed && parsed.type ? parsed : { type: "" }
+    if (!parsed) return { type: "" }
+    const type =
+      parsed.type === "solid" || parsed.type === "linear" || parsed.type === "radial"
+        ? parsed.type
+        : ("" as const)
+    const textDecor = parseTextDecor(parsed)
+    const badgeDecor = parseTextDecor(parsed.badge)
+    const badge = parsed.badge
+      ? {
+          enabled: parsed.badge.enabled,
+          background: parseSurface(parsed.badge.background),
+          background_image_url: parsed.badge.background_image_url || undefined,
+          icon_url: parsed.badge.icon_url || undefined,
+          show_name: parsed.badge.show_name,
+          text_color: parsed.badge.text_color || undefined,
+          ...badgeDecor,
+        }
+      : undefined
+    const hasBadge =
+      badge &&
+      (badge.enabled ||
+        badge.background ||
+        badge.background_image_url ||
+        badge.icon_url ||
+        badge.text_color ||
+        badge.bold ||
+        badge.italic ||
+        badge.underline ||
+        badge.strikethrough)
+    const hasTextDecor =
+      textDecor.bold || textDecor.italic || textDecor.underline || textDecor.strikethrough
+    if (!type && !hasBadge && !hasTextDecor) return { type: "" }
+    return {
+      type,
+      colors: parsed.colors,
+      angle: parsed.angle,
+      shape: parsed.shape,
+      animated: parsed.animated,
+      speed: parsed.speed,
+      ...textDecor,
+      icon_sync: parsed.icon_sync,
+      icon: parseSurface(parsed.icon),
+      badge: hasBadge ? badge : undefined,
+    }
   } catch {
     return { type: "" }
   }
+}
+
+async function uploadRoleBadgeAsset(
+  gid: string,
+  rid: string,
+  path: "badge-icon" | "badge-background",
+  file: File,
+) {
+  let session = getSession()
+  if (session && new Date(session.access_expires_at).getTime() <= Date.now()) {
+    session = await refreshSession(session)
+  }
+  const headers = new Headers()
+  headers.set("Content-Type", file.type || "application/octet-stream")
+  if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
+  const response = await fetch(`${baseURL}/guilds/${gid}/roles/${rid}/${path}`, {
+    method: "PUT",
+    headers,
+    body: file,
+  })
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as ApiError
+    throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
+  }
+  return response.json() as Promise<{
+    role: Role
+    icon_url?: string
+    background_image_url?: string
+  }>
+}
+
+/** 角色徽章 icon 上传（原始字节，勿走 JSON Content-Type） */
+export async function uploadRoleBadgeIcon(gid: string, rid: string, file: File) {
+  return uploadRoleBadgeAsset(gid, rid, "badge-icon", file)
+}
+
+export const deleteRoleBadgeIcon = (gid: string, rid: string) =>
+  api<Role>(`/guilds/${gid}/roles/${rid}/badge-icon`, { method: "DELETE" })
+
+/** 角色徽章背景图上传 */
+export async function uploadRoleBadgeBackground(gid: string, rid: string, file: File) {
+  return uploadRoleBadgeAsset(gid, rid, "badge-background", file)
+}
+
+export const deleteRoleBadgeBackground = (gid: string, rid: string) =>
+  api<Role>(`/guilds/${gid}/roles/${rid}/badge-background`, { method: "DELETE" })
+
+/** 解析出 icon 实际应用的表面样式（sync 用文字；独立用 icon；无则 null） */
+export function resolveRoleIconStyle(style: RoleStyle | null | undefined): RoleSurfaceStyle | null {
+  if (!style?.type) return null
+  if (style.icon_sync) {
+    return {
+      type: style.type,
+      colors: style.colors,
+      angle: style.angle,
+      shape: style.shape,
+      animated: style.animated,
+      speed: style.speed,
+    }
+  }
+  if (style.icon?.type) return style.icon
+  // 无高级 icon 样式时回退文字纯色/首色，便于色点仍有颜色
+  if (style.colors?.[0]) {
+    return { type: "solid", colors: [style.colors[0]] }
+  }
+  return null
 }
 
 export const updateRoleStyle = (gid: string, rid: string, style: RoleStyle) =>
@@ -994,7 +1160,7 @@ export const updateGuild = (
   body: { name?: string; description?: string; restriction_badge_visible?: boolean; restriction_reason_required?: boolean }
 ) => api<Guild>(`/guilds/${gid}`, { method: "PATCH", body: JSON.stringify(body) })
 
-/** 上传服务器图标 / 横幅（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF；需 MANAGE_GUILD） */
+/** 上传服务器图标 / 横幅（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF/MP4；需 MANAGE_GUILD） */
 export async function uploadGuildImage(gid: string, kind: "icon" | "banner", file: File) {
   const session = getSession()
   const form = new FormData()
@@ -1020,7 +1186,7 @@ export const deleteGuildImage = (gid: string, kind: "icon" | "banner") =>
 export const listGuildBanners = (gid: string) =>
   api<{ guild_id: string; banners: GuildBanner[]; limit: number }>(`/guilds/${gid}/banners`)
 
-/** 新增 banner（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF；需 MANAGE_GUILD），追加到末尾 */
+/** 新增 banner（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF/MP4；需 MANAGE_GUILD），追加到末尾 */
 export async function addGuildBanner(gid: string, file: File) {
   const session = getSession()
   const form = new FormData()

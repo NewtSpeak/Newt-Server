@@ -10,6 +10,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/perms"
 	"github.com/owlspeak/owl-server/backend/internal/security"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
+	"github.com/owlspeak/owl-server/backend/internal/social"
 	"gorm.io/gorm"
 )
 
@@ -74,6 +75,11 @@ func (d *dbDirectory) ReadStates(userID uuid.UUID, channelIDs []uuid.UUID) ([]sn
 	return snapshot.BuildReadStates(d.db, userID, channelIDs)
 }
 
+func (d *dbDirectory) SocialSnapshot(userID uuid.UUID) (any, any, any, int64) {
+	rels, privacy, privateChannels, unread := social.SnapshotForReady(d.db, userID)
+	return rels, privacy, privateChannels, unread
+}
+
 // memberCache 对 GuildMemberIDs 做短 TTL 缓存（默认 30s）减少广播时的成员查询；
 // 可见性判定不缓存（Restriction 等要求近实时收紧，docs 12 §6.3）。
 type memberCache struct {
@@ -121,4 +127,8 @@ func (c *memberCache) GuildSnapshots(user model.User, guildIDs []uuid.UUID) ([]s
 
 func (c *memberCache) ReadStates(userID uuid.UUID, channelIDs []uuid.UUID) ([]snapshot.ReadState, error) {
 	return c.inner.ReadStates(userID, channelIDs)
+}
+
+func (c *memberCache) SocialSnapshot(userID uuid.UUID) (any, any, any, int64) {
+	return c.inner.SocialSnapshot(userID)
 }

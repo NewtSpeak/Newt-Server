@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react"
-import { PaletteIcon, PlusIcon, ShieldCheckIcon, Trash2Icon } from "lucide-react"
+import { PaletteIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { PermissionMatrix } from "~/components/server/permission-matrix"
 import { RoleStyleEditor } from "~/components/server/role-style-editor"
-import { StyledName } from "~/components/server/styled-name"
+import { RoleStyleIcon, StyledName } from "~/components/server/styled-name"
 import { EmptyState, ErrorState, LoadingState } from "~/components/states"
 import { Badge } from "~/components/ui/badge"
 import { Button } from "~/components/ui/button"
@@ -186,9 +186,10 @@ export function RolesTab({
                 selected?.id === role.id ? "border-primary/50 bg-primary/5 font-medium" : "border-transparent hover:bg-muted/60"
               )}
             >
-              <ShieldCheckIcon
-                className="size-4 shrink-0 text-muted-foreground"
-                style={role.color ? { color: role.color } : undefined}
+              <RoleStyleIcon
+                style={parseRoleStyle(role.style)}
+                fallbackColor={role.color}
+                className="size-3.5"
               />
               <StyledName nameStyle={parseRoleStyle(role.style)} className="truncate">
                 {role.name}
@@ -315,7 +316,13 @@ function RoleStyleSection({ guildID, role, reload }: { guildID: string; role: Ro
         <span className="text-xs text-muted-foreground">拥有此角色的成员按此渲染名字</span>
       </legend>
       <div className="flex flex-col gap-4">
-        <RoleStyleEditor value={style} onChange={setStyle} previewText={role.name} />
+        <RoleStyleEditor
+          value={style}
+          onChange={setStyle}
+          previewText={role.name}
+          guildID={guildID}
+          roleID={role.id}
+        />
         <div className="flex justify-end">
           <Button size="sm" onClick={onSave} disabled={!dirty || saving}>
             {saving ? "保存中…" : "保存样式"}

@@ -195,13 +195,18 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 		// 已读状态查询失败不阻断连接：客户端可经 GET /users/@me/read-states 兜底校正。
 		readStates = []snapshot.ReadState{}
 	}
+	rels, privacy, privateChannels, notifUnread := h.hub.dir.SocialSnapshot(user.ID)
 	ready := readyData{
-		SessionID:  sess.id,
-		User:       platformbadge.ViewOf(user),
-		GuildIDs:   guildIDs,
-		Guilds:     guilds,
-		Presences:  unionPresences,
-		ReadStates: readStates,
+		SessionID:               sess.id,
+		User:                    platformbadge.ViewOf(user),
+		GuildIDs:                guildIDs,
+		Guilds:                  guilds,
+		Presences:               unionPresences,
+		ReadStates:              readStates,
+		Relationships:           rels,
+		Privacy:                 privacy,
+		PrivateChannels:         privateChannels,
+		NotificationUnreadCount: notifUnread,
 	}
 	if !h.writeDirect(c, outFrame{Op: opReady, D: ready}) {
 		sess.detach(c)

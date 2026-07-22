@@ -82,8 +82,14 @@ func parseMessageIDParam(c *gin.Context) (int64, bool) {
 	return id, true
 }
 
+// dmPermissionBits 私信域固定权限（Server-16 BN.2：不参与 RBAC）。
+// 含消息读写/反应/附件；不含 ManageMessages / MentionEveryone（删除仅作者本人）。
+const dmPermissionBits = rbac.ViewChannel | rbac.SendMessages | rbac.ReadMessageHistory |
+	rbac.AddReactions | rbac.AttachFiles | rbac.EmbedLinks | rbac.UseExternalEmojis
+
 // channelAccess 按频道 ID 定位所属服并计算调用者的频道权限。
 // 频道不存在 / 不可见（含 Restriction 禁看）一律 404，不泄露存在性。
+// DM/GROUP_DM：校验 channel_recipients 成员资格，返回 nil GuildContext + dmPermissionBits。
 func (s *service) channelAccess(c *gin.Context, channelID uuid.UUID) (*perms.GuildContext, model.Channel, rbac.Permission, bool) {
 	var channel model.Channel
 	if err := s.db.First(&channel, "id = ?", channelID).Error; err != nil {
@@ -91,6 +97,19 @@ func (s *service) channelAccess(c *gin.Context, channelID uuid.UUID) (*perms.Gui
 		return nil, channel, 0, false
 	}
 	user := s.currentUser(c)
+
+	if channel.Type.IsPrivate() {
+		var n int64
+		s.db.Model(&model.ChannelRecipient{}).
+			Where("channel_id = ? AND user_id = ?", channel.ID, user.ID).
+			Count(&n)
+		if n == 0 {
+			notFound(c)
+			return nil, channel, 0, false
+		}
+		return nil, channel, dmPermissionBits, true
+	}
+
 	ctx, err := perms.LoadGuild(s.db, user, channel.GuildID)
 	if err != nil {
 		notFound(c)
@@ -102,6 +121,15 @@ func (s *service) channelAccess(c *gin.Context, channelID uuid.UUID) (*perms.Gui
 		return nil, channel, 0, false
 	}
 	return ctx, channel, bits, true
+}
+
+// loadDMRecipientIDs 私信频道参与者 user_id 列表。
+func (s *service) loadDMRecipientIDs(channelID uuid.UUID) []uuid.UUID {
+	var ids []uuid.UUID
+	_ = s.db.Model(&model.ChannelRecipient{}).
+		Where("channel_id = ?", channelID).
+		Pluck("user_id", &ids).Error
+	return ids
 }
 
 // uploadLimitBytes 该服的单文件上限：优先服级配置，未配置回落平台默认 25MB（AT.4）。
@@ -144,12 +172,14 @@ type reactionSummary struct {
 // 后台与用户端两个前缀共用同一增强。
 // Card 为卡片消息载荷（bot 专项）：原样 JSON 透传，客户端按 schema 渲染；
 // AuthorIsBot 标记作者为机器人（客户端渲染 BOT 徽标）。
+// StickerItems 贴图消息载荷（docs 17）：type=STICKER 时透出快照数组。
 type messageView struct {
 	model.Message
-	AuthorUsername string            `json:"author_username"`
-	AuthorIsBot    bool              `json:"author_is_bot,omitempty"`
-	Card           json.RawMessage   `json:"card,omitempty"`
-	Attachments    []attachmentView  `json:"attachments"`
+	AuthorUsername string           `json:"author_username"`
+	AuthorIsBot    bool             `json:"author_is_bot,omitempty"`
+	Card           json.RawMessage  `json:"card,omitempty"`
+	StickerItems   json.RawMessage  `json:"sticker_items,omitempty"`
+	Attachments    []attachmentView `json:"attachments"`
 	Reactions      []reactionSummary `json:"reactions"`
 }
 
@@ -254,6 +284,10 @@ func (s *service) messageViews(messages []model.Message, viewer ...uuid.UUID) ([
 		if message.Card != nil && *message.Card != "" {
 			card = json.RawMessage(*message.Card)
 		}
+		var stickerItems json.RawMessage
+		if message.StickerItems != nil && *message.StickerItems != "" {
+			stickerItems = json.RawMessage(*message.StickerItems)
+		}
 		reactions := reactionGroups[message.ID]
 		if reactions == nil {
 			reactions = []reactionSummary{}
@@ -263,6 +297,7 @@ func (s *service) messageViews(messages []model.Message, viewer ...uuid.UUID) ([
 			AuthorUsername: usernames[message.AuthorID],
 			AuthorIsBot:    botFlags[message.AuthorID],
 			Card:           card,
+			StickerItems:   stickerItems,
 			Attachments:    s.attachmentViews(grouped[message.ID], now),
 			Reactions:      reactions,
 		})

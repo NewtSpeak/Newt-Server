@@ -107,6 +107,18 @@ const (
 	// 密钥/连接信息同步（keysync 专项）：SyncVault 更新后定向发给本人全部端，
 	// 各端据此拉取最新密文实现服务器登录/连接信息的实时多端同步。
 	EventVaultUpdate = "VAULT_UPDATE"
+
+	// 贴图与表情包（docs 17）：包/条目变更、库引用软隐藏、服 ban。
+	EventStickerPackCreate      = "STICKER_PACK_CREATE"
+	EventStickerPackUpdate      = "STICKER_PACK_UPDATE"
+	EventStickerPackDelete      = "STICKER_PACK_DELETE" // payload.status 区分 soft_deleted / purged
+	EventStickerPackRestore     = "STICKER_PACK_RESTORE"
+	EventStickerItemCreate      = "STICKER_ITEM_CREATE"
+	EventStickerItemUpdate      = "STICKER_ITEM_UPDATE"
+	EventStickerItemDelete      = "STICKER_ITEM_DELETE"
+	EventStickerLibraryUpdate   = "STICKER_LIBRARY_UPDATE" // Install 软隐藏/恢复时推给安装者
+	EventGuildStickerPackBanAdd = "GUILD_STICKER_PACK_BAN_ADD"
+	EventGuildStickerPackBanRemove = "GUILD_STICKER_PACK_BAN_REMOVE"
 )
 
 // 内部事件（仅服务内部流转，Gateway 必须过滤，不下发客户端）。

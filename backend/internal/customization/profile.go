@@ -178,6 +178,7 @@ func (h *api) serveProfileAsset(c *gin.Context) {
 	}
 	contentTypes := map[string]string{
 		".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+		".mp4": "video/mp4",
 	}
 	contentType, ok := contentTypes[strings.ToLower(filepath.Ext(name))]
 	if !ok {

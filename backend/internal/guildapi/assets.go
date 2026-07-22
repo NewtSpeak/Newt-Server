@@ -21,6 +21,7 @@ import (
 // 服务器图标/横幅存储（Owl-Desktop docs 02 FR-13/§8-9）：与用户头像同用
 // DataDir/profile 目录和 /public-assets/profile/:name 公开访问路由（customization
 // 模块注册），文件名带纳秒版本号保证 URL 不可变，可配 immutable 长缓存。
+// 图标/banner 额外支持短循环 MP4（客户端默认静音、悬停出声；banner 多张轮播）。
 
 const maxGuildAssetBytes = int64(8 << 20) // 8 MiB，与用户头像一致
 
@@ -29,6 +30,25 @@ var guildAssetExt = map[string]string{
 	"image/jpeg": "jpg",
 	"image/webp": "webp",
 	"image/gif":  "gif",
+	"video/mp4":  "mp4",
+}
+
+// sniffGuildAsset 魔数嗅探展示资产类型（不信客户端 Content-Type）。
+// 除 http.DetectContentType 外，额外识别 ISO BMFF / MP4 的 ftyp 盒（部分封装
+// 会被 DetectContentType 判为 application/octet-stream）。
+func sniffGuildAsset(head []byte) (contentType, ext string, ok bool) {
+	if len(head) == 0 {
+		return "", "", false
+	}
+	contentType = strings.Split(http.DetectContentType(head), ";")[0]
+	if ext, allowed := guildAssetExt[contentType]; allowed {
+		return contentType, ext, true
+	}
+	// MP4/ISO BMFF：offset 4 起为 "ftyp"
+	if len(head) >= 12 && string(head[4:8]) == "ftyp" {
+		return "video/mp4", "mp4", true
+	}
+	return "", "", false
 }
 
 // uploadGuildIcon POST /guilds/{gid}/icon（multipart 字段 file，需 MANAGE_GUILD）。
@@ -53,7 +73,7 @@ func (h *api) saveGuildAssetFile(c *gin.Context, guildID uuid.UUID, kind string)
 		return "", false
 	}
 	if fileHeader.Size > maxGuildAssetBytes {
-		fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", fmt.Sprintf("图片不能超过 %d 字节", maxGuildAssetBytes))
+		fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", fmt.Sprintf("文件不能超过 %d 字节", maxGuildAssetBytes))
 		return "", false
 	}
 	file, err := fileHeader.Open()
@@ -65,10 +85,9 @@ func (h *api) saveGuildAssetFile(c *gin.Context, guildID uuid.UUID, kind string)
 
 	head := make([]byte, 512)
 	n, _ := io.ReadFull(file, head)
-	contentType := strings.Split(http.DetectContentType(head[:n]), ";")[0]
-	ext, allowed := guildAssetExt[contentType]
+	_, ext, allowed := sniffGuildAsset(head[:n])
 	if !allowed {
-		fail(c, http.StatusBadRequest, "UNSUPPORTED_TYPE", "仅支持 PNG/JPEG/WebP/GIF 图片")
+		fail(c, http.StatusBadRequest, "UNSUPPORTED_TYPE", "仅支持 PNG/JPEG/WebP/GIF 图片或 MP4 视频")
 		return "", false
 	}
 
@@ -97,7 +116,7 @@ func (h *api) saveGuildAssetFile(c *gin.Context, guildID uuid.UUID, kind string)
 	if err != nil || written == 0 || int64(written) > maxGuildAssetBytes {
 		_ = os.Remove(target)
 		if int64(written) > maxGuildAssetBytes {
-			fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", fmt.Sprintf("图片不能超过 %d 字节", maxGuildAssetBytes))
+			fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", fmt.Sprintf("文件不能超过 %d 字节", maxGuildAssetBytes))
 			return "", false
 		}
 		fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空或写入失败")

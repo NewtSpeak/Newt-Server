@@ -124,6 +124,8 @@ func (s *service) startStream(c *gin.Context) {
 		return
 	}
 	s.publishMessageEvent(eventbus.EventMessageStreamStart, message, view)
+	// 流式占位创建即推进作者已读（与普通 createMessage 一致）。
+	s.markAuthorReadOnSend(user.ID, channel, message.ID)
 	c.JSON(http.StatusCreated, view)
 }
 

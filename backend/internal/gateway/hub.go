@@ -24,6 +24,8 @@ type directory interface {
 	GuildSnapshots(user model.User, guildIDs []uuid.UUID) ([]snapshot.Guild, error)
 	// ReadStates 该用户在给定（已按可见性过滤的）频道内的已读状态（docs 15 §7-1）。
 	ReadStates(userID uuid.UUID, channelIDs []uuid.UUID) ([]snapshot.ReadState, error)
+	// SocialSnapshot READY 社交扩展：relationships + privacy + private_channels + notification_unread_count（Server-16 BS.1）。
+	SocialSnapshot(userID uuid.UUID) (relationships any, privacy any, privateChannels any, unread int64)
 }
 
 // hub 在线会话注册表：session_id → 会话，另按 userID 建索引（同一用户允许多端多会话）。

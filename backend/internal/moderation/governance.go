@@ -16,6 +16,7 @@ import (
 
 // kickMember DELETE /guilds/{gid}/members/{memberID}：踢出成员（需 KICK_MEMBERS + 层级）。
 // 路径段为 @me 时转入主动退出流程（与踢出共用路由避免 gin 路由树冲突）。
+// memberID 可为成员记录 ID 或 user_id（docs :uid）。
 func (h *api) kickMember(c *gin.Context) {
 	if c.Param("memberID") == "@me" {
 		h.leaveGuild(c)
@@ -34,8 +35,8 @@ func (h *api) kickMember(c *gin.Context) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "成员不存在")
 		return
 	}
-	var member model.Member
-	if err := h.deps.DB.First(&member, "id = ? AND guild_id = ?", memberID, ctx.Guild.ID).Error; err != nil {
+	member, ok := h.findMemberByPathID(ctx.Guild.ID, memberID)
+	if !ok {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "成员不存在")
 		return
 	}

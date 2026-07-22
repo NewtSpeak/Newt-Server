@@ -89,11 +89,15 @@ type Guild struct {
 }
 
 type Member struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	GuildID   uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_member_guild_user" json:"guild_id"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_member_guild_user" json:"user_id"`
-	Nickname  string    `gorm:"size:64" json:"nickname"`
-	CreatedAt time.Time `json:"created_at"`
+	ID       uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	GuildID  uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_member_guild_user" json:"guild_id"`
+	UserID   uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_member_guild_user" json:"user_id"`
+	Nickname string    `gorm:"size:64" json:"nickname"`
+	// NameStyleRoleID 本人选用的用户名样式来源角色（必须是自己持有的角色，含 @everyone）；
+	// 为空则自动取「持有角色中 position 最高且配置了 style」的角色。
+	// 仅影响用户名/徽章样式展示，不改变角色绑定。
+	NameStyleRoleID *uuid.UUID `gorm:"type:uuid" json:"name_style_role_id"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 type Role struct {
@@ -131,10 +135,20 @@ const (
 	ChannelText     ChannelType = "TEXT"
 	ChannelVoice    ChannelType = "VOICE"
 	ChannelCategory ChannelType = "CATEGORY"
+	// ChannelDM / ChannelGroupDM 为私信类型（Server-16 BN）：
+	// GuildID 固定为 uuid.Nil（零 UUID，非 NULL，避免大面积 nullable 改造）。
+	ChannelDM      ChannelType = "DM"
+	ChannelGroupDM ChannelType = "GROUP_DM"
 )
+
+// IsPrivate 是否为私信域频道（无 guild RBAC）。
+func (t ChannelType) IsPrivate() bool {
+	return t == ChannelDM || t == ChannelGroupDM
+}
 
 type Channel struct {
 	ID      uuid.UUID   `gorm:"type:uuid;primaryKey" json:"id"`
+	// GuildID 服内频道为真实服 ID；DM/GROUP_DM 为 uuid.Nil（JSON 常输出为 0000…）。
 	GuildID uuid.UUID   `gorm:"type:uuid;not null;index" json:"guild_id"`
 	Name    string      `gorm:"size:100;not null" json:"name"`
 	Type    ChannelType `gorm:"size:16;not null" json:"type"`

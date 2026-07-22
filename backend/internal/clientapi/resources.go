@@ -144,6 +144,8 @@ type memberSummary struct {
 	Bio            string      `json:"bio"`
 	IsOwner        bool        `json:"is_owner"`
 	RoleIDs        []uuid.UUID `json:"role_ids"`
+	// NameStyleRoleID 本人选用的用户名样式来源角色；空 = 自动最高样式角色。
+	NameStyleRoleID *uuid.UUID `json:"name_style_role_id,omitempty"`
 }
 
 // listMembers GET /gapi/v1/guilds/{gid}/members：服务器成员列表（需本人是成员）。
@@ -226,17 +228,18 @@ func (h *api) listMembers(c *gin.Context) {
 			roleIDs = []uuid.UUID{}
 		}
 		result = append(result, memberSummary{
-			ID:             r.Member.ID,
-			UserID:         r.Member.UserID,
-			Username:       r.Username,
-			DisplayName:    r.DisplayName,
-			Nickname:       r.Member.Nickname,
-			AvatarURL:      r.AvatarURL,
-			AvatarAnimated: r.AvatarAnimated,
-			BannerURL:      r.BannerURL,
-			Bio:            r.Bio,
-			IsOwner:        r.Member.UserID == guild.OwnerUserID,
-			RoleIDs:        roleIDs,
+			ID:              r.Member.ID,
+			UserID:          r.Member.UserID,
+			Username:        r.Username,
+			DisplayName:     r.DisplayName,
+			Nickname:        r.Member.Nickname,
+			AvatarURL:       r.AvatarURL,
+			AvatarAnimated:  r.AvatarAnimated,
+			BannerURL:       r.BannerURL,
+			Bio:             r.Bio,
+			IsOwner:         r.Member.UserID == guild.OwnerUserID,
+			RoleIDs:         roleIDs,
+			NameStyleRoleID: r.Member.NameStyleRoleID,
 		})
 	}
 	c.JSON(http.StatusOK, result)
