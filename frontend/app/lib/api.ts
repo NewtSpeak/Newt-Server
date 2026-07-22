@@ -177,6 +177,8 @@ export type Channel = {
   user_limit?: number
   /** 文本频道慢速模式秒数（0 = 关闭，docs 03 §8-9） */
   rate_limit_per_user?: number
+  /** 慢速模式豁免角色；为空表示对所有成员生效 */
+  rate_limit_exempt_role_ids?: string[]
 }
 
 export type GuildMember = {
@@ -198,7 +200,7 @@ export const getGuildDetail = (gid: string) => api<{ guild: Guild; member_count:
 export const listChannels = (gid: string) => api<Channel[]>(`/guilds/${gid}/channels`)
 export const createChannel = (
   gid: string,
-  body: { name: string; type: ChannelType; parent_id?: string; user_limit?: number; rate_limit_per_user?: number }
+  body: { name: string; type: ChannelType; parent_id?: string; user_limit?: number; rate_limit_per_user?: number; rate_limit_exempt_role_ids?: string[] }
 ) => api<Channel>(`/guilds/${gid}/channels`, { method: "POST", body: JSON.stringify(body) })
 export const listMembers = (gid: string) => api<GuildMember[]>(`/guilds/${gid}/members`)
 export const listRoles = (gid: string) => api<Role[]>(`/guilds/${gid}/roles`)
@@ -1225,7 +1227,7 @@ export const deleteRole = (gid: string, rid: string) => api<void>(`/guilds/${gid
 
 export const updateChannel = (
   cid: string,
-  body: { name?: string; topic?: string; parent_id?: string | null; user_limit?: number; rate_limit_per_user?: number }
+  body: { name?: string; topic?: string; parent_id?: string | null; user_limit?: number; rate_limit_per_user?: number; rate_limit_exempt_role_ids?: string[] }
 ) => api<Channel>(`/channels/${cid}`, { method: "PATCH", body: JSON.stringify(body) })
 export const deleteChannel = (cid: string) => api<void>(`/channels/${cid}`, { method: "DELETE" })
 /** 批量保存频道排序（拖拽后整体提交） */

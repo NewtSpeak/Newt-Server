@@ -101,6 +101,7 @@ export default function ServerDetailPage() {
           <ChannelsTab
             guildID={guildId}
             channels={channels.data ?? []}
+            roles={roles.data ?? []}
             status={channels.status}
             error={channels.error}
             reload={() => channels.reload()}

@@ -49,5 +49,6 @@ make build
 | `EMBEDDED_SFU_MEDIA_UDP` | `3478` | 内嵌 SFU 媒体 UDP 端口 |
 | `EMBEDDED_SFU_PUBLIC_IP` | `127.0.0.1` | 上报给客户端的媒体 IP |
 | `EMBEDDED_SFU_NO_TLS` | development 默认 `true` | 内嵌 SFU 是否禁用信令 TLS |
+| `STICKER_MAX_FILE_BYTES` | `50m`（50 MiB） | 贴图/表情单文件大小上限（每服务器实例独立）。纯数字为字节；可写 `50m`/`50mb`/`512k`/`1g`。**`0` = 不限制**（实际无硬顶，仍受内存与反向代理限制）。格式支持 PNG/JPEG/WebP/GIF + MP4/WebM 等 |
 
 SigNoz 部署方式与完整示例见 `../deploy/signoz/README.md`。Owl-SFU 目前暴露 Prometheus 指标，接入 OTLP 为后续事项。

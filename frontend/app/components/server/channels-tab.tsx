@@ -28,6 +28,7 @@ import {
 import { Input } from "~/components/ui/input"
 import { Label } from "~/components/ui/label"
 import { Switch } from "~/components/ui/switch"
+import { Checkbox } from "~/components/ui/checkbox"
 import {
   createChannel,
   deleteChannel,
@@ -39,6 +40,7 @@ import {
   updateChannel,
   type Channel,
   type ChannelType,
+  type Role,
   type VoiceStageConfig,
 } from "~/lib/api"
 
@@ -49,12 +51,14 @@ import {
 export function ChannelsTab({
   guildID,
   channels,
+  roles,
   status,
   error,
   reload,
 }: {
   guildID: string
   channels: Channel[]
+  roles: Role[]
   status: "idle" | "loading" | "success" | "error"
   error: string
   reload: () => void
@@ -223,6 +227,7 @@ export function ChannelsTab({
       <EditChannelDialog
         channel={editing}
         categories={categoryChannels}
+        roles={roles}
         onClose={() => setEditing(null)}
         onSaved={reload}
       />
@@ -294,11 +299,13 @@ const NO_CATEGORY = "__none__"
 function EditChannelDialog({
   channel,
   categories,
+  roles,
   onClose,
   onSaved,
 }: {
   channel: Channel | null
   categories: Channel[]
+  roles: Role[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -307,6 +314,7 @@ function EditChannelDialog({
   const [parentID, setParentID] = useState<string>(NO_CATEGORY)
   const [userLimit, setUserLimit] = useState(0)
   const [rateLimit, setRateLimit] = useState(0)
+  const [exemptRoleIDs, setExemptRoleIDs] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -316,6 +324,7 @@ function EditChannelDialog({
       setParentID(channel.parent_id ?? NO_CATEGORY)
       setUserLimit(channel.user_limit ?? 0)
       setRateLimit(channel.rate_limit_per_user ?? 0)
+      setExemptRoleIDs(channel.rate_limit_exempt_role_ids ?? [])
     }
   }, [channel])
 
@@ -329,6 +338,7 @@ function EditChannelDialog({
         ...(channel.type !== "CATEGORY" ? { parent_id: parentID === NO_CATEGORY ? null : parentID } : {}),
         ...(channel.type === "VOICE" ? { user_limit: userLimit } : {}),
         ...(channel.type === "TEXT" ? { rate_limit_per_user: rateLimit } : {}),
+        ...(channel.type === "TEXT" ? { rate_limit_exempt_role_ids: exemptRoleIDs } : {}),
       })
       toast.success("频道已更新")
       onClose()
@@ -386,7 +396,7 @@ function EditChannelDialog({
             </div>
           )}
           {channel?.type === "TEXT" && (
-            <div className="grid gap-2">
+            <div className="grid gap-3">
               <Label htmlFor="edit-channel-rate-limit">慢速模式（秒，0 = 关闭，最大 21600）</Label>
               <Input
                 id="edit-channel-rate-limit"
@@ -397,6 +407,28 @@ function EditChannelDialog({
                 onChange={event => setRateLimit(Math.min(21600, Math.max(0, Number(event.target.value) || 0)))}
                 className="w-32 tabular-nums"
               />
+              <div className="grid gap-2">
+                <Label>慢速模式豁免角色</Label>
+                <p className="text-xs text-muted-foreground">默认所有成员都受限；选中的角色可以跳过慢速模式。</p>
+                <div className="grid max-h-40 gap-1 overflow-y-auto rounded-md border p-2 sm:grid-cols-2">
+                  {roles.map(role => {
+                    const checked = exemptRoleIDs.includes(role.id)
+                    return (
+                      <Label key={role.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/60">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={next =>
+                            setExemptRoleIDs(current =>
+                              Boolean(next) ? [...current.filter(id => id !== role.id), role.id] : current.filter(id => id !== role.id)
+                            )
+                          }
+                        />
+                        <span className="truncate text-sm">{role.name}</span>
+                      </Label>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>

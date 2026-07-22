@@ -106,6 +106,11 @@ func (s *Service) handleJoin(c *gin.Context) {
 		fail(c, http.StatusForbidden, "MISSING_PERMISSIONS", "缺少 CONNECT 权限")
 		return
 	}
+	// 上锁频道：未输入密码不可进房（管理员可绕过）。
+	if !perms.IsChannelUnlocked(s.db, user.ID, channel, ctx, bits) {
+		fail(c, http.StatusForbidden, "CHANNEL_LOCKED", "频道已上锁，请先输入访问密码")
+		return
+	}
 	// Restriction 禁听 = 禁 join（docs 12）。
 	if restriction.Denies(user.ID, input.GuildID, &input.ChannelID, model.ChannelVoice).ListenVoice {
 		fail(c, http.StatusForbidden, "RESTRICTED", "你当前被限制收听该语音频道")

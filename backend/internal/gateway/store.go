@@ -67,6 +67,10 @@ func (d *dbDirectory) CanSeeChannel(user model.User, guildID, channelID uuid.UUI
 	return perms.CanSeeChannel(d.db, user, guildID, channelID)
 }
 
+func (d *dbDirectory) CanAccessChannelContent(user model.User, guildID, channelID uuid.UUID) bool {
+	return perms.CanAccessChannelContent(d.db, user, guildID, channelID)
+}
+
 func (d *dbDirectory) GuildSnapshots(user model.User, guildIDs []uuid.UUID) ([]snapshot.Guild, error) {
 	return snapshot.BuildGuilds(d.db, user, guildIDs)
 }
@@ -119,6 +123,10 @@ func (c *memberCache) GuildMemberIDs(guildID uuid.UUID) ([]uuid.UUID, error) {
 
 func (c *memberCache) CanSeeChannel(user model.User, guildID, channelID uuid.UUID) bool {
 	return c.inner.CanSeeChannel(user, guildID, channelID)
+}
+
+func (c *memberCache) CanAccessChannelContent(user model.User, guildID, channelID uuid.UUID) bool {
+	return c.inner.CanAccessChannelContent(user, guildID, channelID)
 }
 
 func (c *memberCache) GuildSnapshots(user model.User, guildIDs []uuid.UUID) ([]snapshot.Guild, error) {

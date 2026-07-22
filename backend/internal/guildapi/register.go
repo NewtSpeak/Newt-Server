@@ -60,6 +60,9 @@ func Register(group *gin.RouterGroup, deps appdeps.Deps) error {
 	// 顶级频道资源（PATCH/DELETE /channels/{cid}，Owl-Desktop docs 03 FR-09/FR-11）。
 	authed.PATCH("/channels/:channelID", h.updateChannel)
 	authed.DELETE("/channels/:channelID", h.deleteChannel)
+	// 频道访问密码解锁（上锁频道访问消息/语音前调用）。
+	authed.POST("/channels/:channelID/unlock", h.unlockChannel)
+	authed.GET("/channels/:channelID/unlock-status", h.unlockStatus)
 	// 顶级频道权限覆盖与权限投影（Owl-Desktop docs 04 FR-15：客户端以频道为入口，
 	// 不强制携带 guildID）。语义与 guild 前缀版一致，额外要求调用者对频道可见
 	//（无 VIEW_CHANNEL 一律 404，防扫频）。

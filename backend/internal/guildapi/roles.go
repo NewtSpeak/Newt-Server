@@ -182,7 +182,7 @@ type rolePositionEntry struct {
 }
 
 // reorderRoles PATCH /guilds/{gid}/roles（需 MANAGE_ROLES）：角色批量排序
-//（Owl-Desktop docs 04 §8：拖拽调整层级）。body 为 [{id, position}] 数组；
+// （Owl-Desktop docs 04 §8：拖拽调整层级）。body 为 [{id, position}] 数组；
 // @everyone（position=0）不可参与排序；每个被移动的角色必须处于调用者可管理
 // 层级内，且目标 position 不得超过自身最高角色（防自我提权）；事务整体生效，
 // 逐角色发 GUILD_ROLE_UPDATE。
@@ -296,6 +296,28 @@ func (h *api) deleteRole(c *gin.Context) {
 		if err := tx.Where("type = ? AND target_id = ? AND channel_id IN (SELECT id FROM channels WHERE guild_id = ?)",
 			model.OverwriteRole, role.ID, ctx.Guild.ID).Delete(&model.ChannelOverwrite{}).Error; err != nil {
 			return err
+		}
+		// 角色删除后同步清理频道慢速模式豁免，避免遗留无效角色 ID。
+		var channels []model.Channel
+		if err := tx.Where("guild_id = ?", ctx.Guild.ID).Find(&channels).Error; err != nil {
+			return err
+		}
+		for _, channel := range channels {
+			next := make(model.UUIDList, 0, len(channel.RateLimitExemptRoleIDs))
+			removed := false
+			for _, exemptID := range channel.RateLimitExemptRoleIDs {
+				if exemptID == role.ID {
+					removed = true
+					continue
+				}
+				next = append(next, exemptID)
+			}
+			if removed {
+				if err := tx.Model(&model.Channel{}).Where("id = ?", channel.ID).
+					Update("rate_limit_exempt_role_ids", next).Error; err != nil {
+					return err
+				}
+			}
 		}
 		return tx.Delete(&model.Role{}, "id = ?", role.ID).Error
 	})

@@ -120,6 +120,11 @@ func (s *service) channelAccess(c *gin.Context, channelID uuid.UUID) (*perms.Gui
 		notFound(c)
 		return nil, channel, 0, false
 	}
+	// 上锁频道：可见但未解锁时拒绝访问消息内容（管理员/服主/系统管可绕过）。
+	if !perms.IsChannelUnlocked(s.db, user.ID, channel, ctx, bits) {
+		fail(c, http.StatusForbidden, "CHANNEL_LOCKED", "频道已上锁，请先输入访问密码")
+		return nil, channel, 0, false
+	}
 	return ctx, channel, bits, true
 }
 

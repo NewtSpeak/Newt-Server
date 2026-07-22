@@ -315,3 +315,44 @@ func TestClientTextFlow(t *testing.T) {
 		t.Fatalf("用户端保留策略管理端点返回 %d，期待 404（不挂载）", rec.Code)
 	}
 }
+
+// TestClientSlowmodeAppliesToOwnerAndRoleExemption 慢速模式默认对所有成员生效，
+// 包括拥有全部管理权限的服主；显式配置的角色才可豁免。
+func TestClientSlowmodeAppliesToOwnerAndRoleExemption(t *testing.T) {
+	router, db, _ := newTextRouter(t)
+	token, _, channelID := setupTextFixture(t, router, db)
+	if err := db.Model(&model.Channel{}).Where("id = ?", channelID).
+		Update("rate_limit_per_user", 60).Error; err != nil {
+		t.Fatalf("设置慢速模式失败: %v", err)
+	}
+	base := "/gapi/v1/channels/" + channelID.String() + "/messages"
+	rec, _ := doJSONReq(t, router, http.MethodPost, base, token, map[string]string{"content": "第一条"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("首条消息返回 %d: %s", rec.Code, rec.Body.String())
+	}
+	rec, body := doJSONReq(t, router, http.MethodPost, base, token, map[string]string{"content": "第二条"})
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("服主未受慢速模式限制，返回 %d: %s", rec.Code, rec.Body.String())
+	}
+	errorBody, _ := body["error"].(map[string]any)
+	if errorBody["code"] != "SLOWMODE_RATE_LIMITED" {
+		t.Fatalf("慢速模式错误码异常: %s", rec.Body.String())
+	}
+
+	var channel model.Channel
+	if err := db.First(&channel, "id = ?", channelID).Error; err != nil {
+		t.Fatalf("读取频道失败: %v", err)
+	}
+	var everyone model.Role
+	if err := db.First(&everyone, "guild_id = ? AND is_everyone = true", channel.GuildID).Error; err != nil {
+		t.Fatalf("读取 @everyone 角色失败: %v", err)
+	}
+	if err := db.Model(&model.Channel{}).Where("id = ?", channelID).
+		Update("rate_limit_exempt_role_ids", model.UUIDList{everyone.ID}).Error; err != nil {
+		t.Fatalf("配置豁免角色失败: %v", err)
+	}
+	rec, _ = doJSONReq(t, router, http.MethodPost, base, token, map[string]string{"content": "豁免后发送"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("@everyone 豁免后返回 %d: %s", rec.Code, rec.Body.String())
+	}
+}

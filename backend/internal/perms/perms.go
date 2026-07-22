@@ -141,6 +141,52 @@ func CanSeeChannel(db *gorm.DB, user model.User, guildID, channelID uuid.UUID) b
 	return err == nil
 }
 
+// CanBypassChannelLock 服主 / 系统管理员 / 持 MANAGE_CHANNELS 者可直接访问上锁频道。
+func CanBypassChannelLock(ctx *GuildContext, channelBits rbac.Permission) bool {
+	if ctx == nil {
+		return false
+	}
+	if ctx.Owner || ctx.SystemAdmin {
+		return true
+	}
+	return rbac.Has(channelBits, rbac.ManageChannels) || rbac.Has(channelBits, rbac.Administrator)
+}
+
+// IsChannelUnlocked 用户是否已对上锁频道完成密码解锁（或无需解锁）。
+// channel 须已加载 PasswordHash（AfterFind 会填充 Locked）。
+func IsChannelUnlocked(db *gorm.DB, userID uuid.UUID, channel model.Channel, ctx *GuildContext, channelBits rbac.Permission) bool {
+	if channel.PasswordHash == "" {
+		return true
+	}
+	if CanBypassChannelLock(ctx, channelBits) {
+		return true
+	}
+	var n int64
+	_ = db.Model(&model.ChannelUnlock{}).
+		Where("channel_id = ? AND user_id = ?", channel.ID, userID).
+		Count(&n).Error
+	return n > 0
+}
+
+// CanAccessChannelContent 可见且已解锁（消息内容 / 语音进房等）。
+// 不可见返回 false；可见但未解锁也返回 false。
+func CanAccessChannelContent(db *gorm.DB, user model.User, guildID, channelID uuid.UUID) bool {
+	ctx, err := LoadGuild(db, user, guildID)
+	if err != nil {
+		return false
+	}
+	channel, bits, err := ctx.ChannelPerms(db, channelID)
+	if err != nil {
+		return false
+	}
+	return IsChannelUnlocked(db, user.ID, channel, ctx, bits)
+}
+
+// RevokeChannelUnlocks 改密或关锁时清空该频道全部解锁记录。
+func RevokeChannelUnlocks(db *gorm.DB, channelID uuid.UUID) error {
+	return db.Where("channel_id = ?", channelID).Delete(&model.ChannelUnlock{}).Error
+}
+
 // Has 语义糖：ctx 权限是否包含 required 全部位。
 func (ctx *GuildContext) Has(required rbac.Permission) bool {
 	return rbac.Has(ctx.Permissions, required)

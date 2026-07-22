@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/perms"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/owlspeak/owl-server/backend/internal/security"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
 	"github.com/owlspeak/owl-server/backend/internal/voice"
 	"gorm.io/gorm"
@@ -31,6 +33,16 @@ type createChannelRequest struct {
 	UserLimit int `json:"user_limit" binding:"omitempty,gte=0,lte=99"`
 	// RateLimitPerUser 文本频道慢速模式秒数（docs 03 §8-9）：0=关闭，≤21600。
 	RateLimitPerUser int `json:"rate_limit_per_user" binding:"omitempty,gte=0,lte=21600"`
+	// RateLimitExemptRoleIDs 慢速模式豁免角色（为空表示不豁免任何角色）。
+	RateLimitExemptRoleIDs []uuid.UUID `json:"rate_limit_exempt_role_ids"`
+	// Password 频道访问密码（TEXT/VOICE）；设置后频道上锁，访问内容需先解锁。
+	Password string `json:"password" binding:"omitempty,min=1,max=64"`
+	// VoiceNote 语音频道活动注释（≤200）。
+	VoiceNote string `json:"voice_note" binding:"omitempty,max=200"`
+	// Private 私密频道：对 @everyone deny VIEW_CHANNEL，并对 VisibleRoleIDs allow。
+	Private bool `json:"private"`
+	// VisibleRoleIDs 私密频道可见角色（本服 role id，不含 @everyone）。
+	VisibleRoleIDs []uuid.UUID `json:"visible_role_ids"`
 }
 
 // validateParentCategory 校验 parent_id 指向本服 CATEGORY 频道（分类自身不可再嵌套）。
@@ -48,6 +60,36 @@ func (h *api) validateParentCategory(c *gin.Context, guildID uuid.UUID, channelT
 		return false
 	}
 	return true
+}
+
+// validateRateLimitExemptRoles 校验慢速模式豁免角色均属于当前服务器，并去重。
+func (h *api) validateRateLimitExemptRoles(c *gin.Context, guildID uuid.UUID, channelType model.ChannelType, roleIDs []uuid.UUID) ([]uuid.UUID, bool) {
+	if len(roleIDs) == 0 {
+		return []uuid.UUID{}, true
+	}
+	if channelType != model.ChannelText {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "rate_limit_exempt_role_ids 仅文本频道可设")
+		return nil, false
+	}
+	seen := make(map[uuid.UUID]struct{}, len(roleIDs))
+	unique := make([]uuid.UUID, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		if roleID == uuid.Nil {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "rate_limit_exempt_role_ids 含无效角色")
+			return nil, false
+		}
+		if _, exists := seen[roleID]; exists {
+			continue
+		}
+		seen[roleID] = struct{}{}
+		unique = append(unique, roleID)
+	}
+	var count int64
+	if err := h.deps.DB.Model(&model.Role{}).Where("guild_id = ? AND id IN ?", guildID, unique).Count(&count).Error; err != nil || count != int64(len(unique)) {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "rate_limit_exempt_role_ids 含无效角色")
+		return nil, false
+	}
+	return unique, true
 }
 
 // createChannel POST /guilds/{gid}/channels（需 MANAGE_CHANNELS）→ CHANNEL_CREATE。
@@ -71,6 +113,22 @@ func (h *api) createChannel(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "rate_limit_per_user 仅文本频道可设")
 		return
 	}
+	exemptRoleIDs, ok := h.validateRateLimitExemptRoles(c, ctx.Guild.ID, input.Type, input.RateLimitExemptRoleIDs)
+	if !ok {
+		return
+	}
+	if input.Password != "" && input.Type == model.ChannelCategory {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "分类不能设置访问密码")
+		return
+	}
+	if strings.TrimSpace(input.VoiceNote) != "" && input.Type != model.ChannelVoice {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "voice_note 仅语音频道可设")
+		return
+	}
+	if input.Private && input.Type == model.ChannelCategory {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "分类不支持私密频道开关")
+		return
+	}
 	// 未显式指定 position 时，追加到本服末尾（避免新建频道全为 0 导致排序不稳定）。
 	position := input.Position
 	if position == 0 {
@@ -79,19 +137,52 @@ func (h *api) createChannel(c *gin.Context) {
 			Select("COALESCE(MAX(position), -1)").Scan(&maxPosition)
 		position = maxPosition + 1
 	}
+	passwordHash := ""
+	if input.Password != "" {
+		hash, err := security.HashChannelPassword(input.Password)
+		if err != nil {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+		passwordHash = hash
+	}
+	voiceNote := ""
+	if input.Type == model.ChannelVoice {
+		voiceNote = strings.TrimSpace(input.VoiceNote)
+	}
 	channel := model.Channel{
 		ID: uuid.New(), GuildID: ctx.Guild.ID,
 		Name: strings.TrimSpace(input.Name), Type: input.Type,
 		Topic: strings.TrimSpace(input.Topic), Position: position,
 		ParentID: input.ParentID, UserLimit: input.UserLimit,
-		RateLimitPerUser: input.RateLimitPerUser,
+		RateLimitPerUser:       input.RateLimitPerUser,
+		RateLimitExemptRoleIDs: model.UUIDList(exemptRoleIDs),
+		PasswordHash:           passwordHash,
+		VoiceNote:              voiceNote,
 	}
-	if err := h.deps.DB.Create(&channel).Error; err != nil {
+	channel.SyncLocked()
+
+	err := h.deps.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&channel).Error; err != nil {
+			return err
+		}
+		if input.Private && (input.Type == model.ChannelText || input.Type == model.ChannelVoice) {
+			if err := applyPrivateVisibility(tx, ctx.Guild.ID, channel.ID, input.VisibleRoleIDs); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errInvalidVisibleRole) {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "visible_role_ids 含无效角色")
+			return
+		}
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "创建频道失败")
 		return
 	}
 	h.audit(ctx, user, "rbac.channel_create", "channel", channel.ID.String(), map[string]any{
-		"name": channel.Name, "type": channel.Type,
+		"name": channel.Name, "type": channel.Type, "locked": channel.Locked, "private": input.Private,
 	})
 	guildID := ctx.Guild.ID
 	// CHANNEL_CREATE 携带 ChannelID → hub 按 VIEW_CHANNEL 可见性过滤，仅推给可见成员。
@@ -100,6 +191,44 @@ func (h *api) createChannel(c *gin.Context) {
 		Payload: snapshot.NewChannelPayload(h.deps.DB, channel),
 	})
 	c.JSON(http.StatusCreated, channel)
+}
+
+var errInvalidVisibleRole = errors.New("invalid visible role")
+
+// applyPrivateVisibility 私密频道初始 overwrite：@everyone deny VIEW；指定角色 allow VIEW。
+func applyPrivateVisibility(tx *gorm.DB, guildID, channelID uuid.UUID, roleIDs []uuid.UUID) error {
+	var everyone model.Role
+	if err := tx.First(&everyone, "guild_id = ? AND is_everyone = true", guildID).Error; err != nil {
+		return err
+	}
+	view := int64(rbac.ViewChannel)
+	if err := tx.Create(&model.ChannelOverwrite{
+		ID: uuid.New(), ChannelID: channelID, Type: model.OverwriteRole,
+		TargetID: everyone.ID, Allow: 0, Deny: view,
+	}).Error; err != nil {
+		return err
+	}
+	seen := map[uuid.UUID]struct{}{}
+	for _, roleID := range roleIDs {
+		if roleID == everyone.ID {
+			continue
+		}
+		if _, ok := seen[roleID]; ok {
+			continue
+		}
+		seen[roleID] = struct{}{}
+		var role model.Role
+		if err := tx.First(&role, "id = ? AND guild_id = ?", roleID, guildID).Error; err != nil {
+			return errInvalidVisibleRole
+		}
+		if err := tx.Create(&model.ChannelOverwrite{
+			ID: uuid.New(), ChannelID: channelID, Type: model.OverwriteRole,
+			TargetID: role.ID, Allow: view, Deny: 0,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type updateChannelRequest struct {
@@ -112,6 +241,14 @@ type updateChannelRequest struct {
 	UserLimit *int `json:"user_limit" binding:"omitempty,gte=0,lte=99"`
 	// RateLimitPerUser 文本频道慢速模式秒数（docs 03 §8-9）。
 	RateLimitPerUser *int `json:"rate_limit_per_user" binding:"omitempty,gte=0,lte=21600"`
+	// RateLimitExemptRoleIDs 显式传空数组可清空豁免角色。
+	RateLimitExemptRoleIDs *[]uuid.UUID `json:"rate_limit_exempt_role_ids"`
+	// Password 设置/更换访问密码；与 Locked=false 同时时以关锁为准。
+	Password *string `json:"password" binding:"omitempty,min=1,max=64"`
+	// Locked 显式关锁（false 清空密码）；true  alone 表示保持/需要密码字段新建锁。
+	Locked *bool `json:"locked"`
+	// VoiceNote 语音频道活动注释；传空串清空。
+	VoiceNote *string `json:"voice_note" binding:"omitempty,max=200"`
 }
 
 // updateChannel PATCH /channels/{cid}（需 MANAGE_CHANNELS；无 VIEW_CHANNEL 一律 404）
@@ -127,7 +264,11 @@ func (h *api) updateChannel(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
-	before := map[string]any{"name": channel.Name, "topic": channel.Topic}
+	before := map[string]any{
+		"name": channel.Name, "topic": channel.Topic,
+		"locked": channel.Locked, "voice_note": channel.VoiceNote,
+	}
+	revokeUnlocks := false
 	if input.Name != nil {
 		channel.Name = strings.TrimSpace(*input.Name)
 		if channel.Name == "" {
@@ -163,6 +304,46 @@ func (h *api) updateChannel(c *gin.Context) {
 		channel.RateLimitPerUser = *input.RateLimitPerUser
 		updates["rate_limit_per_user"] = channel.RateLimitPerUser
 	}
+	if input.RateLimitExemptRoleIDs != nil {
+		exemptRoleIDs, valid := h.validateRateLimitExemptRoles(c, ctx.Guild.ID, channel.Type, *input.RateLimitExemptRoleIDs)
+		if !valid {
+			return
+		}
+		channel.RateLimitExemptRoleIDs = model.UUIDList(exemptRoleIDs)
+		updates["rate_limit_exempt_role_ids"] = channel.RateLimitExemptRoleIDs
+	}
+	if input.VoiceNote != nil {
+		if channel.Type != model.ChannelVoice {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "voice_note 仅语音频道可设")
+			return
+		}
+		channel.VoiceNote = strings.TrimSpace(*input.VoiceNote)
+		updates["voice_note"] = channel.VoiceNote
+	}
+	// 密码锁：Locked=false 关锁；Password 设/改密；Locked=true 且当前未锁时必须带 Password。
+	if input.Locked != nil && !*input.Locked {
+		if channel.PasswordHash != "" {
+			channel.PasswordHash = ""
+			updates["password_hash"] = ""
+			revokeUnlocks = true
+		}
+	} else if input.Password != nil {
+		if channel.Type == model.ChannelCategory {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "分类不能设置访问密码")
+			return
+		}
+		hash, err := security.HashChannelPassword(*input.Password)
+		if err != nil {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+			return
+		}
+		channel.PasswordHash = hash
+		updates["password_hash"] = hash
+		revokeUnlocks = true
+	} else if input.Locked != nil && *input.Locked && channel.PasswordHash == "" {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "上锁时必须提供 password")
+		return
+	}
 	if len(updates) == 0 {
 		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "没有可更新的字段")
 		return
@@ -171,8 +352,16 @@ func (h *api) updateChannel(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "更新频道失败")
 		return
 	}
+	if revokeUnlocks {
+		_ = perms.RevokeChannelUnlocks(h.deps.DB, channel.ID)
+	}
+	channel.SyncLocked()
 	h.audit(ctx, user, "rbac.channel_update", "channel", channel.ID.String(), map[string]any{
-		"before": before, "after": map[string]any{"name": channel.Name, "topic": channel.Topic},
+		"before": before,
+		"after": map[string]any{
+			"name": channel.Name, "topic": channel.Topic,
+			"locked": channel.Locked, "voice_note": channel.VoiceNote,
+		},
 	})
 	guildID := ctx.Guild.ID
 	h.publish(eventbus.Event{
@@ -180,6 +369,98 @@ func (h *api) updateChannel(c *gin.Context) {
 		Payload: snapshot.NewChannelPayload(h.deps.DB, channel),
 	})
 	c.JSON(http.StatusOK, channel)
+}
+
+type unlockChannelRequest struct {
+	Password string `json:"password" binding:"required,min=1,max=64"`
+}
+
+// unlockChannel POST /channels/{cid}/unlock：输入正确密码后写入解锁记录。
+// 无 VIEW_CHANNEL → 404；未上锁 → 200 幂等；密码错误 → 403。
+func (h *api) unlockChannel(c *gin.Context) {
+	user := h.deps.CurrentUser(c)
+	channelID, err := uuid.Parse(c.Param("channelID"))
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	var channel model.Channel
+	if err := h.deps.DB.First(&channel, "id = ?", channelID).Error; err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	if channel.Type.IsPrivate() || channel.Type == model.ChannelCategory {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	ctx, err := perms.LoadGuild(h.deps.DB, user, channel.GuildID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	channel, bits, err := ctx.ChannelPerms(h.deps.DB, channel.ID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	if channel.PasswordHash == "" {
+		c.JSON(http.StatusOK, gin.H{"channel_id": channel.ID, "unlocked": true, "already": true})
+		return
+	}
+	if perms.IsChannelUnlocked(h.deps.DB, user.ID, channel, ctx, bits) {
+		c.JSON(http.StatusOK, gin.H{"channel_id": channel.ID, "unlocked": true, "already": true})
+		return
+	}
+	var input unlockChannelRequest
+	if !bind(c, &input) {
+		return
+	}
+	if !security.VerifyPassword(channel.PasswordHash, input.Password) {
+		fail(c, http.StatusForbidden, "CHANNEL_PASSWORD_INCORRECT", "频道密码错误")
+		return
+	}
+	rec := model.ChannelUnlock{
+		ID: uuid.New(), ChannelID: channel.ID, UserID: user.ID, UnlockedAt: time.Now().UTC(),
+	}
+	// 唯一索引冲突时视为已解锁（并发双点）。
+	if err := h.deps.DB.Where("channel_id = ? AND user_id = ?", channel.ID, user.ID).
+		Assign(model.ChannelUnlock{UnlockedAt: rec.UnlockedAt}).
+		FirstOrCreate(&rec).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解锁失败")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"channel_id": channel.ID, "unlocked": true})
+}
+
+// unlockStatus GET /channels/{cid}/unlock-status：当前用户是否已解锁（可见频道）。
+func (h *api) unlockStatus(c *gin.Context) {
+	user := h.deps.CurrentUser(c)
+	channelID, err := uuid.Parse(c.Param("channelID"))
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	var channel model.Channel
+	if err := h.deps.DB.First(&channel, "id = ?", channelID).Error; err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	ctx, err := perms.LoadGuild(h.deps.DB, user, channel.GuildID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	channel, bits, err := ctx.ChannelPerms(h.deps.DB, channel.ID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	unlocked := perms.IsChannelUnlocked(h.deps.DB, user.ID, channel, ctx, bits)
+	c.JSON(http.StatusOK, gin.H{
+		"channel_id": channel.ID,
+		"locked":     channel.PasswordHash != "",
+		"unlocked":   unlocked,
+	})
 }
 
 // deleteChannel DELETE /channels/{cid}（需 MANAGE_CHANNELS）→ CHANNEL_DELETE。
@@ -205,6 +486,9 @@ func (h *api) deleteChannel(c *gin.Context) {
 			return err
 		}
 		if err := tx.Where("channel_id = ?", channel.ID).Delete(&model.ChannelOverwrite{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("channel_id = ?", channel.ID).Delete(&model.ChannelUnlock{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("channel_id = ?", channel.ID).Delete(&model.StageChannelConfig{}).Error; err != nil {
@@ -246,8 +530,8 @@ func (h *api) deleteChannel(c *gin.Context) {
 // ParentID：JSON null / 省略均表示根级（无分类）；分类频道强制 parent_id=null。
 // 客户端提交「受影响项」或「全量可见频道」均可；事务内原子写入。
 type channelPositionEntry struct {
-	ID       uuid.UUID  `json:"id" binding:"required"`
-	Position int        `json:"position" binding:"gte=0"`
+	ID       uuid.UUID `json:"id" binding:"required"`
+	Position int       `json:"position" binding:"gte=0"`
 	// ParentID 所属分类；nil = 根级。跨分类拖拽时一并更新。
 	ParentID *uuid.UUID `json:"parent_id"`
 }
@@ -378,7 +662,7 @@ type overwriteRequest struct {
 }
 
 // upsertOverwrite PUT /guilds/{gid}/channels/{cid}/overwrites/{targetID}
-//（需 MANAGE_ROLES + 防提权：不能授予超过自身的权限位）。
+// （需 MANAGE_ROLES + 防提权：不能授予超过自身的权限位）。
 func (h *api) upsertOverwrite(c *gin.Context) {
 	ctx, user, ok := h.requireGuildPermission(c, rbac.ManageRoles)
 	if !ok {
@@ -442,7 +726,7 @@ func (h *api) applyOverwrite(c *gin.Context, ctx *perms.GuildContext, user model
 }
 
 // deleteOverwrite DELETE /guilds/{gid}/channels/{cid}/overwrites/{targetID}?type=ROLE|MEMBER
-//（需 MANAGE_ROLES）→ PERMISSIONS_UPDATE + 可见性增减定向事件（复用 upsert 的 diff 逻辑）。
+// （需 MANAGE_ROLES）→ PERMISSIONS_UPDATE + 可见性增减定向事件（复用 upsert 的 diff 逻辑）。
 // type 缺省时删除该目标的全部覆盖记录（ROLE 与 MEMBER 目标 ID 空间不同，实际最多一条）。
 func (h *api) deleteOverwrite(c *gin.Context) {
 	ctx, user, ok := h.requireGuildPermission(c, rbac.ManageRoles)

@@ -3,9 +3,9 @@ package sticker
 import "errors"
 
 var (
-	errUnsupportedMIME = errors.New("仅支持 PNG/JPEG/WebP/GIF")
-	errFileTooLarge    = errors.New("文件超过大小上限")
-	errInvalidImage    = errors.New("无法解析图片尺寸")
+	errUnsupportedMIME = errors.New("仅支持 PNG/JPEG/WebP/GIF/MP4/WebM 等图片与短视频格式")
+	errFileTooLarge    = errors.New("文件超过本服务器配置的大小上限")
+	errInvalidImage    = errors.New("无法解析媒体文件")
 	errPackLimit       = errors.New("自建贴图包数量已达上限")
 	errItemLimit       = errors.New("包内条目数量已达上限")
 	errKindMismatch    = errors.New("条目 kind 必须与包一致")

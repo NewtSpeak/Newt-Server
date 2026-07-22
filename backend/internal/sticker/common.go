@@ -21,19 +21,33 @@ import (
 )
 
 // 配额与资源上限（docs 17 §9）。
+// 单文件大小上限见 config.StickerMaxFileBytes（每服务器实例独立，默认 50 MiB，≤0 不限制）。
 const (
-	defaultMaxPacksPerUser  = 25
-	defaultMaxItemsPerPack  = 100
-	defaultMaxFileBytes     = int64(512 << 10) // 512 KiB
-	softDeleteRestoreDays   = 180
-	maxPackNameRunes        = 100
-	maxPackDescRunes        = 500
-	maxItemNameRunes        = 100
-	maxBanReasonRunes       = 500
-	markPrefix              = "e_"
-	markHashLen             = 12
-	publicAssetURLPrefix    = "/public-assets/stickers/"
+	defaultMaxPacksPerUser = 25
+	defaultMaxItemsPerPack = 100
+	softDeleteRestoreDays  = 180
+	maxPackNameRunes       = 100
+	maxPackDescRunes       = 500
+	maxItemNameRunes       = 100
+	maxBanReasonRunes      = 500
+	markPrefix             = "e_"
+	markHashLen            = 12
+	publicAssetURLPrefix   = "/public-assets/stickers/"
 )
+
+// maxFileBytes 本实例贴图单文件上限；≤0 表示不限制。
+func (h *api) maxFileBytes() int64 {
+	return h.cfg().StickerMaxFileBytes
+}
+
+// fileExceedsLimit 是否超过本实例配置的大小上限（0=不限制）。
+func (h *api) fileExceedsLimit(n int64) bool {
+	max := h.maxFileBytes()
+	if max <= 0 {
+		return false
+	}
+	return n > max
+}
 
 // 自定义表情 wire format（正文内嵌）：<e:item_id:mark>
 // 反应路径编码：item:{item_id}
@@ -119,9 +133,12 @@ func normalizeItemName(raw string) string {
 	if i := strings.LastIndexAny(s, `/\`); i >= 0 && i+1 < len(s) {
 		s = s[i+1:]
 	}
-	// 去掉图片扩展名（上传常把文件名当 name）
+	// 去掉媒体扩展名（上传常把文件名当 name）
 	lower := strings.ToLower(s)
-	for _, ext := range []string{".png", ".jpg", ".jpeg", ".webp", ".gif", ".apng"} {
+	for _, ext := range []string{
+		".png", ".jpg", ".jpeg", ".webp", ".gif", ".apng",
+		".mp4", ".webm", ".mov", ".m4v",
+	} {
 		if strings.HasSuffix(lower, ext) {
 			s = s[:len(s)-len(ext)]
 			lower = strings.ToLower(s)

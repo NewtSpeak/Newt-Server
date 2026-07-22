@@ -20,6 +20,8 @@ type directory interface {
 	GuildMemberIDs(guildID uuid.UUID) ([]uuid.UUID, error)
 	// CanSeeChannel 判断用户对频道是否可见（docs 06 议题 8：不可见即不推送）。
 	CanSeeChannel(user model.User, guildID, channelID uuid.UUID) bool
+	// CanAccessChannelContent 可见且已解锁上锁频道（消息内容事件过滤）。
+	CanAccessChannelContent(user model.User, guildID, channelID uuid.UUID) bool
 	// GuildSnapshots 组装 READY 全量快照（按用户 VIEW_CHANNEL 过滤频道，docs 14 §7-2）。
 	GuildSnapshots(user model.User, guildIDs []uuid.UUID) ([]snapshot.Guild, error)
 	// ReadStates 该用户在给定（已按可见性过滤的）频道内的已读状态（docs 15 §7-1）。
@@ -199,10 +201,31 @@ func (h *hub) dispatch(event eventbus.Event) {
 		if len(sessions) == 0 {
 			continue
 		}
-		if event.ChannelID != nil && !h.dir.CanSeeChannel(sessions[0].user, *event.GuildID, *event.ChannelID) {
-			continue
+		if event.ChannelID != nil {
+			user := sessions[0].user
+			if !h.dir.CanSeeChannel(user, *event.GuildID, *event.ChannelID) {
+				continue
+			}
+			// 消息类事件额外要求已解锁上锁频道。
+			if isLockedContentEvent(event.Type) &&
+				!h.dir.CanAccessChannelContent(user, *event.GuildID, *event.ChannelID) {
+				continue
+			}
 		}
 		h.push(sessions, event.Type, payload)
+	}
+}
+
+// isLockedContentEvent 上锁频道需解锁才推送的内容事件（消息/输入中等）。
+func isLockedContentEvent(eventType string) bool {
+	switch eventType {
+	case eventbus.EventMessageCreate, eventbus.EventMessageUpdate, eventbus.EventMessageDelete,
+		eventbus.EventMessageReactionAdd, eventbus.EventMessageReactionRemove,
+		eventbus.EventMessageStreamStart, eventbus.EventMessageStreamDelta, eventbus.EventMessageStreamEnd:
+		return true
+	default:
+		// TYPING 等若有独立常量则一并拦截；未知类型保持可见性过滤即可。
+		return eventType == "TYPING_START"
 	}
 }
 

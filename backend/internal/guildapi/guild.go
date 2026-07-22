@@ -251,7 +251,14 @@ func (h *api) myChannelPermissions(c *gin.Context) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"guild_id": ctx.Guild.ID, "channel_id": channel.ID, "permissions": maskString(bits)})
+	user := h.deps.CurrentUser(c)
+	unlocked := perms.IsChannelUnlocked(h.deps.DB, user.ID, channel, ctx, bits)
+	c.JSON(http.StatusOK, gin.H{
+		"guild_id": ctx.Guild.ID, "channel_id": channel.ID,
+		"permissions": maskString(bits),
+		"locked":      channel.PasswordHash != "",
+		"unlocked":    unlocked,
+	})
 }
 
 // myChannelPermissionsByChannel GET /channels/{cid}/permissions/@me：顶级频道入口，
@@ -278,5 +285,11 @@ func (h *api) myChannelPermissionsByChannel(c *gin.Context) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"guild_id": ctx.Guild.ID, "channel_id": channel.ID, "permissions": maskString(bits)})
+	unlocked := perms.IsChannelUnlocked(h.deps.DB, user.ID, channel, ctx, bits)
+	c.JSON(http.StatusOK, gin.H{
+		"guild_id": ctx.Guild.ID, "channel_id": channel.ID,
+		"permissions": maskString(bits),
+		"locked":      channel.PasswordHash != "",
+		"unlocked":    unlocked,
+	})
 }

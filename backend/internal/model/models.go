@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type User struct {
@@ -41,7 +42,7 @@ type RefreshToken struct {
 	// Audience 令牌受众（admin=后台管理 / client=用户端），与 JWT aud claim 对齐。
 	// 历史数据（该列上线前签发的 refresh token）均来自后台登录，AutoMigrate 加列时
 	// 靠 default:'admin' 回填，不破坏现有数据。
-	Audience  string     `gorm:"size:16;not null;default:'admin'"`
+	Audience string `gorm:"size:16;not null;default:'admin'"`
 	// SessionID 登录会话链 ID：登录时生成，refresh 轮换后的新 token 继承同一值，
 	// 使「一次登录」在多次轮换后仍可作为单个会话被列出/吊销（docs 01 FR-27/FR-28）。
 	// access token 的 sid claim 与此对应。历史数据靠 gen_random_uuid() 回填（每行独立会话）。
@@ -69,15 +70,15 @@ type UserSettings struct {
 }
 
 type Guild struct {
-	ID          uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	Name        string    `gorm:"size:100;not null" json:"name"`
+	ID   uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	Name string    `gorm:"size:100;not null" json:"name"`
 	// Description 服务器简介（设置页概览可编辑，Owl-Desktop docs 02 FR-13）。
 	Description string    `gorm:"size:1024;not null;default:''" json:"description"`
 	OwnerUserID uuid.UUID `gorm:"type:uuid;not null;index" json:"owner_user_id"`
 	// IconURL / BannerURL 服务器图标与横幅（Owl-Desktop docs 02 FR-13/§8-9）：
 	// 走 /public-assets/profile 公开路径（与用户头像同存储约定），空串表示未设置。
-	IconURL   string    `gorm:"size:512;not null;default:''" json:"icon_url"`
-	BannerURL string    `gorm:"size:512;not null;default:''" json:"banner_url"`
+	IconURL   string `gorm:"size:512;not null;default:''" json:"icon_url"`
+	BannerURL string `gorm:"size:512;not null;default:''" json:"banner_url"`
 	// RestrictionBadgeVisible 「受限徽章」服级开关（Owl-Desktop docs 08 AM.4/§8-6）：
 	// 关闭后客户端不在成员列表渲染受限标识（服务端仍照常下发脱敏 RESTRICTION 事件）。
 	RestrictionBadgeVisible bool `gorm:"not null;default:true" json:"restriction_badge_visible"`
@@ -147,7 +148,7 @@ func (t ChannelType) IsPrivate() bool {
 }
 
 type Channel struct {
-	ID      uuid.UUID   `gorm:"type:uuid;primaryKey" json:"id"`
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	// GuildID 服内频道为真实服 ID；DM/GROUP_DM 为 uuid.Nil（JSON 常输出为 0000…）。
 	GuildID uuid.UUID   `gorm:"type:uuid;not null;index" json:"guild_id"`
 	Name    string      `gorm:"size:100;not null" json:"name"`
@@ -165,9 +166,39 @@ type Channel struct {
 	UserLimit int `gorm:"not null;default:0" json:"user_limit"`
 	// RateLimitPerUser 文本频道慢速模式（Owl-Desktop docs 03 §8-9/05 FR-08）：
 	// 每用户两条消息之间的最小间隔秒数，0=关闭；上限 21600（6 小时，对标 Discord）。
-	RateLimitPerUser int       `gorm:"not null;default:0" json:"rate_limit_per_user"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	RateLimitPerUser int `gorm:"not null;default:0" json:"rate_limit_per_user"`
+	// RateLimitExemptRoleIDs 慢速模式豁免角色；为空表示慢速模式对所有成员生效。
+	// 角色必须属于当前服务器；配置 @everyone 角色时全体成员豁免。
+	RateLimitExemptRoleIDs UUIDList `gorm:"type:jsonb;not null;default:'[]'" json:"rate_limit_exempt_role_ids"`
+	// PasswordHash 频道访问密码（argon2）；空串表示未上锁。永不序列化到 JSON。
+	// 上锁后对 TEXT/VOICE 均生效：可见（VIEW_CHANNEL）但访问内容需先解锁。
+	PasswordHash string `gorm:"size:255;not null;default:''" json:"-"`
+	// Locked 是否已上锁（不入库；AfterFind / SyncLocked 根据 PasswordHash 填充）。
+	Locked bool `gorm:"-" json:"locked"`
+	// VoiceNote 语音频道活动注释（管理员手写，列表在线成员区顶部展示，≤200 字符）。
+	// 仅 VOICE 有意义；TEXT/CATEGORY 恒为空串。
+	VoiceNote string    `gorm:"size:200;not null;default:''" json:"voice_note"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AfterFind 填充 Locked 公开标志（密码哈希本身不暴露）。
+func (c *Channel) AfterFind(tx *gorm.DB) error {
+	c.Locked = c.PasswordHash != ""
+	return nil
+}
+
+// SyncLocked 在 Create/Updates 路径手动刷新 Locked（AfterFind 不触发时）。
+func (c *Channel) SyncLocked() {
+	c.Locked = c.PasswordHash != ""
+}
+
+// ChannelUnlock 用户对上锁频道的解锁记录（输入正确密码后写入；改密/关锁时清空）。
+type ChannelUnlock struct {
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	ChannelID  uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_channel_unlock_user" json:"channel_id"`
+	UserID     uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_channel_unlock_user;index" json:"user_id"`
+	UnlockedAt time.Time `gorm:"not null" json:"unlocked_at"`
 }
 
 type OverwriteType string
@@ -189,5 +220,5 @@ type ChannelOverwrite struct {
 }
 
 func init() {
-	Register(&User{}, &RefreshToken{}, &UserSettings{}, &Guild{}, &Member{}, &Role{}, &MemberRole{}, &Channel{}, &ChannelOverwrite{})
+	Register(&User{}, &RefreshToken{}, &UserSettings{}, &Guild{}, &Member{}, &Role{}, &MemberRole{}, &Channel{}, &ChannelOverwrite{}, &ChannelUnlock{})
 }

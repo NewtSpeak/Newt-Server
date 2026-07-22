@@ -62,10 +62,9 @@ func (s *service) createMessage(c *gin.Context) {
 	if !s.enforcePrivateSend(c, channel, s.currentUser(c).ID) {
 		return
 	}
-	// 慢速模式（docs 03 §8-9 / 05 FR-08）：频道配置 rate_limit_per_user 秒内每用户
-	// 限一条；MANAGE_MESSAGES / MANAGE_CHANNELS 豁免（对标 Discord）。429 携带
-	// retry_after（秒，向上取整）供客户端倒计时。
-	if channel.RateLimitPerUser > 0 && !rbac.Has(bits, rbac.ManageMessages) && !rbac.Has(bits, rbac.ManageChannels) {
+	// 慢速模式：默认对所有成员生效，仅频道配置的豁免角色可以跳过。
+	// 权限位本身不再隐式豁免，避免管理员配置无法约束普通管理角色。
+	if channel.RateLimitPerUser > 0 && !s.slowmodeExempt(channel, ctx) {
 		var last model.Message
 		err := s.db.Select("created_at").
 			Where("channel_id = ? AND author_id = ?", channel.ID, s.currentUser(c).ID).

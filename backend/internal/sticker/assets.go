@@ -3,6 +3,7 @@ package sticker
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"image"
@@ -21,32 +22,106 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// 允许的 MIME（docs 17 §9 建议）。
+// 允许的 MIME（docs 17 §9：图片 + 短视频；每服务器实例共用此白名单）。
 var allowedMIME = map[string]string{
-	"image/png":  "png",
-	"image/webp": "webp",
-	"image/gif":  "gif",
-	"image/jpeg": "jpg",
+	"image/png":       "png",
+	"image/webp":      "webp",
+	"image/gif":       "gif",
+	"image/jpeg":      "jpg",
+	"image/jpg":       "jpg",
+	"image/apng":      "png",
+	"video/mp4":       "mp4",
+	"video/webm":      "webm",
+	"video/quicktime": "mov",
+	// 部分浏览器对 mp4 上报的 sniff 结果
+	"application/mp4": "mp4",
+}
+
+var allowedExt = map[string]bool{
+	"png": true, "webp": true, "gif": true, "jpg": true,
+	"mp4": true, "webm": true, "mov": true,
 }
 
 func stickersDir(dataDir string) string {
 	return filepath.Join(dataDir, "stickers")
 }
 
+// normalizeMIME 去掉参数并小写；对常见别名做归一。
+func normalizeMIME(raw string) string {
+	mime := strings.ToLower(strings.TrimSpace(strings.Split(raw, ";")[0]))
+	switch mime {
+	case "image/jpg":
+		return "image/jpeg"
+	case "image/apng":
+		return "image/png"
+	case "application/mp4":
+		return "video/mp4"
+	default:
+		return mime
+	}
+}
+
+// sniffMediaMIME 在 Content-Type 不可靠时按魔数补全。
+func sniffMediaMIME(data []byte, hinted string) string {
+	hinted = normalizeMIME(hinted)
+	if _, ok := allowedMIME[hinted]; ok {
+		// 仍用 sniff 校正错误标注的 mp4/webm
+		if !strings.HasPrefix(hinted, "video/") {
+			return hinted
+		}
+	}
+	if len(data) >= 12 {
+		// ISO BMFF: ....ftyp
+		if string(data[4:8]) == "ftyp" {
+			return "video/mp4"
+		}
+		// WebM / Matroska EBML
+		if data[0] == 0x1A && data[1] == 0x45 && data[2] == 0xDF && data[3] == 0xA3 {
+			return "video/webm"
+		}
+		// RIFF....WEBP
+		if string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+			return "image/webp"
+		}
+		// GIF
+		if string(data[0:6]) == "GIF87a" || string(data[0:6]) == "GIF89a" {
+			return "image/gif"
+		}
+		// PNG
+		if len(data) >= 8 && data[0] == 0x89 && string(data[1:4]) == "PNG" {
+			return "image/png"
+		}
+		// JPEG
+		if data[0] == 0xFF && data[1] == 0xD8 {
+			return "image/jpeg"
+		}
+	}
+	detected := normalizeMIME(http.DetectContentType(data))
+	if _, ok := allowedMIME[detected]; ok {
+		return detected
+	}
+	if hinted != "" {
+		return hinted
+	}
+	return detected
+}
+
 // ensureAsset 按内容 hash 去重写入 sticker_assets；命中则 ref_count++ 并返回已有行。
 func (h *api) ensureAsset(tx *gorm.DB, data []byte, mime string) (model.StickerAsset, error) {
-	mime = strings.ToLower(strings.TrimSpace(strings.Split(mime, ";")[0]))
+	mime = sniffMediaMIME(data, mime)
 	ext, ok := allowedMIME[mime]
 	if !ok {
 		return model.StickerAsset{}, errUnsupportedMIME
 	}
-	if int64(len(data)) == 0 || int64(len(data)) > defaultMaxFileBytes {
+	if int64(len(data)) == 0 {
+		return model.StickerAsset{}, errInvalidImage
+	}
+	if h.fileExceedsLimit(int64(len(data))) {
 		return model.StickerAsset{}, errFileTooLarge
 	}
 
 	sum := sha256.Sum256(data)
 	hash := hex.EncodeToString(sum[:])
-	mark := markPrefix + hash[:markHashLen]
 
 	var existing model.StickerAsset
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -56,14 +131,13 @@ func (h *api) ensureAsset(tx *gorm.DB, data []byte, mime string) (model.StickerA
 			return model.StickerAsset{}, err
 		}
 		existing.RefCount++
-		_ = mark // mark 由 item 层用同一 hash 生成
 		return existing, nil
 	}
 	if err != gorm.ErrRecordNotFound {
 		return model.StickerAsset{}, err
 	}
 
-	width, height, animated := probeImage(data, mime)
+	width, height, animated := probeMedia(data, mime)
 	if width <= 0 || height <= 0 {
 		return model.StickerAsset{}, errInvalidImage
 	}
@@ -125,6 +199,19 @@ func markFromHash(contentHash string) string {
 	return markPrefix + contentHash[:markHashLen]
 }
 
+// probeMedia 解析宽高与是否动画（图片 / 短视频）。
+func probeMedia(data []byte, mime string) (width, height int, animated bool) {
+	if strings.HasPrefix(mime, "video/") {
+		animated = true
+		if w, h, ok := probeMP4Size(data); ok {
+			return w, h, true
+		}
+		// 无法解析时用占位尺寸，避免拒收合法视频
+		return 1, 1, true
+	}
+	return probeImage(data, mime)
+}
+
 func probeImage(data []byte, mime string) (width, height int, animated bool) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
@@ -150,6 +237,77 @@ func probeImage(data []byte, mime string) (width, height int, animated bool) {
 		animated = true
 	}
 	return width, height, animated
+}
+
+// probeMP4Size 粗解析 ISO BMFF 中 tkhd 的宽高（定点数 16.16）。
+// 失败返回 ok=false；调用方可用占位。
+func probeMP4Size(data []byte) (width, height int, ok bool) {
+	if len(data) < 32 || string(data[4:8]) != "ftyp" {
+		return 0, 0, false
+	}
+	// 线性扫描 box，找 tkhd（可能在 moov/trak 内；递归跳过容器）
+	type box struct{ start, end int }
+	stack := []box{{0, len(data)}}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		off := cur.start
+		for off+8 <= cur.end {
+			if off+8 > len(data) {
+				break
+			}
+			size := int(binary.BigEndian.Uint32(data[off : off+4]))
+			typ := string(data[off+4 : off+8])
+			header := 8
+			if size == 1 {
+				if off+16 > len(data) {
+					break
+				}
+				size64 := binary.BigEndian.Uint64(data[off+8 : off+16])
+				if size64 > uint64(^uint(0)>>1) {
+					break
+				}
+				size = int(size64)
+				header = 16
+			} else if size == 0 {
+				size = cur.end - off
+			}
+			if size < header || off+size > cur.end {
+				break
+			}
+			payloadStart := off + header
+			payloadEnd := off + size
+			switch typ {
+			case "moov", "trak", "mdia", "minf", "stbl", "edts":
+				stack = append(stack, box{payloadStart, payloadEnd})
+			case "tkhd":
+				// version(1) + flags(3) + ... 宽高在末尾 8 字节之前的固定偏移
+				// v0: 84 bytes min；v1: 96 bytes min
+				if payloadEnd-payloadStart < 4 {
+					break
+				}
+				ver := data[payloadStart]
+				var whOff int
+				if ver == 1 {
+					whOff = payloadStart + 4 + 8 + 8 + 4 + 4 + 8 + 4*2 + 2*2 + 2*2 + 4*9
+				} else {
+					// v0
+					whOff = payloadStart + 4 + 4 + 4 + 4 + 4 + 4 + 4*2 + 2*2 + 2*2 + 4*9
+				}
+				if whOff+8 <= payloadEnd {
+					wFixed := binary.BigEndian.Uint32(data[whOff : whOff+4])
+					hFixed := binary.BigEndian.Uint32(data[whOff+4 : whOff+8])
+					w := int(wFixed >> 16)
+					h := int(hFixed >> 16)
+					if w > 0 && h > 0 {
+						return w, h, true
+					}
+				}
+			}
+			off += size
+		}
+	}
+	return 0, 0, false
 }
 
 // serveAsset GET /public-assets/stickers/:name
@@ -190,7 +348,7 @@ func validAssetName(name string) bool {
 		return false
 	}
 	hash, ext := name[:dot], name[dot+1:]
-	if _, ok := map[string]bool{"png": true, "webp": true, "gif": true, "jpg": true}[ext]; !ok {
+	if !allowedExt[ext] {
 		return false
 	}
 	for _, r := range hash {
@@ -211,6 +369,12 @@ func mimeFromName(name string) string {
 		return "image/gif"
 	case ".jpg", ".jpeg":
 		return "image/jpeg"
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mov":
+		return "video/quicktime"
 	default:
 		return "application/octet-stream"
 	}

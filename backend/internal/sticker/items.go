@@ -128,14 +128,16 @@ func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOr
 		}
 	}
 
-	ct := strings.TrimSpace(strings.Split(c.GetHeader("Content-Type"), ";")[0])
+	maxBytes := h.maxFileBytes() // ≤0 不限制
+
+	ct := normalizeMIME(c.GetHeader("Content-Type"))
 	if strings.HasPrefix(ct, "multipart/") {
 		file, err := c.FormFile("file")
 		if err != nil {
 			fail(c, http.StatusBadRequest, "MISSING_FILE", "需要 multipart 字段 file")
 			return nil, "", "", 0, false
 		}
-		if file.Size > defaultMaxFileBytes {
+		if file.Size > 0 && h.fileExceedsLimit(file.Size) {
 			fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", errFileTooLarge.Error())
 			return nil, "", "", 0, false
 		}
@@ -145,19 +147,21 @@ func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOr
 			return nil, "", "", 0, false
 		}
 		defer f.Close()
-		data, err = io.ReadAll(io.LimitReader(f, defaultMaxFileBytes+1))
-		if err != nil || int64(len(data)) == 0 {
+		data, err = readBodyLimited(f, maxBytes)
+		if err != nil {
+			if errIs(err, errFileTooLarge) {
+				fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", errFileTooLarge.Error())
+			} else {
+				fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "读取上传文件失败")
+			}
+			return nil, "", "", 0, false
+		}
+		if len(data) == 0 {
 			fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空")
 			return nil, "", "", 0, false
 		}
-		if int64(len(data)) > defaultMaxFileBytes {
-			fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", errFileTooLarge.Error())
-			return nil, "", "", 0, false
-		}
-		mime = file.Header.Get("Content-Type")
-		if mime == "" {
-			mime = http.DetectContentType(data)
-		}
+		mime = normalizeMIME(file.Header.Get("Content-Type"))
+		mime = sniffMediaMIME(data, mime)
 		if name == "" {
 			name = normalizeItemName(file.Filename)
 		}
@@ -165,30 +169,36 @@ func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOr
 	}
 
 	// 原始 body
-	if _, ok := allowedMIME[ct]; !ok {
-		// 尝试 sniff
-		raw, err := io.ReadAll(io.LimitReader(c.Request.Body, defaultMaxFileBytes+1))
-		if err != nil || len(raw) == 0 {
-			fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空或 Content-Type 不支持")
-			return nil, "", "", 0, false
-		}
-		if int64(len(raw)) > defaultMaxFileBytes {
+	raw, err := readBodyLimited(c.Request.Body, maxBytes)
+	if err != nil {
+		if errIs(err, errFileTooLarge) {
 			fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", errFileTooLarge.Error())
-			return nil, "", "", 0, false
+		} else {
+			fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空或读取失败")
 		}
-		ct = http.DetectContentType(raw)
-		return raw, ct, name, sortOrder, true
+		return nil, "", "", 0, false
 	}
-	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, defaultMaxFileBytes+1))
-	if err != nil || len(raw) == 0 {
+	if len(raw) == 0 {
 		fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空")
 		return nil, "", "", 0, false
 	}
-	if int64(len(raw)) > defaultMaxFileBytes {
-		fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", errFileTooLarge.Error())
-		return nil, "", "", 0, false
+	mime = sniffMediaMIME(raw, ct)
+	return raw, mime, name, sortOrder, true
+}
+
+// readBodyLimited 读取全部内容；maxBytes≤0 不限制，>0 时超限返回 errFileTooLarge。
+func readBodyLimited(r io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return io.ReadAll(r)
 	}
-	return raw, ct, name, sortOrder, true
+	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errFileTooLarge
+	}
+	return data, nil
 }
 
 // patchItem PATCH /users/@me/sticker-packs/{pack_id}/items/{item_id}

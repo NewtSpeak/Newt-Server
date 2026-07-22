@@ -56,6 +56,10 @@ func (d *stubDirectory) CanSeeChannel(user model.User, guildID, channelID uuid.U
 	return !d.invisible[user.ID]
 }
 
+func (d *stubDirectory) CanAccessChannelContent(user model.User, guildID, channelID uuid.UUID) bool {
+	return d.CanSeeChannel(user, guildID, channelID)
+}
+
 // ReadStates 与生产实现同语义：只返回落在给定可见频道集合内的记录。
 func (d *stubDirectory) ReadStates(userID uuid.UUID, channelIDs []uuid.UUID) ([]snapshot.ReadState, error) {
 	d.mu.Lock()

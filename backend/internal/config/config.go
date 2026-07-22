@@ -86,6 +86,11 @@ type Config struct {
 	EmbeddedSFUAdvertiseWSS string
 	// EmbeddedSFUNoTLS 内嵌 SFU 是否禁用信令 TLS（开发默认 true）。
 	EmbeddedSFUNoTLS bool
+
+	// ---- 贴图 / 表情包（docs 17，每服务器实例独立配置）----
+	// StickerMaxFileBytes 单条贴图/表情文件大小上限（字节）。
+	// 默认 50 MiB；≤0 表示不限制（实际无上限，仍受进程内存与反向代理约束）。
+	StickerMaxFileBytes int64
 }
 
 func Load() (Config, error) {
@@ -134,6 +139,10 @@ func Load() (Config, error) {
 		EmbeddedSFUMediaUDP:     intEnv("EMBEDDED_SFU_MEDIA_UDP", 3478),
 		EmbeddedSFUPublicIP:     env("EMBEDDED_SFU_PUBLIC_IP", "127.0.0.1"),
 		EmbeddedSFUAdvertiseWSS: os.Getenv("EMBEDDED_SFU_ADVERTISE_WSS"),
+
+		// 贴图单文件上限：默认 50 MiB；STICKER_MAX_FILE_BYTES=0 不限制。
+		// 支持纯数字字节，或带单位：50m / 50mb / 512k / 1g。
+		StickerMaxFileBytes: bytesEnv("STICKER_MAX_FILE_BYTES", 50<<20),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL 不能为空，Owl-Server 仅支持 PostgreSQL")
@@ -256,4 +265,68 @@ func durationEnv(key string, fallback time.Duration) time.Duration {
 		return value
 	}
 	return fallback
+}
+
+// bytesEnv 解析字节大小环境变量。
+// 支持：纯数字（字节）、可选后缀 k/kb/m/mb/g/gb（十进制 1000 与二进制 KiB 均接受为 1024 倍数）。
+// 未设置时用 fallback；解析失败时也回退 fallback。
+func bytesEnv(key string, fallback int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	if n, err := parseByteSize(raw); err == nil {
+		return n
+	}
+	return fallback
+}
+
+func parseByteSize(raw string) (int64, error) {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	if s == "" {
+		return 0, fmt.Errorf("empty")
+	}
+	// 纯数字（允许 0 = 不限制；负数非法）
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		if n < 0 {
+			return 0, fmt.Errorf("negative byte size")
+		}
+		return n, nil
+	}
+	mult := int64(1)
+	switch {
+	case strings.HasSuffix(s, "kib"):
+		mult = 1 << 10
+		s = strings.TrimSuffix(s, "kib")
+	case strings.HasSuffix(s, "mib"):
+		mult = 1 << 20
+		s = strings.TrimSuffix(s, "mib")
+	case strings.HasSuffix(s, "gib"):
+		mult = 1 << 30
+		s = strings.TrimSuffix(s, "gib")
+	case strings.HasSuffix(s, "kb"):
+		mult = 1 << 10
+		s = strings.TrimSuffix(s, "kb")
+	case strings.HasSuffix(s, "mb"):
+		mult = 1 << 20
+		s = strings.TrimSuffix(s, "mb")
+	case strings.HasSuffix(s, "gb"):
+		mult = 1 << 30
+		s = strings.TrimSuffix(s, "gb")
+	case strings.HasSuffix(s, "k"):
+		mult = 1 << 10
+		s = strings.TrimSuffix(s, "k")
+	case strings.HasSuffix(s, "m"):
+		mult = 1 << 20
+		s = strings.TrimSuffix(s, "m")
+	case strings.HasSuffix(s, "g"):
+		mult = 1 << 30
+		s = strings.TrimSuffix(s, "g")
+	}
+	s = strings.TrimSpace(s)
+	n, err := strconv.ParseFloat(s, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid byte size %q", raw)
+	}
+	return int64(n * float64(mult)), nil
 }

@@ -23,6 +23,18 @@ func HashPassword(password string) (string, error) {
 	if len(password) < 8 || len(password) > 128 {
 		return "", errors.New("密码长度必须为 8 到 128 个字符")
 	}
+	return hashArgon2id(password)
+}
+
+// HashChannelPassword 频道访问密码哈希：允许 1–64 字符（房门密码可更短）。
+func HashChannelPassword(password string) (string, error) {
+	if len(password) < 1 || len(password) > 64 {
+		return "", errors.New("频道密码长度必须为 1 到 64 个字符")
+	}
+	return hashArgon2id(password)
+}
+
+func hashArgon2id(password string) (string, error) {
 	salt := make([]byte, argonSaltLength)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("生成密码盐: %w", err)
