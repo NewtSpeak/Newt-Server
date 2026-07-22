@@ -204,7 +204,14 @@ func (r *Registry) SendCommand(ctx context.Context, nodeID uuid.UUID, command *o
 		return nil, err
 	}
 
+	// 超时优先取 ctx 剩余截止时间（升级下载等长任务会传 10+ 分钟 ctx）；
+	// 无截止时间时回落 registry 默认 commandTimeout。
 	timeout := r.commandTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remain := time.Until(deadline); remain > 0 {
+			timeout = remain
+		}
+	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {

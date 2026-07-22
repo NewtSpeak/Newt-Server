@@ -586,8 +586,9 @@ func (e *migrationEngine) ack(migrationID, userID uuid.UUID) error {
 	return nil
 }
 
-// migrateNode 节点级触发（死亡 / Drain）：该节点全部会话批量迁出（docs 09 H.2、I.6）。
-// mode=MIGRATE_BATCH：每（源节点, 房间）批先定 batch_target 再塞人（docs 10 U.2）。
+// migrateNode 节点级触发（死亡 / Drain / 滚动升级）：该节点全部会话批量迁出
+//（docs 09 H.2、I.6）。目标在「附近」候选（同 region 优先、调度打分）上
+// **均匀分摊**，避免全部砸到单一节点造成二次过载。
 func (e *migrationEngine) migrateNode(nodeID uuid.UUID, reason string) {
 	s := e.svc
 	s.mu.Lock()
@@ -597,13 +598,18 @@ func (e *migrationEngine) migrateNode(nodeID uuid.UUID, reason string) {
 	if err := s.db.Find(&states, "node_id = ? AND channel_id IS NOT NULL", nodeID).Error; err != nil {
 		return
 	}
+	if len(states) == 0 {
+		return
+	}
 	byRoom := make(map[uuid.UUID][]model.VoiceState)
 	for _, vs := range states {
 		byRoom[*vs.ChannelID] = append(byRoom[*vs.ChannelID], vs)
 	}
+	// 全局指派计数：跨房间也均匀，配合节点当前负载。
+	assigned := map[uuid.UUID]int{}
 	for roomID, members := range byRoom {
 		guildID := members[0].GuildID
-		// 源即 anchor：先走 08 §7.1 换根（冻图→新根→升 epoch→挂边→等关键
+		// 源即 anchor：先走 08 §7.1 换根（冻图→新根→升 epoch→挂边→等
 		// EdgeUp），再迁用户（docs 09 L.2）。
 		var lease model.VoiceAnchorLease
 		if s.db.First(&lease, "room_id = ?", roomID).Error == nil && lease.AnchorNodeID == nodeID {
@@ -617,28 +623,119 @@ func (e *migrationEngine) migrateNode(nodeID uuid.UUID, reason string) {
 				s.db.Delete(&model.VoiceAnchorLease{}, "room_id = ?", roomID)
 			}
 		}
-		// 批量先定 batch_target：以首个用户为代表打分（docs 10 §5.1）。
 		batchKey := nodeID.String() + "@" + roomID.String()
-		var batchTarget *uuid.UUID
-		if candidates, err := s.buildCandidates(guildID, roomID); err == nil {
-			from := nodeID
-			if result, ok := schedule(candidates, scheduleParams{
-				Mode: ModeMigrateBatch, UserID: members[0].UserID,
-				FromNodeID: &from, Config: s.sched,
-			}); ok {
-				batchTarget = &result.Primary
-			}
+		targets := e.rankedNearbyTargets(guildID, roomID, nodeID, members[0].UserID)
+		if len(targets) == 0 {
+			log.Printf("voice: 房间 %s 无可迁目标，会话将排队重试", roomID)
 		}
 		for _, vs := range members {
+			var to *uuid.UUID
+			if t, ok := pickLeastLoaded(targets, assigned, e.targetBaseLoad); ok {
+				to = &t
+				assigned[t]++
+			}
 			_, err := e.createJob(model.VoiceMigrationJob{
 				Reason: reason, UserID: vs.UserID, GuildID: vs.GuildID, ChannelID: roomID,
-				FromNodeID: nodeID, ToNodeID: batchTarget, BatchKey: batchKey,
+				FromNodeID: nodeID, ToNodeID: to, BatchKey: batchKey,
 			})
 			if err != nil {
 				log.Printf("voice: 创建批量迁移失败 user=%s: %v", vs.UserID, err)
 			}
 		}
 	}
+	log.Printf("voice: 节点 %s 批量迁出 %d 会话 → 目标分布 %v（reason=%s）",
+		nodeID, len(states), assigned, reason)
+}
+
+// rankedNearbyTargets 返回迁移目标列表：硬过滤后按调度分排序；
+// 若有同 region / 同大区节点则优先只用这些「附近」节点，否则退回全量排序结果。
+func (e *migrationEngine) rankedNearbyTargets(guildID, roomID, fromNode, sampleUser uuid.UUID) []uuid.UUID {
+	s := e.svc
+	candidates, err := s.buildCandidates(guildID, roomID)
+	if err != nil || len(candidates) == 0 {
+		return nil
+	}
+	from := fromNode
+	params := scheduleParams{
+		Mode: ModeMigrateBatch, UserID: sampleUser,
+		FromNodeID: &from, Config: s.sched,
+		RTTMs: s.rtt.Samples(sampleUser, time.Now()),
+	}
+	// 源节点 region（用于「附近」筛选）。
+	srcRegion := ""
+	if info, err := sfuctl.Dir().Node(fromNode); err == nil {
+		srcRegion = info.Region
+		if srcRegion == "" {
+			srcRegion = info.Labels["region"]
+		}
+	}
+	type scored struct {
+		id    uuid.UUID
+		score float64
+		near  bool
+	}
+	var list []scored
+	for _, c := range candidates {
+		if !passHardFilter(c, params) {
+			continue
+		}
+		nodeRegion := c.Info.Region
+		if nodeRegion == "" {
+			nodeRegion = c.Info.Labels["region"]
+		}
+		// 附近：同源 region 或同大区前缀（如 jp-tokyo / jp-osaka）。
+		near := srcRegion != "" && scoreRegion(srcRegion, nodeRegion) >= 0.5
+		list = append(list, scored{
+			id: c.Info.ID, score: scoreNode(c, params), near: near,
+		})
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	// 分数降序
+	for i := 0; i < len(list); i++ {
+		for j := i + 1; j < len(list); j++ {
+			if list[j].score > list[i].score {
+				list[i], list[j] = list[j], list[i]
+			}
+		}
+	}
+	var nearby, all []uuid.UUID
+	for _, item := range list {
+		all = append(all, item.id)
+		if item.near {
+			nearby = append(nearby, item.id)
+		}
+	}
+	if len(nearby) > 0 {
+		return nearby
+	}
+	return all
+}
+
+// targetBaseLoad 返回节点当前负载（在线用户数），目录查不到时当 0。
+func (e *migrationEngine) targetBaseLoad(nodeID uuid.UUID) int {
+	info, err := sfuctl.Dir().Node(nodeID)
+	if err != nil {
+		return 0
+	}
+	return info.CurrentUsers
+}
+
+// pickLeastLoaded 在候选中选 baseLoad+assigned 最小者（均匀分摊）。
+func pickLeastLoaded(targets []uuid.UUID, assigned map[uuid.UUID]int, baseLoad func(uuid.UUID) int) (uuid.UUID, bool) {
+	if len(targets) == 0 {
+		return uuid.Nil, false
+	}
+	best := targets[0]
+	bestLoad := baseLoad(best) + assigned[best]
+	for _, t := range targets[1:] {
+		load := baseLoad(t) + assigned[t]
+		if load < bestLoad {
+			best, bestLoad = t, load
+		}
+	}
+	return best, true
 }
 
 func nonEmpty(value, fallback string) string {

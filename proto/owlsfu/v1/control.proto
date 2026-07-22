@@ -46,6 +46,8 @@ message NodeAdvertise {
 message Heartbeat {
   NodeCapacity capacity = 1;
   int64 unix_ms = 2;
+  // 运行中版本（与 Register.node_version 一致；便于热更新后未重连时也能刷新）。
+  string node_version = 3;
 }
 
 message RoomEvent {
@@ -75,11 +77,25 @@ message EdgeStatus {
   State state = 5;
   double rtt_ms = 6;
   double loss_pct = 7;
+  // 累计 RTP 字节（本端视角；拓扑面板差分得 bps）。
+  // parent 上报时：bytes_tx = parent→child（down），bytes_rx = child→parent（up）。
+  uint64 bytes_tx = 8;
+  uint64 bytes_rx = 9;
+  // 媒体传输路径（由 ICE 选中候选对推断）：PATH_TYPE_LAN / WAN / UNKNOWN。
+  PathType path_type = 10;
+  string local_candidate_ip = 11;  // 本端选中候选 IP（可空）
+  string remote_candidate_ip = 12; // 对端选中候选 IP（可空）
 
   enum State {
     STATE_UNSPECIFIED = 0;
     STATE_EDGE_UP = 1;
     STATE_EDGE_DOWN = 2;
+  }
+
+  enum PathType {
+    PATH_TYPE_UNSPECIFIED = 0;
+    PATH_TYPE_LAN = 1; // 内网 / 私网 IP 互通
+    PATH_TYPE_WAN = 2; // 公网 / 外网
   }
 }
 
@@ -121,7 +137,18 @@ message Command {
     SetCascadeEdges set_cascade_edges = 8;
     MigrateParticipants migrate_participants = 9;
     Drain drain = 10;
+    // 远程热更 SFU 二进制：节点下载 → 校验 → 原子替换 → 自重启。
+    UpdateBinary update_binary = 11;
   }
+}
+
+// UpdateBinary 远程升级节点程序（运维从管理后台下发）。
+// 节点侧：若当前版本已等于 target_version 且 force=false，直接 Ack 成功跳过下载。
+message UpdateBinary {
+  string target_version = 1; // 期望版本号，写入新二进制后 Register 会上报
+  string download_url = 2;   // HTTPS/HTTP 可执行文件下载地址
+  string sha256_hex = 3;     // 小写/大写 hex 均可；空则跳过校验（不推荐）
+  bool force = 4;            // true 时即使版本相同也强制重装
 }
 
 message EnsureLogicalRoom {

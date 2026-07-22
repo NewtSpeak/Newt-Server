@@ -138,6 +138,164 @@ func (a *api) listNodes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"nodes": views})
 }
 
+// topologyAggEdge 按 parent-child 合并多房间边（拓扑图画线用）。
+type topologyAggEdge struct {
+	ParentNodeID string  `json:"parent_node_id"`
+	ChildNodeID  string  `json:"child_node_id"`
+	Up           bool    `json:"up"`
+	RttMs        float64 `json:"rtt_ms"`
+	BytesTx      uint64  `json:"bytes_tx"`
+	BytesRx      uint64  `json:"bytes_rx"`
+	PathType     string  `json:"path_type"`
+	RoomCount    int     `json:"room_count"`
+	LocalIP      string  `json:"local_ip,omitempty"`
+	RemoteIP     string  `json:"remote_ip,omitempty"`
+}
+
+// topologyServerInfo 拓扑图中的 Owl-Server 控制面节点（编排 / 租约 / 边下发）。
+type topologyServerInfo struct {
+	ID                 string `json:"id"`
+	DisplayName        string `json:"display_name"`
+	Role               string `json:"role"` // control_plane
+	HTTPAddress        string `json:"http_address"`
+	SFUControlEndpoint string `json:"sfu_control_endpoint"`
+	SFUControlListen   string `json:"sfu_control_listen"`
+	PublicBaseURL      string `json:"public_base_url,omitempty"`
+	Online             bool   `json:"online"`
+	ConnectedSFUCount  int    `json:"connected_sfu_count"`
+}
+
+// topologyControlLink Server ↔ SFU 控制通道（gRPC mTLS，无媒体）。
+type topologyControlLink struct {
+	ServerID string `json:"server_id"`
+	NodeID   string `json:"node_id"`
+	Up       bool   `json:"up"`
+	Kind     string `json:"kind"` // grpc_control
+}
+
+// listTopology GET /admin/sfu/topology：Server 控制面 + SFU 节点 + 级联边。
+// 前端对累计字节差分得到实时 bps。边状态来自 gRPC 控制面 Registry（SFU EdgeStatus 上报）。
+func (a *api) listTopology(c *gin.Context) {
+	var nodes []model.SfuNode
+	if err := a.svc.db.Order("created_at ASC").Find(&nodes).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "查询节点列表失败")
+		return
+	}
+	views := make([]nodeView, 0, len(nodes))
+	controlLinks := make([]topologyControlLink, 0, len(nodes))
+	connected := 0
+	for _, node := range nodes {
+		v := a.view(node)
+		// 优先以 gRPC Registry 实时在线为准（控制流 attached + 心跳健康）
+		if reg := a.deps.SFURegistry; reg != nil {
+			if snap, ok := reg.Snapshot(node.ID); ok {
+				v.Online = snap.Online
+				v.CurrentUsers = snap.Capacity.CurrentUsers
+				v.CPUPct = snap.Capacity.CPUPct
+				v.MemPct = snap.Capacity.MemPct
+				v.BandwidthOutMbps = snap.Capacity.BandwidthOutMbps
+				v.ScreenTracks = snap.Capacity.ScreenTracks
+				last := snap.LastSeen.UTC()
+				v.LastSeenAt = &last
+			}
+		}
+		views = append(views, v)
+		controlLinks = append(controlLinks, topologyControlLink{
+			ServerID: "owl-server",
+			NodeID:   node.ID.String(),
+			Up:       v.Online,
+			Kind:     "grpc_control",
+		})
+		if v.Online {
+			connected++
+		}
+	}
+
+	var edges any = []struct{}{}
+	aggList := make([]topologyAggEdge, 0)
+	if reg := a.deps.SFURegistry; reg != nil {
+		raw := reg.ListEdges()
+		edges = raw
+		type aggKey struct{ parent, child string }
+		agg := map[aggKey]*topologyAggEdge{}
+		for _, e := range raw {
+			k := aggKey{parent: e.ParentNodeID, child: e.ChildNodeID}
+			cur, ok := agg[k]
+			if !ok {
+				cur = &topologyAggEdge{
+					ParentNodeID: e.ParentNodeID,
+					ChildNodeID:  e.ChildNodeID,
+					PathType:     e.PathType,
+					LocalIP:      e.LocalIP,
+					RemoteIP:     e.RemoteIP,
+				}
+				agg[k] = cur
+			}
+			cur.RoomCount++
+			cur.BytesTx += e.BytesTx
+			cur.BytesRx += e.BytesRx
+			if e.Up {
+				cur.Up = true
+			}
+			if e.RttMs > cur.RttMs {
+				cur.RttMs = e.RttMs
+			}
+			cur.PathType = worseTopologyPath(cur.PathType, e.PathType)
+			if cur.LocalIP == "" && e.LocalIP != "" {
+				cur.LocalIP = e.LocalIP
+			}
+			if cur.RemoteIP == "" && e.RemoteIP != "" {
+				cur.RemoteIP = e.RemoteIP
+			}
+		}
+		for _, v := range agg {
+			aggList = append(aggList, *v)
+		}
+	}
+
+	serverInfo := topologyServerInfo{
+		ID:                 "owl-server",
+		DisplayName:        "Owl-Server",
+		Role:               "control_plane",
+		HTTPAddress:        a.deps.Cfg.Address,
+		SFUControlEndpoint: a.deps.Cfg.SFUControlPublicEndpoint,
+		SFUControlListen:   a.deps.Cfg.SFUControlAddress,
+		PublicBaseURL:      a.deps.Cfg.PublicBaseURL,
+		Online:             true,
+		ConnectedSFUCount:  connected,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"generated_at":     time.Now().UTC(),
+		"server":           serverInfo,
+		"nodes":            views,
+		"control_links":    controlLinks,
+		"edges":            edges,
+		"aggregated_edges": aggList,
+	})
+}
+
+// worseTopologyPath 聚合多房间时取「更贵」路径：wan > lan > unknown。
+func worseTopologyPath(a, b string) string {
+	rank := func(p string) int {
+		switch p {
+		case "wan":
+			return 3
+		case "lan":
+			return 2
+		default:
+			return 1
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	if a == "" {
+		return b
+	}
+	return a
+}
+
 // getNode GET /admin/sfu/nodes/:nodeID
 func (a *api) getNode(c *gin.Context) {
 	nodeID, ok := parseUUIDParam(c, "nodeID")

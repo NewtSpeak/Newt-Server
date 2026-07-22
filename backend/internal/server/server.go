@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,6 +36,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/secretstore"
 	"github.com/owlspeak/owl-server/backend/internal/security"
 	"github.com/owlspeak/owl-server/backend/internal/sfubridge"
+	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
 	"github.com/owlspeak/owl-server/backend/internal/sfunode"
 	"github.com/owlspeak/owl-server/backend/internal/social"
 	"github.com/owlspeak/owl-server/backend/internal/stage"
@@ -130,7 +133,14 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	// Presence 注册表全局唯一：后台 / 用户端 / bot 三个 Gateway 平面共享，
 	// 同一用户跨平面的连接自然参与多端合并（docs 01 §3.4）。
 	presenceManager := presence.NewDBManager(db, bus)
-	deps := appdeps.Deps{DB: db, Bus: bus, Cfg: cfg, Auth: api.AuthMiddleware(), CurrentUser: httpapi.CurrentUser, MediaTokens: mediaTokens, Presence: presenceManager}
+	var sfuRegistry *sfucontrol.Registry
+	if len(sfu) > 0 {
+		sfuRegistry = sfu[0].Registry
+	}
+	deps := appdeps.Deps{
+		DB: db, Bus: bus, Cfg: cfg, Auth: api.AuthMiddleware(), CurrentUser: httpapi.CurrentUser,
+		MediaTokens: mediaTokens, Presence: presenceManager, SFURegistry: sfuRegistry,
+	}
 	perms.RestrictionMask = func(db *gorm.DB, bits rbac.Permission, userID, guildID uuid.UUID, channel *model.Channel) rbac.Permission {
 		return restriction.Mask(bits, userID, guildID, channel)
 	}
@@ -208,6 +218,31 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	if err := adminpresence.RegisterIngest(router.Group("/audit-api"), deps); err != nil {
 		return nil, err
 	}
+
+	// SFU 发布工件公开下载（节点 UpdateBinary 拉取）：仅暴露文件名，路径限制在 SFUReleaseDir。
+	// 文件名约定 owl-sfu-<version>-<goos>-<goarch>；生产建议前置鉴权/CDN。
+	if err := os.MkdirAll(cfg.SFUReleaseDir, 0o755); err != nil {
+		return nil, err
+	}
+	router.GET("/sfu-releases/:name", func(c *gin.Context) {
+		name := filepath.Base(c.Param("name"))
+		if name == "." || name == ".." || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		// 仅允许 owl-sfu- 前缀，避免目录被用作通用静态文件站。
+		if !strings.HasPrefix(name, "owl-sfu-") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		path := filepath.Join(cfg.SFUReleaseDir, name)
+		if st, err := os.Stat(path); err != nil || st.IsDir() {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Header("Cache-Control", "public, max-age=3600")
+		c.File(path)
+	})
 
 	if err := web.RegisterFallback(router, cfg.Environment, cfg.FrontendDevURL); err != nil {
 		return nil, err

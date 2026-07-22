@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -91,6 +92,12 @@ type Config struct {
 	// StickerMaxFileBytes 单条贴图/表情文件大小上限（字节）。
 	// 默认 50 MiB；≤0 表示不限制（实际无上限，仍受进程内存与反向代理约束）。
 	StickerMaxFileBytes int64
+
+	// ---- SFU 远程升级（管理后台一键更新节点二进制）----
+	// SFUReleaseDir 本地发布目录：放置 owl-sfu-<version>-linux-amd64 等工件；
+	// 管理端可按版本号生成下载 URL（需配合 PUBLIC_BASE_URL 可达）。
+	// 默认 DATA_DIR/sfu-releases。
+	SFUReleaseDir string
 }
 
 func Load() (Config, error) {
@@ -143,6 +150,9 @@ func Load() (Config, error) {
 		// 贴图单文件上限：默认 50 MiB；STICKER_MAX_FILE_BYTES=0 不限制。
 		// 支持纯数字字节，或带单位：50m / 50mb / 512k / 1g。
 		StickerMaxFileBytes: bytesEnv("STICKER_MAX_FILE_BYTES", 50<<20),
+
+		// SFU 发布工件目录：空则默认 DATA_DIR/sfu-releases。
+		SFUReleaseDir: os.Getenv("SFU_RELEASE_DIR"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL 不能为空，Owl-Server 仅支持 PostgreSQL")
@@ -158,6 +168,9 @@ func Load() (Config, error) {
 	}
 	if cfg.PublicBaseURL == "" && isDev {
 		cfg.PublicBaseURL = deriveDevPublicBaseURL(cfg.Address)
+	}
+	if cfg.SFUReleaseDir == "" {
+		cfg.SFUReleaseDir = filepath.Join(cfg.DataDir, "sfu-releases")
 	}
 	if cfg.AuditIngestToken != "" && cfg.PublicBaseURL != "" {
 		cfg.AuditIngestURL = strings.TrimRight(cfg.PublicBaseURL, "/") + "/audit-api/records"

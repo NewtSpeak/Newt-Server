@@ -8,6 +8,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/mediatoken"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/presence"
+	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
 	"gorm.io/gorm"
 )
 
@@ -27,4 +28,7 @@ type Deps struct {
 	// 双认证平面的 Gateway 共享同一实例，同一用户跨平面连接参与多端合并；
 	// 为 nil 时 Gateway 不启用 presence（纯单测场景兼容）。
 	Presence *presence.Manager
+	// SFURegistry gRPC 控制面节点注册表（容量/在线/级联边状态）；管理台拓扑面板读取。
+	// 为 nil 时拓扑接口返回空边集（单测或未装配 SFU 时）。
+	SFURegistry *sfucontrol.Registry
 }

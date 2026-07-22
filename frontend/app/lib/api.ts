@@ -243,7 +243,9 @@ export type SfuNode = {
   status: SfuNodeStatus
   cert_fingerprint?: string
   cert_not_after?: string
-  labels?: Record<string, string>
+  labels: Record<string, string>
+  /** 节点程序版本（Register/Heartbeat 上报） */
+  node_version?: string
   capacity?: {
     max_users?: number
     current_users?: number
@@ -251,7 +253,9 @@ export type SfuNode = {
     cpu_pct?: number
     mem_pct?: number
   }
-  enabled_for_scheduling?: boolean
+  enabled_for_scheduling: boolean
+  platform_default?: boolean
+  online?: boolean
   created_at?: string
   enrolled_at?: string
   last_seen_at?: string
@@ -260,14 +264,16 @@ export type SfuNode = {
 export type SfuNodeCreated = { node_id: string; enrollment_token: string }
 export type SfuNodeAction = "enable" | "disable" | "drain" | "undrain" | "revoke"
 
-// 后端存在两种节点视图（capacity 嵌套的摘要版 / 平铺字段版），此处统一归一化
+// 后端存在两种节点视图（capacity 嵌套的摘要版 / 平铺字段版 / {nodes:[]} 包裹），此处统一归一化
 type RawSfuNode = {
-  id: string
+  id?: string
+  node_id?: string
   display_name: string
   status: SfuNodeStatus
   cert_fingerprint?: string
   cert_not_after?: string
-  labels?: Record<string, string>
+  labels?: Record<string, string> | null
+  node_version?: string
   capacity?: {
     max_users?: number
     current_users?: number
@@ -281,6 +287,7 @@ type RawSfuNode = {
   cpu_pct?: number
   mem_pct?: number
   enabled_for_scheduling?: boolean
+  platform_default?: boolean
   online?: boolean
   created_at?: string
   enrolled_at?: string
@@ -289,12 +296,13 @@ type RawSfuNode = {
 
 function normalizeSfuNode(raw: RawSfuNode): SfuNode {
   return {
-    node_id: raw.id,
+    node_id: raw.id ?? raw.node_id ?? "",
     display_name: raw.display_name,
     status: raw.status,
     cert_fingerprint: raw.cert_fingerprint,
     cert_not_after: raw.cert_not_after,
-    labels: raw.labels,
+    labels: raw.labels ?? {},
+    node_version: raw.node_version ?? "",
     capacity: raw.capacity ?? {
       max_users: raw.max_users,
       current_users: raw.current_users,
@@ -302,24 +310,189 @@ function normalizeSfuNode(raw: RawSfuNode): SfuNode {
       cpu_pct: raw.cpu_pct,
       mem_pct: raw.mem_pct,
     },
-    enabled_for_scheduling: raw.enabled_for_scheduling,
+    enabled_for_scheduling: Boolean(raw.enabled_for_scheduling),
+    platform_default: raw.platform_default,
+    online: raw.online,
     created_at: raw.created_at,
     enrolled_at: raw.enrolled_at,
     last_seen_at: raw.last_seen_at,
   }
 }
 
-export const listSfuNodes = () => api<RawSfuNode[]>("/admin/sfu/nodes").then(rows => rows.map(normalizeSfuNode))
+export const listSfuNodes = () =>
+  api<RawSfuNode[] | { nodes: RawSfuNode[] }>("/admin/sfu/nodes").then(raw => {
+    const rows = Array.isArray(raw) ? raw : (raw.nodes ?? [])
+    return rows.map(normalizeSfuNode)
+  })
 export const getSfuNode = (id: string) => api<RawSfuNode>(`/admin/sfu/nodes/${id}`).then(normalizeSfuNode)
+
+/** 级联拓扑（管理台可视化）：节点 + 边累计字节/路径类型；前端差分得 bps */
+export type SfuTopologyPathType = "lan" | "wan" | "unknown" | string
+
+export type SfuTopologyEdge = {
+  room_id: string
+  epoch: number
+  parent_node_id: string
+  child_node_id: string
+  up: boolean
+  rtt_ms: number
+  bytes_tx: number
+  bytes_rx: number
+  path_type: SfuTopologyPathType
+  local_ip?: string
+  remote_ip?: string
+  last_seen_at?: string
+}
+
+export type SfuTopologyAggEdge = {
+  parent_node_id: string
+  child_node_id: string
+  up: boolean
+  rtt_ms: number
+  bytes_tx: number
+  bytes_rx: number
+  path_type: SfuTopologyPathType
+  room_count: number
+  local_ip?: string
+  remote_ip?: string
+}
+
+/** Owl-Server 控制面节点（拓扑图中心） */
+export type SfuTopologyServer = {
+  id: string
+  display_name: string
+  role: string
+  http_address?: string
+  sfu_control_endpoint?: string
+  sfu_control_listen?: string
+  public_base_url?: string
+  online: boolean
+  connected_sfu_count: number
+}
+
+/** Server ↔ SFU 控制通道（gRPC mTLS，无媒体） */
+export type SfuTopologyControlLink = {
+  server_id: string
+  node_id: string
+  up: boolean
+  kind: string
+}
+
+export type SfuTopology = {
+  generated_at: string
+  server: SfuTopologyServer
+  nodes: SfuNode[]
+  control_links: SfuTopologyControlLink[]
+  edges: SfuTopologyEdge[]
+  aggregated_edges: SfuTopologyAggEdge[]
+}
+
+type RawSfuTopology = {
+  generated_at: string
+  server?: SfuTopologyServer
+  nodes: RawSfuNode[]
+  control_links?: SfuTopologyControlLink[]
+  edges?: SfuTopologyEdge[]
+  aggregated_edges?: SfuTopologyAggEdge[]
+}
+
+export const getSfuTopology = () =>
+  api<RawSfuTopology>("/admin/sfu/topology").then(
+    (raw): SfuTopology => ({
+      generated_at: raw.generated_at,
+      server: raw.server ?? {
+        id: "owl-server",
+        display_name: "Owl-Server",
+        role: "control_plane",
+        online: true,
+        connected_sfu_count: 0,
+      },
+      nodes: (raw.nodes ?? []).map(normalizeSfuNode),
+      control_links: raw.control_links ?? [],
+      edges: raw.edges ?? [],
+      aggregated_edges: raw.aggregated_edges ?? [],
+    }),
+  )
 export const createSfuNode = (body: { display_name: string; labels?: Record<string, string> }) =>
   api<{ node?: RawSfuNode; node_id?: string; enrollment_token: string }>("/admin/sfu/nodes", {
     method: "POST",
     body: JSON.stringify(body),
   }).then(
-    (raw): SfuNodeCreated => ({ node_id: raw.node?.id ?? raw.node_id ?? "", enrollment_token: raw.enrollment_token }),
+    (raw): SfuNodeCreated => ({
+      node_id: raw.node?.id ?? raw.node?.node_id ?? raw.node_id ?? "",
+      enrollment_token: raw.enrollment_token,
+    }),
   )
+/** 更新名称/地域标签/调度开关/平台默认池（不改变生命周期状态） */
+export const updateSfuNode = (
+  id: string,
+  body: {
+    display_name?: string
+    labels?: Record<string, string>
+    enabled_for_scheduling?: boolean
+    platform_default?: boolean
+  },
+) =>
+  api<RawSfuNode>(`/admin/sfu/nodes/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(normalizeSfuNode)
 export const sfuNodeAction = (id: string, action: SfuNodeAction) =>
   api<RawSfuNode>(`/admin/sfu/nodes/${id}/${action}`, { method: "POST" }).then(normalizeSfuNode)
+
+export type SfuRelease = {
+  filename: string
+  version: string
+  goos: string
+  goarch: string
+  size: number
+  url: string
+}
+
+export const listSfuReleases = () =>
+  api<{ releases: SfuRelease[]; release_dir: string }>("/admin/sfu/releases")
+
+export type UpdateSfuBinaryBody = {
+  target_version?: string
+  download_url?: string
+  sha256_hex?: string
+  force?: boolean
+  goos?: string
+  goarch?: string
+  /** 升级前排空并均匀迁到附近节点（默认 true） */
+  drain_first?: boolean
+  /** 等待迁空秒数，默认 90 */
+  drain_timeout_sec?: number
+}
+
+export type RollingUpgradeDrain = {
+  sessions_before: number
+  sessions_after: number
+  jobs_created: number
+  drained: boolean
+  elapsed_ms: number
+  forced?: boolean
+}
+
+export type UpdateSfuBinaryResult = {
+  node_id: string
+  target_version: string
+  download_url: string
+  sha256_hex?: string
+  command_id?: string
+  ok: boolean
+  error_code?: string
+  error_message?: string
+  note?: string
+  drain?: RollingUpgradeDrain
+}
+
+/** 远程升级节点 SFU 程序（节点在线时） */
+export const updateSfuBinary = (id: string, body: UpdateSfuBinaryBody) =>
+  api<UpdateSfuBinaryResult>(`/admin/sfu/nodes/${id}/update-binary`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 
 export type NodePool = { node_ids?: string[] }
 

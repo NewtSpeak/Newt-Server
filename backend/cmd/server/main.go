@@ -148,7 +148,7 @@ func main() {
 		}()
 	}
 
-	router, err := server.New(cfg, db, bus, httpapi.SFUOptions{Registry: registry, MediaTokens: mediaTokens})
+	router, err := server.New(cfg, db, bus, httpapi.SFUOptions{Registry: registry, MediaTokens: mediaTokens, Cfg: &cfg})
 	if err != nil {
 		log.Fatal(err)
 	}

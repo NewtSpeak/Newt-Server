@@ -84,6 +84,9 @@ type SfuNode struct {
 
 	Labels SfuLabelMap `gorm:"type:jsonb;not null;default:'{}'" json:"labels"`
 
+	// NodeVersion 节点 Register/Heartbeat 上报的程序版本（如 0.1.0-m1）。
+	NodeVersion string `gorm:"size:64;not null;default:''" json:"node_version"`
+
 	// endpoints
 	ControlAdvertise string        `gorm:"size:255" json:"control_advertise"`
 	WebRTCHosts      SfuStringList `gorm:"column:webrtc_hosts;type:jsonb;not null;default:'[]'" json:"webrtc_hosts"`

@@ -37,12 +37,16 @@ func Register(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 	admin := v1.Group("/admin", deps.Auth, handlers.requireSystemAdmin())
 	mount("POST /admin/sfu/nodes", func() { admin.POST("/sfu/nodes", handlers.createNode) })
 	mount("GET /admin/sfu/nodes", func() { admin.GET("/sfu/nodes", handlers.listNodes) })
+	// 拓扑必须在 nodes/:nodeID 之前注册（避免被参数路由误匹配；且与 httpapi 双挂时 mount 幂等跳过）。
+	mount("GET /admin/sfu/topology", func() { admin.GET("/sfu/topology", handlers.listTopology) })
 	mount("GET /admin/sfu/nodes/:nodeID", func() { admin.GET("/sfu/nodes/:nodeID", handlers.getNode) })
 	mount("PATCH /admin/sfu/nodes/:nodeID", func() { admin.PATCH("/sfu/nodes/:nodeID", handlers.updateNode) })
 	mount("POST /admin/sfu/nodes/:nodeID/revoke", func() { admin.POST("/sfu/nodes/:nodeID/revoke", handlers.nodeAction(svc.Revoke)) })
 	mount("POST /admin/sfu/nodes/:nodeID/drain", func() { admin.POST("/sfu/nodes/:nodeID/drain", handlers.nodeAction(svc.Drain)) })
 	mount("POST /admin/sfu/nodes/:nodeID/undrain", func() { admin.POST("/sfu/nodes/:nodeID/undrain", handlers.nodeAction(svc.Undrain)) })
-	mount("POST /admin/sfu/nodes/:nodeID/disable", func() { admin.POST("/sfu/nodes/:nodeID/disable", handlers.nodeAction(svc.Disable)) })
+	// disable = 仅关闭调度开关（保持 ONLINE/ENROLLED 状态）；生命周期禁用见 PATCH status=DISABLED。
+	mount("POST /admin/sfu/nodes/:nodeID/disable", func() { admin.POST("/sfu/nodes/:nodeID/disable", handlers.nodeAction(svc.DisableScheduling)) })
+	// enable = 打开调度开关；DISABLED 时顺带解禁为 ENROLLED（在线则回 ONLINE）。
 	mount("POST /admin/sfu/nodes/:nodeID/enable", func() { admin.POST("/sfu/nodes/:nodeID/enable", handlers.nodeAction(svc.Enable)) })
 	mount("GET /admin/guilds/:guildID/node-pool", func() { admin.GET("/guilds/:guildID/node-pool", handlers.adminGetPool) })
 	mount("PUT /admin/guilds/:guildID/node-pool", func() { admin.PUT("/guilds/:guildID/node-pool", handlers.adminPutPool) })

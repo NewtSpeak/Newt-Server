@@ -277,14 +277,18 @@ func (s *Service) Channel(stream grpc.BidiStreamingServer[owlsfuv1.NodeMessage, 
 				s.registry.UpdateCapacity(node.ID, capacity)
 				if time.Since(lastSeenWritten) >= lastSeenThrottle {
 					lastSeenWritten = time.Now()
+					hbUpdates := map[string]any{
+						"last_seen_at":  time.Now().UTC(),
+						"status":        model.SfuNodeOnline,
+						"max_users":     capacity.MaxUsers,
+						"current_users": capacity.CurrentUsers,
+					}
+					if v := payload.Heartbeat.GetNodeVersion(); v != "" {
+						hbUpdates["node_version"] = v
+					}
 					s.db.Model(&model.SfuNode{}).
 						Where("id = ? AND status IN ?", node.ID, []string{model.SfuNodeOnline, model.SfuNodeEnrolled}).
-						Updates(map[string]any{
-							"last_seen_at":  time.Now().UTC(),
-							"status":        model.SfuNodeOnline,
-							"max_users":     capacity.MaxUsers,
-							"current_users": capacity.CurrentUsers,
-						})
+						Updates(hbUpdates)
 				}
 			case *owlsfuv1.NodeMessage_RoomEvent:
 				s.handleRoomEvent(logger, node.ID, payload.RoomEvent)
@@ -298,11 +302,24 @@ func (s *Service) Channel(stream grpc.BidiStreamingServer[owlsfuv1.NodeMessage, 
 }
 
 func (s *Service) handleRegister(nodeID uuid.UUID, connection *conn, register *owlsfuv1.Register) error {
+	// DISABLED/REVOKED 节点拒绝上线（管理员禁用/吊销后不能靠重连把自己刷回 ONLINE）。
+	var current model.SfuNode
+	if err := s.db.Select("id", "status").First(&current, "id = ?", nodeID).Error; err != nil {
+		return status.Error(codes.NotFound, "节点不存在")
+	}
+	switch current.Status {
+	case model.SfuNodeDisabled:
+		return status.Error(codes.PermissionDenied, "节点已禁用")
+	case model.SfuNodeRevoked:
+		return status.Error(codes.PermissionDenied, "节点已吊销")
+	case model.SfuNodePendingEnrollment:
+		return status.Error(codes.FailedPrecondition, "节点尚未完成 Enrollment")
+	}
 	advertise := register.GetAdvertise()
 	capacity := capacityFromProto(register.GetCapacity())
 	now := time.Now().UTC()
-	err := s.db.Model(&model.SfuNode{}).Where("id = ?", nodeID).Updates(map[string]any{
-		"status":            model.SfuNodeOnline,
+	// DRAINING 保持排空态，仅刷新端点与容量；其余可上线态写 ONLINE。
+	updates := map[string]any{
 		"advertise_wss_url": advertise.GetWssUrl(),
 		"media_udp_port":    int(advertise.GetMediaUdpPort()),
 		"media_ips":         model.SfuStringList(advertise.GetMediaIps()),
@@ -310,7 +327,14 @@ func (s *Service) handleRegister(nodeID uuid.UUID, connection *conn, register *o
 		"max_users":         capacity.MaxUsers,
 		"current_users":     capacity.CurrentUsers,
 		"last_seen_at":      now,
-	}).Error
+		"node_version":      register.GetNodeVersion(),
+	}
+	if current.Status != model.SfuNodeDraining {
+		updates["status"] = model.SfuNodeOnline
+	}
+	// DRAINING 保持：滚动升级的恢复由 update-binary 异步 restoreSchedulingAfterUpgrade
+	// 显式 undrain；管理员手动排空不应因重连自动取消。
+	err := s.db.Model(&model.SfuNode{}).Where("id = ?", nodeID).Updates(updates).Error
 	if err != nil {
 		return err
 	}
@@ -381,7 +405,7 @@ func (s *Service) notifyVoiceConnectedChange(sessionID uuid.UUID) {
 // EdgeDown 时经回调交给 voice 编排处理（docs 08 §6.1 / §7.2），并把
 // 「健康邻居对边对端的指控」计入 BI.3 提前信号（docs 15 §5 BI.2 ①）。
 func (s *Service) handleEdgeStatus(logger *slog.Logger, reporterID uuid.UUID, es *owlsfuv1.EdgeStatus) {
-	s.registry.UpdateEdgeStatus(es)
+	s.registry.UpdateEdgeStatusFrom(es, reporterID.String())
 	if es.GetState() == owlsfuv1.EdgeStatus_STATE_EDGE_DOWN {
 		logger.Warn("级联边断开", "room_id", es.GetRoomId(), "epoch", es.GetEpoch(),
 			"parent", es.GetParentNodeId(), "child", es.GetChildNodeId())

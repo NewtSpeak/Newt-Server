@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import {
   CpuIcon,
+  DownloadIcon,
   EllipsisVerticalIcon,
   PauseCircleIcon,
   PlayCircleIcon,
@@ -16,6 +17,7 @@ import { toast } from "sonner"
 import { CopyButton } from "~/components/copy-button"
 import { NodeStatusBadge } from "~/components/node-status-badge"
 import { PageHeader } from "~/components/page-header"
+import { SfuTopologyInfoButton } from "~/components/sfu-topology-dialog"
 import { EmptyState, ErrorState, LoadingState } from "~/components/states"
 import { Button } from "~/components/ui/button"
 import {
@@ -40,10 +42,14 @@ import { useGatewayEvent } from "~/hooks/use-gateway"
 import {
   createSfuNode,
   listSfuNodes,
+  listSfuReleases,
   sfuNodeAction,
+  updateSfuBinary,
+  updateSfuNode,
   type SfuNode,
   type SfuNodeAction,
   type SfuNodeCreated,
+  type SfuRelease,
 } from "~/lib/api"
 import { formatRelative } from "~/lib/format"
 import { gsap, MOTION, MOTION_OK, useGSAP } from "~/lib/gsap"
@@ -65,6 +71,16 @@ export default function VoiceNodesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<SfuNodeCreated | null>(null)
+
+  const [upgradeNode, setUpgradeNode] = useState<SfuNode | null>(null)
+  const [upgrading, setUpgrading] = useState(false)
+  const [releases, setReleases] = useState<SfuRelease[]>([])
+  const [upgradeVersion, setUpgradeVersion] = useState("")
+  const [upgradeURL, setUpgradeURL] = useState("")
+  const [upgradeSHA, setUpgradeSHA] = useState("")
+  const [upgradeForce, setUpgradeForce] = useState(false)
+  /** 升级前排空并均匀迁到附近节点（滚动更新，默认开） */
+  const [upgradeDrainFirst, setUpgradeDrainFirst] = useState(true)
 
   // 轮询 15s 刷新（节点生命周期走 internal.NODE_* 内部事件，不下发客户端）；
   // 节点池变更事件作为辅助信号（授权/勾选变化通常伴随节点面板操作）。
@@ -140,11 +156,90 @@ export default function VoiceNodesPage() {
   async function onAction(node: SfuNode, action: SfuNodeAction) {
     if (action === "revoke" && !window.confirm(`吊销「${node.display_name}」的证书后需重新 Enrollment 才能接入，确定继续？`)) return
     try {
-      await sfuNodeAction(node.node_id, action)
+      // 启用/停用调度：走显式调度开关，不改 ONLINE/ENROLLED 生命周期状态。
+      // 其余动作（排空/吊销）仍走节点动作端点。
+      if (action === "enable") {
+        await updateSfuNode(node.node_id, { enabled_for_scheduling: true })
+      } else if (action === "disable") {
+        await updateSfuNode(node.node_id, { enabled_for_scheduling: false })
+      } else {
+        await sfuNodeAction(node.node_id, action)
+      }
       toast.success(`已对「${node.display_name}」执行：${ACTION_LABELS[action]}`)
       nodes.reload(true)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : `${ACTION_LABELS[action]}失败`)
+    }
+  }
+
+  async function onSaveRegion(node: SfuNode, region: string) {
+    const next = region.trim()
+    const labels = { ...(node.labels ?? {}) }
+    if (next) labels.region = next
+    else delete labels.region
+    try {
+      await updateSfuNode(node.node_id, { labels })
+      toast.success(`已更新「${node.display_name}」地域标签`)
+      nodes.reload(true)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "更新地域失败")
+    }
+  }
+
+  async function openUpgrade(node: SfuNode) {
+    setUpgradeNode(node)
+    setUpgradeVersion("")
+    setUpgradeURL("")
+    setUpgradeSHA("")
+    setUpgradeForce(false)
+    setUpgradeDrainFirst(true)
+    try {
+      const data = await listSfuReleases()
+      setReleases(data.releases ?? [])
+    } catch {
+      setReleases([])
+    }
+  }
+
+  async function onUpgrade() {
+    if (!upgradeNode) return
+    const version = upgradeVersion.trim()
+    const url = upgradeURL.trim()
+    if (!version && !url) {
+      toast.error("请填写目标版本，或提供下载 URL")
+      return
+    }
+    setUpgrading(true)
+    try {
+      const result = await updateSfuBinary(upgradeNode.node_id, {
+        target_version: version || undefined,
+        download_url: url || undefined,
+        sha256_hex: upgradeSHA.trim() || undefined,
+        force: upgradeForce,
+        drain_first: upgradeDrainFirst,
+        drain_timeout_sec: 90,
+      })
+      if (result.ok) {
+        const drainHint = result.drain
+          ? result.drain.drained
+            ? `（已迁出 ${result.drain.sessions_before} 人）`
+            : result.drain.forced
+              ? `（排空超时，残留 ${result.drain.sessions_after} 人）`
+              : ""
+          : ""
+        toast.success(result.note || `已向「${upgradeNode.display_name}」下发升级${drainHint}`)
+        setUpgradeNode(null)
+        // 排空 + 重启后版本与调度会刷新；多等几轮
+        setTimeout(() => nodes.reload(true), 3000)
+        setTimeout(() => nodes.reload(true), 10000)
+        setTimeout(() => nodes.reload(true), 25000)
+      } else {
+        toast.error(result.error_message || result.error_code || "节点拒绝升级")
+      }
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "升级失败")
+    } finally {
+      setUpgrading(false)
     }
   }
 
@@ -154,6 +249,7 @@ export default function VoiceNodesPage() {
     <main ref={containerRef} className="flex flex-1 flex-col gap-6 py-4 md:py-6">
       <PageHeader
         title="SFU 节点"
+        titleExtra={<SfuTopologyInfoButton />}
         description="节点须完成 Enrollment（一次性令牌 → 证书 → mTLS）并显式启用调度后才进入调度池。"
         actions={
           <Button onClick={() => { setCreated(null); setCreateOpen(true) }}>
@@ -233,6 +329,114 @@ export default function VoiceNodesPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={Boolean(upgradeNode)}
+        onOpenChange={open => {
+          if (!open) setUpgradeNode(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>升级 SFU 程序</DialogTitle>
+            <DialogDescription>
+              向「{upgradeNode?.display_name}」下发远程升级。默认先把本节点用户均匀迁到附近节点，再更新程序，客户端仅短暂静音切换；当前版本{" "}
+              <span className="font-mono text-foreground">{upgradeNode?.node_version || "未知"}</span>。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            {releases.length > 0 && (
+              <div className="grid gap-2">
+                <Label>本地已发布版本</Label>
+                <div className="flex max-h-36 flex-col gap-1 overflow-auto rounded-xl border p-2">
+                  {releases.map(r => (
+                    <button
+                      key={r.filename}
+                      type="button"
+                      className={cn(
+                        "rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted",
+                        upgradeVersion === r.version && "bg-primary/10 text-foreground",
+                      )}
+                      onClick={() => {
+                        setUpgradeVersion(r.version)
+                        setUpgradeURL("")
+                      }}
+                    >
+                      <span className="font-mono font-medium">{r.version}</span>
+                      <span className="ml-2 text-muted-foreground">
+                        {r.goos}/{r.goarch} · {(r.size / (1024 * 1024)).toFixed(1)} MiB
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="grid gap-2">
+              <Label htmlFor="upgrade-version">目标版本</Label>
+              <Input
+                id="upgrade-version"
+                value={upgradeVersion}
+                onChange={e => setUpgradeVersion(e.target.value)}
+                placeholder="如 0.1.1"
+                maxLength={64}
+              />
+              <p className="text-xs text-muted-foreground">
+                使用本地发布目录时填版本号即可（文件名 owl-sfu-&lt;version&gt;-linux-amd64）。
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="upgrade-url">下载 URL（可选，覆盖本地发布）</Label>
+              <Input
+                id="upgrade-url"
+                value={upgradeURL}
+                onChange={e => setUpgradeURL(e.target.value)}
+                placeholder="https://…/owl-sfu"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="upgrade-sha">SHA-256（可选）</Label>
+              <Input
+                id="upgrade-sha"
+                value={upgradeSHA}
+                onChange={e => setUpgradeSHA(e.target.value)}
+                placeholder="本地发布会自动计算"
+                className="font-mono text-xs"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={upgradeDrainFirst}
+                onChange={e => setUpgradeDrainFirst(e.target.checked)}
+                className="size-4 rounded border"
+              />
+              滚动更新：升级前排空，用户均匀分流到附近节点（推荐）
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={upgradeForce}
+                onChange={e => setUpgradeForce(e.target.checked)}
+                className="size-4 rounded border"
+              />
+              强制重装（即使版本相同）
+            </label>
+            {upgrading && upgradeDrainFirst && (
+              <p className="text-xs text-muted-foreground">
+                正在排空并迁移会话，可能需要最多约 90 秒，请勿关闭页面…
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setUpgradeNode(null)} disabled={upgrading}>
+              取消
+            </Button>
+            <Button type="button" onClick={() => void onUpgrade()} disabled={upgrading}>
+              {upgrading ? (upgradeDrainFirst ? "排空并升级中…" : "下发中…") : "确认升级"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <section className="px-4 lg:px-6">
         {nodes.status === "loading" && <LoadingState rows={4} />}
         {nodes.status === "error" && !nodes.data && <ErrorState message={nodes.error} onRetry={() => nodes.reload()} />}
@@ -283,6 +487,13 @@ export default function VoiceNodesPage() {
                             <WavesIcon />
                             排空节点
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={!node.online && node.status !== "ONLINE"}
+                            onClick={() => void openUpgrade(node)}
+                          >
+                            <DownloadIcon />
+                            升级程序
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem variant="destructive" onClick={() => onAction(node, "revoke")}>
                             <ShieldAlertIcon />
@@ -318,13 +529,37 @@ export default function VoiceNodesPage() {
                         <CpuIcon className="size-3.5" />
                         CPU <span className="font-medium text-foreground tabular-nums">{cpu != null ? `${Math.round(cpu)}%` : "—"}</span>
                       </span>
-                      <span>
-                        地域 <span className="font-medium text-foreground">{node.labels?.region ?? "—"}</span>
-                      </span>
+                      <label className="flex items-center gap-1">
+                        地域
+                        <input
+                          key={`${node.node_id}-${node.labels?.region ?? ""}`}
+                          defaultValue={node.labels?.region ?? ""}
+                          placeholder="未设置"
+                          maxLength={64}
+                          className="h-6 w-28 rounded-md border bg-background px-1.5 font-medium text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+                          onBlur={event => {
+                            const next = event.currentTarget.value.trim()
+                            if (next === (node.labels?.region ?? "")) return
+                            void onSaveRegion(node, next)
+                          }}
+                          onKeyDown={event => {
+                            if (event.key === "Enter") {
+                              event.currentTarget.blur()
+                            }
+                          }}
+                          aria-label={`${node.display_name} 地域标签`}
+                        />
+                      </label>
                       <span>
                         调度{" "}
                         <span className={cn("font-medium", node.enabled_for_scheduling ? "text-emerald-600 dark:text-emerald-400" : "text-foreground")}>
                           {node.enabled_for_scheduling ? "已启用" : "未启用"}
+                        </span>
+                      </span>
+                      <span>
+                        版本{" "}
+                        <span className="font-mono font-medium text-foreground">
+                          {node.node_version?.trim() ? node.node_version : "—"}
                         </span>
                       </span>
                       <span className="ml-auto">心跳 {formatRelative(node.last_seen_at)}</span>

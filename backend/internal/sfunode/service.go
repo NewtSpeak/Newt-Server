@@ -53,6 +53,9 @@ func (s *Service) CreateNode(actor model.User, displayName string, labels map[st
 		return model.SfuNode{}, "", err
 	}
 	expires := time.Now().UTC().Add(ttl)
+	if labels == nil {
+		labels = map[string]string{}
+	}
 	node := model.SfuNode{
 		ID:                       uuid.New(),
 		DisplayName:              displayName,
@@ -263,7 +266,8 @@ func (s *Service) Undrain(actor model.User, nodeID uuid.UUID) (model.SfuNode, er
 	return node, nil
 }
 
-// Disable 管理员禁用节点：拒绝连接并踢掉现有控制连接。
+// Disable 管理员禁用节点：拒绝连接并踢掉现有控制连接（生命周期禁用，非仅关调度）。
+// 后台「停用调度」应走 DisableScheduling；本方法保留给「禁用节点」语义。
 func (s *Service) Disable(actor model.User, nodeID uuid.UUID) (model.SfuNode, error) {
 	node, err := s.transitionStatus(nodeID, model.SfuNodeDisabled, map[string]any{
 		"enabled_for_scheduling": false,
@@ -274,6 +278,8 @@ func (s *Service) Disable(actor model.User, nodeID uuid.UUID) (model.SfuNode, er
 	if s.hub != nil {
 		s.hub.Kick(nodeID, "节点已被管理员禁用")
 	}
+	// 踢掉旧 WSS hub 连接（若有）；gRPC 控制流会在节点侧重连时由
+	// handleRegister 的 DISABLED 校验拒绝，或由管理员后续 revoke 断开。
 	audit.Log(s.db, audit.Entry{
 		ActorID: &actor.ID, ActorType: "system_admin",
 		Action: "sfu_node.disable", TargetType: "sfu_node", TargetID: nodeID.String(),
@@ -282,15 +288,79 @@ func (s *Service) Disable(actor model.User, nodeID uuid.UUID) (model.SfuNode, er
 	return node, nil
 }
 
-// Enable 解除禁用：DISABLED → ENROLLED（需节点重新连上才 ONLINE）。
+// Enable 启用调度（docs 03 §2.2：显式开关，与生命周期状态正交）。
+// - DISABLED → 先解禁为 ENROLLED（控制通道仍在时会由心跳/Register 回到 ONLINE）
+// - 任意非终态 → 打开 enabled_for_scheduling，不改变 ONLINE 等在线状态
+// - REVOKED / PENDING_ENROLLMENT 拒绝
 func (s *Service) Enable(actor model.User, nodeID uuid.UUID) (model.SfuNode, error) {
-	node, err := s.transitionStatus(nodeID, model.SfuNodeEnrolled, nil)
-	if err != nil {
-		return node, err
+	var node model.SfuNode
+	if err := s.db.First(&node, "id = ?", nodeID).Error; err != nil {
+		return node, fmt.Errorf("节点不存在")
+	}
+	switch node.Status {
+	case model.SfuNodeRevoked:
+		return node, fmt.Errorf("已吊销节点无法启用调度")
+	case model.SfuNodePendingEnrollment:
+		return node, fmt.Errorf("待接入节点尚未完成 Enrollment，无法启用调度")
+	case model.SfuNodeDisabled:
+		// 解禁：DISABLED → ENROLLED，并打开调度开关
+		updated, err := s.transitionStatus(nodeID, model.SfuNodeEnrolled, map[string]any{
+			"enabled_for_scheduling": true,
+		})
+		if err != nil {
+			return node, err
+		}
+		node = updated
+		node.EnabledForScheduling = true
+	default:
+		// ONLINE / ENROLLED / DRAINING：只拨调度开关，不改状态机
+		if err := s.db.Model(&node).Update("enabled_for_scheduling", true).Error; err != nil {
+			return node, fmt.Errorf("更新调度开关失败: %w", err)
+		}
+		node.EnabledForScheduling = true
+	}
+	// 若控制通道仍在线且当前是 ENROLLED，立即回 ONLINE，避免 UI 短暂显示「已注册」。
+	if node.Status == model.SfuNodeEnrolled {
+		if info, err := sfuctl.Dir().Node(nodeID); err == nil && info.Online {
+			if updated, err := s.transitionStatus(nodeID, model.SfuNodeOnline, nil); err == nil {
+				node = updated
+				node.EnabledForScheduling = true
+			}
+		}
 	}
 	audit.Log(s.db, audit.Entry{
 		ActorID: &actor.ID, ActorType: "system_admin",
-		Action: "sfu_node.enable", TargetType: "sfu_node", TargetID: nodeID.String(),
+		Action: "sfu_node.enable_scheduling", TargetType: "sfu_node", TargetID: nodeID.String(),
+		Detail: map[string]any{"status": node.Status, "enabled_for_scheduling": true},
+	})
+	return node, nil
+}
+
+// SetScheduling 仅切换调度开关（不改变生命周期状态）。Disable 语义见 Disable。
+func (s *Service) SetScheduling(actor model.User, nodeID uuid.UUID, enabled bool) (model.SfuNode, error) {
+	if enabled {
+		return s.Enable(actor, nodeID)
+	}
+	return s.DisableScheduling(actor, nodeID)
+}
+
+// DisableScheduling 关闭调度开关，保持节点在线状态（ONLINE 仍可连，只是不再被调度进新会话）。
+func (s *Service) DisableScheduling(actor model.User, nodeID uuid.UUID) (model.SfuNode, error) {
+	var node model.SfuNode
+	if err := s.db.First(&node, "id = ?", nodeID).Error; err != nil {
+		return node, fmt.Errorf("节点不存在")
+	}
+	if node.Status == model.SfuNodeRevoked {
+		return node, fmt.Errorf("已吊销节点无法操作调度开关")
+	}
+	if err := s.db.Model(&node).Update("enabled_for_scheduling", false).Error; err != nil {
+		return node, fmt.Errorf("更新调度开关失败: %w", err)
+	}
+	node.EnabledForScheduling = false
+	audit.Log(s.db, audit.Entry{
+		ActorID: &actor.ID, ActorType: "system_admin",
+		Action: "sfu_node.disable_scheduling", TargetType: "sfu_node", TargetID: nodeID.String(),
+		Detail: map[string]any{"status": node.Status},
 	})
 	return node, nil
 }

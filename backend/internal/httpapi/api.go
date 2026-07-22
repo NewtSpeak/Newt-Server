@@ -72,9 +72,12 @@ func (a *API) RegisterRoutes(group *gin.RouterGroup) {
 	admin := protected.Group("/admin/sfu", a.requireSystemAdmin())
 	admin.POST("/nodes", a.createSfuNode)
 	admin.GET("/nodes", a.listSfuNodes)
+	admin.GET("/topology", a.listSfuTopology)
 	admin.PATCH("/nodes/:nodeID", a.updateSfuNode)
 	admin.DELETE("/nodes/:nodeID", a.deleteSfuNode)
 	admin.POST("/nodes/:nodeID/revoke", a.revokeSfuNode)
+	admin.POST("/nodes/:nodeID/update-binary", a.updateSfuBinary)
+	admin.GET("/releases", a.listSfuReleases)
 
 	// 语音会话收敛说明（端到端统一专项）：早期本文件平行实现的
 	// POST /guilds/:gid/channels/:cid/voice/join|leave、/guilds/:gid/voice/refresh-token、
