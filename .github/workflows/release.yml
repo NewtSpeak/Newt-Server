@@ -1,5 +1,4 @@
-# Owl-Server 发布：嵌入前端 SPA 的多平台二进制 + GitHub Release
-# 触发：推送 v* 标签，或手动 workflow_dispatch 指定版本号
+# Owl-Server 发布：嵌入 SPA 的多平台二进制 → 本仓 Release + 同步到 OwlSpeak/OwlSpeak
 name: Release
 
 on:
@@ -11,12 +10,18 @@ on:
         description: "版本号（不含 v 前缀，如 0.1.0）"
         required: true
         type: string
+      extra_notes:
+        description: "附加到 Release 说明的额外备注（可选）"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
 
 env:
   CGO_ENABLED: "0"
+  RELEASE_HUB_REPO: OwlSpeak/OwlSpeak
 
 jobs:
   resolve-version:
@@ -40,18 +45,15 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Release version: ${VERSION}"
 
   prepare-frontend:
     name: Build frontend for embed
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
@@ -69,10 +71,8 @@ jobs:
           mkdir -p backend/internal/web/dist
           cp -R frontend/build/client/. backend/internal/web/dist/
           test -f backend/internal/web/dist/index.html
-          find backend/internal/web/dist -type f | head -30
 
-      - name: Upload embed dist
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: embed-frontend-dist
           path: backend/internal/web/dist
@@ -98,17 +98,14 @@ jobs:
           - goos: windows
             goarch: amd64
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download embed dist
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: embed-frontend-dist
           path: backend/internal/web/dist
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
@@ -125,10 +122,8 @@ jobs:
           OUT="dist/owl-server-${VERSION}-${GOOS}-${GOARCH}"
           go build -trimpath -ldflags "-s -w" -o "${OUT}" ./cmd/server
           sha256sum "${OUT}" | tee "${OUT}.sha256"
-          ls -lh dist/
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: owl-server-${{ needs.resolve-version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: backend/dist/*
@@ -136,13 +131,16 @@ jobs:
           retention-days: 14
 
   release:
-    name: GitHub Release
+    name: Release + Hub sync
     needs: [resolve-version, build]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
         with:
           path: release-assets
           pattern: owl-server-*
@@ -152,22 +150,52 @@ jobs:
         working-directory: release-assets
         run: |
           ls -lah
-          if ls *.sha256 >/dev/null 2>&1; then
-            cat *.sha256 > SHA256SUMS
-          else
-            sha256sum owl-server-* > SHA256SUMS
-          fi
-          cat SHA256SUMS
+          {
+            if ls *.sha256 >/dev/null 2>&1; then cat *.sha256
+            else sha256sum owl-server-*
+            fi
+          } > "SHA256SUMS-owl-server-${{ needs.resolve-version.outputs.version }}.txt"
+          cat "SHA256SUMS-owl-server-${{ needs.resolve-version.outputs.version }}.txt"
 
-      - name: Create Release
+      - name: Write extra notes
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.extra_notes != '' }}
+        run: |
+          printf '%s\n' "${{ inputs.extra_notes }}" > EXTRA_NOTES.md
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          TAG: ${{ needs.resolve-version.outputs.tag }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          chmod +x scripts/ci/generate-release-notes.sh
+          EXTRA=""
+          if [ -f EXTRA_NOTES.md ]; then EXTRA=EXTRA_NOTES.md; fi
+          scripts/ci/generate-release-notes.sh "Owl-Server" "$EXTRA" | tee RELEASE_BODY.md
+
+      - name: Create own-repo Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-version.outputs.tag }}
           name: Owl-Server ${{ needs.resolve-version.outputs.tag }}
-          generate_release_notes: true
+          body_path: RELEASE_BODY.md
           files: |
             release-assets/owl-server-*
-            release-assets/SHA256SUMS
+            release-assets/SHA256SUMS-owl-server-*
           fail_on_unmatched_files: true
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync to OwlSpeak/OwlSpeak hub
+        env:
+          RELEASE_HUB_TOKEN: ${{ secrets.RELEASE_HUB_TOKEN }}
+          RELEASE_HUB_REPO: ${{ env.RELEASE_HUB_REPO }}
+          TAG: ${{ needs.resolve-version.outputs.tag }}
+          COMPONENT_KEY: Owl-Server
+          COMPONENT_TITLE: Owl-Server（控制面）
+          RELEASE_BODY_PATH: RELEASE_BODY.md
+          ASSET_GLOBS: "release-assets/owl-server-* release-assets/SHA256SUMS-owl-server-*"
+        run: |
+          chmod +x scripts/ci/sync-release-hub.sh
+          scripts/ci/sync-release-hub.sh
