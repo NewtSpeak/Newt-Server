@@ -1,0 +1,173 @@
+# Owl-Server 发布：嵌入前端 SPA 的多平台二进制 + GitHub Release
+# 触发：推送 v* 标签，或手动 workflow_dispatch 指定版本号
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（不含 v 前缀，如 0.1.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  resolve-version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - name: Compute version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "empty version" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${VERSION}"
+
+  prepare-frontend:
+    name: Build frontend for embed
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install & build SPA
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile || bun install
+          bun run build
+
+      - name: Stage embed dist
+        run: |
+          rm -rf backend/internal/web/dist/assets \
+                 backend/internal/web/dist/index.html \
+                 backend/internal/web/dist/favicon.ico
+          mkdir -p backend/internal/web/dist
+          cp -R frontend/build/client/. backend/internal/web/dist/
+          test -f backend/internal/web/dist/index.html
+          find backend/internal/web/dist -type f | head -30
+
+      - name: Upload embed dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: embed-frontend-dist
+          path: backend/internal/web/dist
+          retention-days: 3
+
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: [resolve-version, prepare-frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download embed dist
+        uses: actions/download-artifact@v4
+        with:
+          name: embed-frontend-dist
+          path: backend/internal/web/dist
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build owl-server
+        working-directory: backend
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          test -f internal/web/dist/index.html
+          mkdir -p dist
+          OUT="dist/owl-server-${VERSION}-${GOOS}-${GOARCH}"
+          go build -trimpath -ldflags "-s -w" -o "${OUT}" ./cmd/server
+          sha256sum "${OUT}" | tee "${OUT}.sha256"
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: owl-server-${{ needs.resolve-version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: backend/dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub Release
+    needs: [resolve-version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: owl-server-*
+          merge-multiple: true
+
+      - name: Prepare checksums
+        working-directory: release-assets
+        run: |
+          ls -lah
+          if ls *.sha256 >/dev/null 2>&1; then
+            cat *.sha256 > SHA256SUMS
+          else
+            sha256sum owl-server-* > SHA256SUMS
+          fi
+          cat SHA256SUMS
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-version.outputs.tag }}
+          name: Owl-Server ${{ needs.resolve-version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            release-assets/owl-server-*
+            release-assets/SHA256SUMS
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,161 @@
+# Owl-Server 持续集成：前端类型检查/构建 + 后端单测/集成测 + 全量编译
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: server-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build
+
+      - name: Upload SPA dist (for backend embed check)
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/build/client
+          retention-days: 3
+
+  backend-unit:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        # 未设置 TEST_DATABASE_URL 时集成测试会自动 Skip
+        run: go test ./... -count=1 -timeout 15m
+
+  backend-integration:
+    name: Backend integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: backend-unit
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: owl_test
+          POSTGRES_USER: owl
+          POSTGRES_PASSWORD: owl_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U owl -d owl_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgres://owl:owl_ci_password@127.0.0.1:5432/owl_test?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Integration tests
+        run: go test ./... -count=1 -timeout 25m
+
+  build:
+    name: Full build
+    needs: [frontend, backend-unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Install swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Build frontend + embed + server binary
+        working-directory: backend
+        run: |
+          make frontend
+          # swagger 生成可能与已提交 docs 略有差异，允许失败回退到仓库内 docs
+          make swagger || true
+          go build -trimpath -ldflags "-s -w" -o bin/owl-server ./cmd/server
+          ls -lh bin/owl-server
+          # 确认 embed 资源存在
+          test -f internal/web/dist/index.html
+
+      - name: Cross-compile smoke (linux/arm64, darwin/arm64)
+        working-directory: backend
+        run: |
+          for pair in linux/arm64 darwin/arm64; do
+            GOOS=${pair%/*} GOARCH=${pair#*/}
+            OUT="bin/owl-server-ci-${GOOS}-${GOARCH}"
+            echo "→ $OUT"
+            GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags "-s -w" -o "$OUT" ./cmd/server
+            ls -lh "$OUT"
+          done
