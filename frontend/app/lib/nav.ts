@@ -44,7 +44,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: "多维限制", url: "/governance/restrictions", icon: ShieldOffIcon },
       { title: "封禁管理", url: "/governance/bans", icon: ShieldBanIcon },
-      { title: "审计日志", url: "/governance/audit", icon: ScrollTextIcon },
+      { title: "操作日志", url: "/governance/audit", icon: ScrollTextIcon },
       { title: "临场与音频审计", url: "/governance/presence", icon: EyeOffIcon },
     ],
   },

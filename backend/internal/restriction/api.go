@@ -205,6 +205,20 @@ func (h *api) create(c *gin.Context) {
 		return
 	}
 	publishChange(h.deps.DB, h.deps.Bus, eventbus.EventRestrictionCreate, record, now)
+	afterSnap := map[string]any{
+		"id": record.ID.String(), "guild_id": record.GuildID.String(),
+		"target_user_id": record.TargetUserID.String(),
+		"scope": record.Scope, "kind": record.Kind, "reason": record.Reason,
+		"deny_view_text": record.DenyViewText, "deny_send_text": record.DenySendText,
+		"deny_listen_voice": record.DenyListenVoice, "deny_speak_voice": record.DenySpeakVoice,
+		"created_by": record.CreatedBy.String(),
+	}
+	if record.ChannelID != nil {
+		afterSnap["channel_id"] = record.ChannelID.String()
+	}
+	if record.ExpiresAt != nil {
+		afterSnap["expires_at"] = record.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
 	h.audit(ctx, user, "restriction.create", record.ID.String(), map[string]any{
 		"target_user_id": targetUserID,
 		"scope":          record.Scope,
@@ -213,6 +227,7 @@ func (h *api) create(c *gin.Context) {
 		"kind":           record.Kind,
 		"reason":         record.Reason,
 		"expires_at":     record.ExpiresAt,
+		"after":          afterSnap,
 	})
 	c.JSON(http.StatusCreated, viewOf(record, true, true, now))
 }
@@ -372,6 +387,8 @@ func (h *api) patch(c *gin.Context) {
 	if !ok {
 		return
 	}
+	beforeReason := record.Reason
+	beforeExpires := record.ExpiresAt
 	var fields map[string]json.RawMessage
 	if err := c.ShouldBindJSON(&fields); err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
@@ -425,7 +442,12 @@ func (h *api) patch(c *gin.Context) {
 		return
 	}
 	publishChange(h.deps.DB, h.deps.Bus, eventbus.EventRestrictionUpdate, record, now)
-	h.audit(ctx, user, "restriction.update", record.ID.String(), map[string]any{"updates": updates})
+	h.audit(ctx, user, "restriction.update", record.ID.String(), map[string]any{
+		"updates": updates,
+		"before": map[string]any{
+			"reason": beforeReason, "expires_at": beforeExpires,
+		},
+	})
 	c.JSON(http.StatusOK, viewOf(record, true, true, now))
 }
 
@@ -454,7 +476,24 @@ func (h *api) lift(c *gin.Context) {
 	liftedBy := user.ID
 	record.LiftedAt, record.LiftedBy = &now, &liftedBy
 	publishChange(h.deps.DB, h.deps.Bus, eventbus.EventRestrictionLift, record, now)
-	h.audit(ctx, user, "restriction.lift", record.ID.String(), map[string]any{"target_user_id": record.TargetUserID})
+	beforeSnap := map[string]any{
+		"id": record.ID.String(), "guild_id": record.GuildID.String(),
+		"target_user_id": record.TargetUserID.String(),
+		"scope": record.Scope, "kind": record.Kind, "reason": record.Reason,
+		"deny_view_text": record.DenyViewText, "deny_send_text": record.DenySendText,
+		"deny_listen_voice": record.DenyListenVoice, "deny_speak_voice": record.DenySpeakVoice,
+		"created_by": record.CreatedBy.String(),
+	}
+	if record.ChannelID != nil {
+		beforeSnap["channel_id"] = record.ChannelID.String()
+	}
+	if record.ExpiresAt != nil {
+		beforeSnap["expires_at"] = record.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	h.audit(ctx, user, "restriction.lift", record.ID.String(), map[string]any{
+		"target_user_id": record.TargetUserID,
+		"before":         beforeSnap,
+	})
 	c.Status(http.StatusNoContent)
 }
 

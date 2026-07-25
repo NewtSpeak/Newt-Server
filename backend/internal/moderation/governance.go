@@ -56,7 +56,14 @@ func (h *api) kickMember(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "踢出成员失败")
 		return
 	}
-	h.audit(ctx, user, "moderation.kick", "member", member.ID.String(), map[string]any{"target_user_id": member.UserID})
+	// 记录角色绑定便于人工恢复；kick 本身不可一键拉回（目录 irreversible）。
+	var roleIDs []uuid.UUID
+	_ = h.deps.DB.Model(&model.MemberRole{}).Where("member_id = ?", member.ID).Pluck("role_id", &roleIDs)
+	h.audit(ctx, user, "moderation.kick", "member", member.ID.String(), map[string]any{
+		"target_user_id": member.UserID,
+		"nickname":       member.Nickname,
+		"role_ids":       roleIDs,
+	})
 	c.Status(http.StatusNoContent)
 }
 
@@ -130,11 +137,20 @@ func (h *api) banUser(c *gin.Context) {
 	}
 	// Ban 联动：失活该用户本服全部生效 Restriction（docs 12 AO.3），历史保留供审计。
 	lifted, liftErr := restriction.LiftAllForUser(h.deps.DB, h.deps.Bus, ctx.Guild.ID, targetUserID, user.ID)
+	var roleIDs []uuid.UUID
+	var nickname string
+	if isMember {
+		nickname = member.Nickname
+		_ = h.deps.DB.Model(&model.MemberRole{}).Where("member_id = ?", member.ID).Pluck("role_id", &roleIDs)
+	}
 	h.audit(ctx, user, "moderation.ban", "user", targetUserID.String(), map[string]any{
 		"reason":              ban.Reason,
 		"was_member":          isMember,
 		"restrictions_lifted": lifted,
 		"lift_error":          errString(liftErr),
+		"nickname":            nickname,
+		"role_ids":            roleIDs,
+		"after":               map[string]any{"banned": true, "reason": ban.Reason},
 	})
 	// GUILD_BAN_ADD：guild 广播（含预防性封禁非成员的场景——removeMember 只覆盖成员路径），
 	// 管理端封禁列表与在线成员据此实时刷新（docs 08 §8-8）。
@@ -157,6 +173,11 @@ func (h *api) unbanUser(c *gin.Context) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "封禁记录不存在")
 		return
 	}
+	var existing model.GuildBan
+	if err := h.deps.DB.First(&existing, "guild_id = ? AND user_id = ?", ctx.Guild.ID, targetUserID).Error; err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "封禁记录不存在")
+		return
+	}
 	result := h.deps.DB.Delete(&model.GuildBan{}, "guild_id = ? AND user_id = ?", ctx.Guild.ID, targetUserID)
 	if result.Error != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解除封禁失败")
@@ -166,7 +187,12 @@ func (h *api) unbanUser(c *gin.Context) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "封禁记录不存在")
 		return
 	}
-	h.audit(ctx, user, "moderation.unban", "user", targetUserID.String(), nil)
+	h.audit(ctx, user, "moderation.unban", "user", targetUserID.String(), map[string]any{
+		"before": map[string]any{
+			"user_id": targetUserID, "reason": existing.Reason, "created_by": existing.CreatedBy,
+		},
+		"reason": existing.Reason,
+	})
 	// GUILD_BAN_REMOVE：guild 广播 + 定向被解封者（其在线时立即感知可重新加入）。
 	h.publishBanEvent(eventbus.EventGuildBanRemove, ctx.Guild.ID, targetUserID, "")
 	if h.deps.Bus != nil {

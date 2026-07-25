@@ -499,6 +499,13 @@ func (h *api) deleteChannel(c *gin.Context) {
 			Updates(map[string]any{"channel_id": nil, "node_id": nil, "room_id": nil, "voice_session_id": nil, "connected": false, "joined_at": nil}).Error; err != nil {
 			return err
 		}
+		// 若本频道是服务器默认着陆频道，一并置空（避免悬空引用）。
+		if ctx.Guild.DefaultChannelID != nil && *ctx.Guild.DefaultChannelID == channel.ID {
+			if err := tx.Model(&model.Guild{}).Where("id = ?", guildID).
+				Update("default_channel_id", nil).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Delete(&model.Channel{}, "id = ?", channel.ID).Error
 	})
 	if err != nil {
@@ -711,6 +718,19 @@ func (h *api) applyOverwrite(c *gin.Context, ctx *perms.GuildContext, user model
 	if h.deps.Bus != nil {
 		viewersBefore, _ = snapshot.ChannelViewers(h.deps.DB, ctx.Guild.ID, channel.ID)
 	}
+	var prev model.ChannelOverwrite
+	hadPrev := h.deps.DB.Where("channel_id = ? AND type = ? AND target_id = ?", channel.ID, input.Type, targetID).First(&prev).Error == nil
+	before := map[string]any{"target_id": targetID, "type": input.Type, "target_type": input.Type}
+	if hadPrev {
+		before["id"] = prev.ID
+		before["allow"] = prev.Allow
+		before["deny"] = prev.Deny
+		before["created"] = false
+	} else {
+		before["created"] = true
+		before["allow"] = int64(0)
+		before["deny"] = int64(0)
+	}
 	overwrite := model.ChannelOverwrite{ID: uuid.New(), ChannelID: channel.ID, Type: input.Type, TargetID: targetID, Allow: input.Allow, Deny: input.Deny}
 	err := h.deps.DB.Where(model.ChannelOverwrite{ChannelID: channel.ID, Type: input.Type, TargetID: targetID}).
 		Assign(map[string]any{"allow": input.Allow, "deny": input.Deny}).FirstOrCreate(&overwrite).Error
@@ -720,6 +740,8 @@ func (h *api) applyOverwrite(c *gin.Context, ctx *perms.GuildContext, user model
 	}
 	h.audit(ctx, user, "rbac.channel_overwrite_update", "channel", channel.ID.String(), map[string]any{
 		"target_type": input.Type, "target_id": targetID, "allow": input.Allow, "deny": input.Deny,
+		"before": before,
+		"after":  map[string]any{"allow": input.Allow, "deny": input.Deny, "target_id": targetID, "type": input.Type},
 	})
 	h.publishOverwriteEvents(ctx.Guild.ID, channel, viewersBefore)
 	c.JSON(http.StatusOK, overwrite)
@@ -768,7 +790,14 @@ func (h *api) removeOverwrite(c *gin.Context, ctx *perms.GuildContext, user mode
 	if h.deps.Bus != nil {
 		viewersBefore, _ = snapshot.ChannelViewers(h.deps.DB, ctx.Guild.ID, channel.ID)
 	}
-	result := query.Delete(&model.ChannelOverwrite{})
+	var existing []model.ChannelOverwrite
+	_ = query.Session(&gorm.Session{}).Find(&existing).Error
+	// 重新构造删除 query（Find 可能消耗）
+	delQuery := h.deps.DB.Where("channel_id = ? AND target_id = ?", channel.ID, targetID)
+	if raw := c.Query("type"); raw != "" {
+		delQuery = delQuery.Where("type = ?", raw)
+	}
+	result := delQuery.Delete(&model.ChannelOverwrite{})
 	if result.Error != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "删除频道覆盖失败")
 		return
@@ -777,8 +806,18 @@ func (h *api) removeOverwrite(c *gin.Context, ctx *perms.GuildContext, user mode
 		fail(c, http.StatusNotFound, "NOT_FOUND", "覆盖记录不存在")
 		return
 	}
+	before := map[string]any{"target_id": targetID}
+	if len(existing) > 0 {
+		ow := existing[0]
+		before["id"] = ow.ID
+		before["type"] = ow.Type
+		before["target_type"] = ow.Type
+		before["allow"] = ow.Allow
+		before["deny"] = ow.Deny
+	}
 	h.audit(ctx, user, "rbac.channel_overwrite_delete", "channel", channel.ID.String(), map[string]any{
 		"target_id": targetID,
+		"before":    before,
 	})
 	h.publishOverwriteEvents(ctx.Guild.ID, channel, viewersBefore)
 	c.Status(http.StatusNoContent)

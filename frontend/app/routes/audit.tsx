@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useOutletContext } from "react-router"
-import { ChevronDownIcon, ChevronUpIcon, ScrollTextIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronUpIcon, ScrollTextIcon, Undo2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { PageHeader } from "~/components/page-header"
@@ -12,21 +12,29 @@ import { useAsyncData } from "~/hooks/use-async-data"
 import {
   listAdminAuditLogs,
   listGuildAuditLogs,
+  undoAdminAuditLog,
+  undoGuildAuditLog,
   type AuditLogEntry,
   type AuditLogFilters,
   type AuditLogPage,
+  type AuditUndoStatus,
 } from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
 import { formatFullTime, formatRelative } from "~/lib/format"
 
-/** action → 中文标签；未收录的 action 原样展示 */
+/** action → 中文标签；优先用服务端 action_label */
 const ACTION_LABELS: Record<string, string> = {
   "rbac.role_create": "创建角色",
   "rbac.role_update": "修改角色",
+  "rbac.role_delete": "删除角色",
+  "rbac.role_reorder": "角色排序",
   "rbac.member_role_assign": "绑定成员角色",
   "rbac.member_role_remove": "移除成员角色",
   "rbac.channel_create": "创建频道",
+  "rbac.channel_update": "修改频道",
+  "rbac.channel_delete": "删除频道",
   "rbac.channel_overwrite_update": "更新频道权限覆盖",
+  "rbac.channel_overwrite_delete": "删除频道权限覆盖",
   "restriction.create": "创建限制",
   "restriction.update": "修改限制",
   "restriction.lift": "解除限制",
@@ -36,6 +44,11 @@ const ACTION_LABELS: Record<string, string> = {
   "moderation.unban": "解除封禁",
   "moderation.invite_create": "创建邀请",
   "moderation.member_join": "成员加入",
+  "moderation.nickname_update": "修改昵称",
+  "guild.create": "创建服务器",
+  "guild.update": "更新服务器",
+  "guild.delete": "删除服务器",
+  "guild.transfer_ownership": "转让所有权",
   "message.delete_by_moderator": "管理删除消息",
   "message.upload_limit": "调整上传限制",
   "message.retention": "调整消息保留",
@@ -43,6 +56,7 @@ const ACTION_LABELS: Record<string, string> = {
   "voicepack.channel_toggle": "语音包频道开关",
   "stage.config_update": "舞台配置变更",
   "stage.bring_down": "舞台抱下麦",
+  "stage.bring_up": "舞台抱上麦",
   "screen.stop_user": "强制结束共享",
   "screen.guild_quota_update": "调整屏幕配额",
   "screen.platform_settings_update": "平台共享设置",
@@ -63,6 +77,15 @@ const ACTION_LABELS: Record<string, string> = {
   "voice.migration.created": "语音迁移创建",
   "voice.migration.completed": "语音迁移完成",
   "voice.migration.failed": "语音迁移失败",
+  "bot.install": "安装机器人",
+  "bot.uninstall": "卸载机器人",
+  "bot.create": "创建机器人",
+  "bot.delete": "删除机器人",
+  "sticker.pack.guild_ban": "服内封禁贴图包",
+  "sticker.pack.guild_unban": "解除贴图包封禁",
+  "audit.undo": "撤销操作",
+  "platform.user_disable": "禁用用户",
+  "platform.user_enable": "启用用户",
 }
 
 const ACTOR_TYPE_LABELS: Record<string, string> = {
@@ -86,14 +109,16 @@ const TARGET_TYPE_LABELS: Record<string, string> = {
   guild_node_pool: "节点池",
   voice_migration: "语音迁移",
   platform: "平台",
+  bot: "机器人",
 }
 
-/** 操作类型过滤：按 action 前缀分组 */
 const ACTION_FILTERS = [
   { value: "all", label: "全部操作" },
   { value: "rbac.", label: "角色与频道（RBAC）" },
   { value: "restriction.", label: "限制" },
   { value: "moderation.", label: "成员治理" },
+  { value: "guild.", label: "服务器" },
+  { value: "bot.", label: "机器人" },
   { value: "message.", label: "消息" },
   { value: "voicepack.", label: "语音包" },
   { value: "stage.", label: "舞台" },
@@ -101,6 +126,7 @@ const ACTION_FILTERS = [
   { value: "sfu_node.", label: "SFU 节点" },
   { value: "sfu_pool.", label: "节点池" },
   { value: "voice.", label: "语音" },
+  { value: "audit.undo", label: "撤销记录" },
 ]
 
 const RANGE_FILTERS = [
@@ -110,14 +136,43 @@ const RANGE_FILTERS = [
   { value: "30d", label: "近 30 天", hours: 24 * 30 },
 ]
 
+const STATUS_FILTERS = [
+  { value: "all", label: "全部状态" },
+  { value: "available", label: "可撤销" },
+  { value: "undone", label: "已撤销" },
+  { value: "irreversible", label: "不可逆" },
+]
+
 const ALL_GUILDS = "__all__"
+
+function labelOf(entry: AuditLogEntry): string {
+  if (entry.action_label && entry.action_label !== entry.action) return entry.action_label
+  return ACTION_LABELS[entry.action] ?? entry.action
+}
+
+function statusMeta(status?: AuditUndoStatus): { label: string; variant: "default" | "secondary" | "outline" | "destructive" } {
+  switch (status) {
+    case "available":
+      return { label: "可撤销", variant: "default" }
+    case "undone":
+      return { label: "已撤销", variant: "secondary" }
+    case "irreversible":
+      return { label: "不可逆", variant: "outline" }
+    case "blocked":
+      return { label: "暂不可撤", variant: "outline" }
+    default:
+      return { label: "记录", variant: "secondary" }
+  }
+}
 
 export default function AuditPage() {
   const { user, guilds } = useOutletContext<ConsoleContext>()
-  // 系统管理员默认看全量流水；普通用户只能按服查看（后端校验 VIEW_AUDIT_LOG）。
   const [guildID, setGuildID] = useState<string | null>(user.system_admin ? ALL_GUILDS : (guilds[0]?.id ?? null))
   const [actionPrefix, setActionPrefix] = useState("all")
   const [range, setRange] = useState("all")
+  const [undoStatus, setUndoStatus] = useState("all")
+  const [localOverrides, setLocalOverrides] = useState<Record<string, AuditLogEntry>>({})
+  const [prepended, setPrepended] = useState<AuditLogEntry[]>([])
 
   useEffect(() => {
     if (!guildID && guilds[0]) setGuildID(user.system_admin ? ALL_GUILDS : guilds[0].id)
@@ -126,10 +181,11 @@ export default function AuditPage() {
   const filters = useMemo((): AuditLogFilters => {
     const result: AuditLogFilters = {}
     if (actionPrefix !== "all") result.action = actionPrefix
+    if (undoStatus !== "all") result.undo_status = undoStatus as AuditUndoStatus
     const hours = RANGE_FILTERS.find(item => item.value === range)?.hours ?? 0
     if (hours > 0) result.since = new Date(Date.now() - hours * 3_600_000).toISOString()
     return result
-  }, [actionPrefix, range])
+  }, [actionPrefix, range, undoStatus])
 
   const fetchPage = useMemo(() => {
     if (!guildID) return null
@@ -142,15 +198,27 @@ export default function AuditPage() {
 
   const firstPage = useAsyncData<AuditLogPage>(fetchPage ? () => fetchPage(undefined) : null, [fetchPage])
 
-  // 「加载更多」追加页：过滤条件变化时清空
   const [more, setMore] = useState<{ items: AuditLogEntry[]; cursor?: string; hasMore: boolean } | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
-  useEffect(() => setMore(null), [fetchPage])
+  useEffect(() => {
+    setMore(null)
+    setLocalOverrides({})
+    setPrepended([])
+  }, [fetchPage])
 
-  const items = useMemo(
-    () => [...(firstPage.data?.items ?? []), ...(more?.items ?? [])],
-    [firstPage.data, more],
-  )
+  const items = useMemo(() => {
+    const base = [...prepended, ...(firstPage.data?.items ?? []), ...(more?.items ?? [])]
+    const seen = new Set<string>()
+    const out: AuditLogEntry[] = []
+    for (const item of base) {
+      const merged = localOverrides[item.id] ?? item
+      if (seen.has(merged.id)) continue
+      seen.add(merged.id)
+      out.push(merged)
+    }
+    return out
+  }, [firstPage.data, more, localOverrides, prepended])
+
   const nextCursor = more ? more.cursor : firstPage.data?.next_cursor
   const hasMore = more ? more.hasMore : (firstPage.data?.has_more ?? false)
 
@@ -171,6 +239,25 @@ export default function AuditPage() {
     }
   }
 
+  async function handleUndo(entry: AuditLogEntry) {
+    const hint = entry.undo_hint || `将撤销「${labelOf(entry)}」`
+    if (!window.confirm(`${hint}\n\n确认撤销？此操作会写入新的操作日志。`)) return
+    try {
+      const res =
+        guildID === ALL_GUILDS
+          ? await undoAdminAuditLog(entry.id)
+          : await undoGuildAuditLog(guildID!, entry.id)
+      setLocalOverrides(current => ({
+        ...current,
+        [res.original.id]: res.original,
+      }))
+      setPrepended(current => [res.undo, ...current])
+      toast.success("已撤销该操作")
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "撤销失败")
+    }
+  }
+
   const guildOptions = [
     ...(user.system_admin ? [{ value: ALL_GUILDS, label: "全部服务器" }] : []),
     ...guilds.map(guild => ({ value: guild.id, label: guild.name })),
@@ -179,8 +266,8 @@ export default function AuditPage() {
   return (
     <main className="flex flex-1 flex-col gap-6 py-4 md:py-6">
       <PageHeader
-        title="审计日志"
-        description="节点 Enrollment / 启停、限制与封禁、角色与覆盖变更等敏感操作的完整审计流水，支持按服务器、操作类型与时间范围检索。"
+        title="操作日志"
+        description="全部管理操作的可检索时间线。可撤销的操作可在卡片上一键撤回；不可逆操作会明确标注。"
       />
 
       <section className="flex flex-col gap-4 px-4 lg:px-6">
@@ -201,6 +288,13 @@ export default function AuditPage() {
             className="w-44"
           />
           <SimpleSelect
+            ariaLabel="撤销状态"
+            value={undoStatus}
+            onChange={setUndoStatus}
+            options={STATUS_FILTERS}
+            className="w-36"
+          />
+          <SimpleSelect
             ariaLabel="时间范围"
             value={range}
             onChange={setRange}
@@ -214,17 +308,22 @@ export default function AuditPage() {
         {firstPage.status === "success" && items.length === 0 && (
           <EmptyState
             icon={ScrollTextIcon}
-            title="没有匹配的审计记录"
-            description="调整过滤条件，或等待新的敏感操作产生审计事件。"
+            title="没有匹配的操作记录"
+            description="调整过滤条件，或等待新的管理操作产生日志。"
           />
         )}
 
         {firstPage.status === "success" && items.length > 0 && (
           <>
-            {/* 时间线：左侧竖线串联事件圆点 */}
             <ol className="relative flex flex-col gap-0 border-l pl-5 [margin-left:0.4375rem]">
               {items.map((entry, index) => (
-                <AuditTimelineItem key={entry.id} entry={entry} index={index} showGuild={guildID === ALL_GUILDS} />
+                <AuditTimelineItem
+                  key={entry.id}
+                  entry={entry}
+                  index={index}
+                  showGuild={guildID === ALL_GUILDS}
+                  onUndo={() => void handleUndo(entry)}
+                />
               ))}
             </ol>
             {hasMore && (
@@ -239,27 +338,53 @@ export default function AuditPage() {
   )
 }
 
-function AuditTimelineItem({ entry, index, showGuild }: { entry: AuditLogEntry; index: number; showGuild: boolean }) {
+function AuditTimelineItem({
+  entry,
+  index,
+  showGuild,
+  onUndo,
+}: {
+  entry: AuditLogEntry
+  index: number
+  showGuild: boolean
+  onUndo: () => void
+}) {
   const [expanded, setExpanded] = useState(false)
-  const actionLabel = ACTION_LABELS[entry.action] ?? entry.action
+  const actionLabel = labelOf(entry)
   const actorLabel = entry.actor_username || (entry.actor_id ? entry.actor_id.slice(0, 8) : "系统")
   const actorType = ACTOR_TYPE_LABELS[entry.actor_type] ?? entry.actor_type
   const targetType = TARGET_TYPE_LABELS[entry.target_type] ?? entry.target_type
   const targetLabel = entry.target_summary || entry.target_id
   const hasDetail = entry.detail && Object.keys(entry.detail).length > 0
+  const status = entry.undo_status ?? "none"
+  const meta = statusMeta(status)
+  const canUndo = entry.reversible === true || status === "available"
+  const faded = status === "undone"
 
   return (
     <li
       style={{ "--stagger-index": index } as React.CSSProperties}
-      className="anim-item relative pb-5 last:pb-0"
+      className={`anim-item relative pb-5 last:pb-0 ${faded ? "opacity-60" : ""}`}
     >
-      <span className="absolute top-1.5 -left-[1.5625rem] size-2.5 rounded-full border-2 border-background bg-primary/70" aria-hidden />
-      <div className="flex flex-col gap-1 rounded-xl border px-4 py-3">
+      <span
+        className={`absolute top-1.5 -left-[1.5625rem] size-2.5 rounded-full border-2 border-background ${
+          canUndo ? "bg-emerald-500" : status === "undone" ? "bg-muted-foreground/40" : "bg-primary/70"
+        }`}
+        aria-hidden
+      />
+      <div className="flex flex-col gap-1 rounded-xl border px-4 py-3 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{actionLabel}</span>
-          <Badge variant="secondary" className="font-normal">{actorType}</Badge>
+          <Badge variant={meta.variant} className="font-normal">
+            {meta.label}
+          </Badge>
+          <Badge variant="secondary" className="font-normal">
+            {actorType}
+          </Badge>
           {showGuild && entry.guild_name && (
-            <Badge variant="outline" className="font-normal">{entry.guild_name}</Badge>
+            <Badge variant="outline" className="font-normal">
+              {entry.guild_name}
+            </Badge>
           )}
           <span className="ml-auto text-xs text-muted-foreground" title={formatFullTime(entry.created_at)}>
             {formatRelative(entry.created_at)}
@@ -275,8 +400,17 @@ function AuditTimelineItem({ entry, index, showGuild }: { entry: AuditLogEntry; 
           {" 执行了 "}
           <code className="rounded bg-muted px-1 py-0.5 text-[11px]">{entry.action}</code>
         </p>
-        {hasDetail && (
-          <div>
+        {entry.undo_hint && status !== "none" && status !== "available" && (
+          <p className="text-[11px] text-muted-foreground/80">{entry.undo_hint}</p>
+        )}
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          {canUndo && (
+            <Button size="sm" className="h-7 gap-1 px-2.5 text-xs" onClick={onUndo}>
+              <Undo2Icon className="size-3.5" data-icon="inline-start" />
+              撤销
+            </Button>
+          )}
+          {hasDetail && (
             <Button
               variant="ghost"
               size="sm"
@@ -286,12 +420,12 @@ function AuditTimelineItem({ entry, index, showGuild }: { entry: AuditLogEntry; 
               {expanded ? <ChevronUpIcon data-icon="inline-start" /> : <ChevronDownIcon data-icon="inline-start" />}
               {expanded ? "收起详情" : "查看详情"}
             </Button>
-            {expanded && (
-              <pre className="mt-1 max-h-72 overflow-auto rounded-lg bg-muted/60 p-3 text-xs leading-relaxed">
-                {JSON.stringify(entry.detail, null, 2)}
-              </pre>
-            )}
-          </div>
+          )}
+        </div>
+        {expanded && hasDetail && (
+          <pre className="mt-1 max-h-72 overflow-auto rounded-lg bg-muted/60 p-3 text-xs leading-relaxed">
+            {JSON.stringify(entry.detail, null, 2)}
+          </pre>
         )}
       </div>
     </li>

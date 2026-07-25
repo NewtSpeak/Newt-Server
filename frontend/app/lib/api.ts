@@ -745,6 +745,8 @@ export type Bot = {
   id: string
   user_id: string
   owner_user_id: string
+  /** 非空 = 服级独属机器人 */
+  home_guild_id?: string | null
   name: string
   description: string
   avatar_url: string
@@ -768,12 +770,17 @@ export type BotToken = {
 export type GuildBot = {
   id: string
   user_id: string
+  owner_user_id?: string
+  /** 非空 = 本服独属机器人（服主创建）；空 = 平台级 */
+  home_guild_id?: string | null
   name: string
   description: string
   avatar_url: string
   username: string
   member_id: string
   role_ids: string[]
+  created_at?: string
+  updated_at?: string
 }
 
 export const listBots = () => api<Bot[]>("/bots")
@@ -791,15 +798,42 @@ export const revokeBotToken = (botID: string, tokenID: string) =>
   api<void>(`/bots/${botID}/tokens/${tokenID}`, { method: "DELETE" })
 
 export const listGuildBots = (gid: string) => api<GuildBot[]>(`/guilds/${gid}/bots`)
+/** 在本服创建独属机器人（自动安装） */
+export const createGuildBot = (
+  gid: string,
+  body: { name: string; username: string; description?: string; avatar_url?: string },
+) => api<GuildBot>(`/guilds/${gid}/bots`, { method: "POST", body: JSON.stringify(body) })
+export const updateGuildBot = (
+  gid: string,
+  botID: string,
+  body: { name?: string; description?: string; avatar_url?: string },
+) => api<GuildBot>(`/guilds/${gid}/bots/${botID}`, { method: "PATCH", body: JSON.stringify(body) })
 export const installBot = (gid: string, botID: string) =>
   api<{ member_id: string }>(`/guilds/${gid}/bots/${botID}`, { method: "PUT" })
-export const uninstallBot = (gid: string, botID: string) => api<void>(`/guilds/${gid}/bots/${botID}`, { method: "DELETE" })
+/** 服级 bot 整档删除；平台 bot 仅卸载 */
+export const uninstallBot = (gid: string, botID: string) =>
+  api<void>(`/guilds/${gid}/bots/${botID}`, { method: "DELETE" })
+export const listGuildBotTokens = (gid: string, botID: string) =>
+  api<{ tokens?: BotToken[] }>(`/guilds/${gid}/bots/${botID}/tokens`).then(raw => raw.tokens ?? [])
+export const createGuildBotToken = (
+  gid: string,
+  botID: string,
+  body: { name?: string; expires_at?: string | null } = {},
+) =>
+  api<{ token: BotToken; plain: string }>(`/guilds/${gid}/bots/${botID}/tokens`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+export const revokeGuildBotToken = (gid: string, botID: string, tokenID: string) =>
+  api<void>(`/guilds/${gid}/bots/${botID}/tokens/${tokenID}`, { method: "DELETE" })
 
 // ---------------------------------------------------------------------------
 // 审计日志（治理）
 // ---------------------------------------------------------------------------
 
 export type AuditActorType = "user" | "system_admin" | "guild_admin" | "auto" | "node"
+
+export type AuditUndoStatus = "none" | "available" | "undone" | "blocked" | "irreversible"
 
 export type AuditLogEntry = {
   id: string
@@ -809,11 +843,18 @@ export type AuditLogEntry = {
   guild_id?: string | null
   guild_name?: string
   action: string
+  action_label?: string
   target_type: string
   target_id: string
   target_summary?: string
   detail: Record<string, unknown>
   created_at: string
+  reversible?: boolean
+  undo_status?: AuditUndoStatus
+  undo_hint?: string
+  undo_of_id?: string | null
+  undone_by_id?: string | null
+  undone_at?: string | null
 }
 
 export type AuditLogPage = {
@@ -828,11 +869,17 @@ export type AuditLogFilters = {
   /** action 前缀匹配，如 "restriction." */
   action?: string
   target_type?: string
+  undo_status?: AuditUndoStatus
   since?: string
   until?: string
   /** 游标分页：上一页返回的 next_cursor */
   before?: string
   limit?: number
+}
+
+export type UndoAuditLogResult = {
+  original: AuditLogEntry
+  undo: AuditLogEntry
 }
 
 /** 系统管理员：跨服全量审计流水 */
@@ -841,6 +888,12 @@ export const listAdminAuditLogs = (filters: AuditLogFilters = {}) =>
 /** 单服审计流水（需 VIEW_AUDIT_LOG 权限位或服管） */
 export const listGuildAuditLogs = (gid: string, filters: Omit<AuditLogFilters, "guild_id"> = {}) =>
   api<AuditLogPage>(`/guilds/${gid}/audit-logs${qs(filters)}`)
+/** 系统管理员全量入口撤销 */
+export const undoAdminAuditLog = (logId: string) =>
+  api<UndoAuditLogResult>(`/admin/audit-logs/${logId}/undo`, { method: "POST" })
+/** 本服撤销 */
+export const undoGuildAuditLog = (gid: string, logId: string) =>
+  api<UndoAuditLogResult>(`/guilds/${gid}/audit-logs/${logId}/undo`, { method: "POST" })
 
 // ---------------------------------------------------------------------------
 // 屏幕共享配额（文档 14 §7.2）

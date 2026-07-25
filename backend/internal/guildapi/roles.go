@@ -288,6 +288,26 @@ func (h *api) deleteRole(c *gin.Context) {
 		fail(c, http.StatusForbidden, "CANNOT_MANAGE_ROLE", "不能管理该角色")
 		return
 	}
+	// 删除前快照：供 auditundo 重建
+	var memberIDs []uuid.UUID
+	_ = h.deps.DB.Model(&model.MemberRole{}).Where("role_id = ?", role.ID).Pluck("member_id", &memberIDs)
+	var overwrites []model.ChannelOverwrite
+	_ = h.deps.DB.Where("type = ? AND target_id = ? AND channel_id IN (SELECT id FROM channels WHERE guild_id = ?)",
+		model.OverwriteRole, role.ID, ctx.Guild.ID).Find(&overwrites).Error
+	roleSnap := map[string]any{
+		"name": role.Name, "permissions": role.Permissions, "position": role.Position,
+		"color": role.Color, "style": role.Style, "hoist": role.Hoist, "mentionable": role.Mentionable,
+		"member_ids": memberIDs,
+	}
+	if len(overwrites) > 0 {
+		owList := make([]map[string]any, 0, len(overwrites))
+		for _, ow := range overwrites {
+			owList = append(owList, map[string]any{
+				"id": ow.ID, "channel_id": ow.ChannelID, "allow": ow.Allow, "deny": ow.Deny, "type": ow.Type,
+			})
+		}
+		roleSnap["overwrites"] = owList
+	}
 	err = h.deps.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("role_id = ?", role.ID).Delete(&model.MemberRole{}).Error; err != nil {
 			return err
@@ -327,6 +347,7 @@ func (h *api) deleteRole(c *gin.Context) {
 	}
 	h.audit(ctx, user, "rbac.role_delete", "role", role.ID.String(), map[string]any{
 		"name": role.Name, "position": role.Position,
+		"before": roleSnap,
 	})
 	guildID := ctx.Guild.ID
 	h.publish(eventbus.Event{
