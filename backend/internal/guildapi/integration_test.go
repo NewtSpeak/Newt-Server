@@ -5,7 +5,7 @@ package guildapi_test
 //	TEST_DATABASE_URL='postgres://user:pass@127.0.0.1:5432/owl_test?sslmode=disable' go test ./internal/guildapi/
 //
 // 覆盖重点（任务验收项）：
-//  1. client 平面（/gapi/v1）绝无 SystemAdmin 短路，后台平面（/api/v1）短路保持；
+//  1. client / 后台双平面均保留 SystemAdmin 短路（docs 04 FR-32，系统所有者可管全服）；
 //  2. 角色/成员治理的层级校验与防提权；
 //  3. 所有者保护（不可踢/不可退/删服与转让仅所有者）；
 //  4. 结构变更的 Gateway 事件发布（GUILD_UPDATE/DELETE、CHANNEL_*、GUILD_ROLE_DELETE、

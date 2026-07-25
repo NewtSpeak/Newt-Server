@@ -225,14 +225,15 @@ func TestGuildBannersPermissions(t *testing.T) {
 		t.Fatalf("非成员上传返回 %d，期待 404", rec.Code)
 	}
 
-	// 系统管理员：client 平面非成员无短路（404）；后台平面（aud=admin）短路可管理。
+	// 系统管理员：client 平面同样保留 SystemAdmin 短路（docs 04 FR-32 / register.go），
+	// 非成员也可管理；后台平面（aud=admin）同理。
 	sysadmin := env.signup(t)
 	if err := env.db.Model(&model.User{}).Where("id = ?", sysadmin.ID).Update("system_admin", true).Error; err != nil {
 		t.Fatalf("提升系统管理员失败: %v", err)
 	}
 	rec, _ = env.uploadImage(t, http.MethodPost, base, sysadmin.Token, pngBytes(32))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("client 平面系统管上传返回 %d，期待 404", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("client 平面系统管上传返回 %d，期待 201", rec.Code)
 	}
 	adminToken, _, err := env.tokens.AccessToken(sysadmin.ID)
 	if err != nil {

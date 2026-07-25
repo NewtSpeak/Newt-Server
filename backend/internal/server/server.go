@@ -228,7 +228,16 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 
 	// SFU 发布工件公开下载（节点 UpdateBinary 拉取）：仅暴露文件名，路径限制在 SFUReleaseDir。
 	// 文件名约定 owl-sfu-<version>-<goos>-<goarch>；生产建议前置鉴权/CDN。
-	if err := os.MkdirAll(cfg.SFUReleaseDir, 0o755); err != nil {
+	// 测试/手工构造 Config 时可能未走 config.Load 默认值，空路径回落到 DataDir。
+	sfuReleaseDir := cfg.SFUReleaseDir
+	if sfuReleaseDir == "" {
+		base := cfg.DataDir
+		if base == "" {
+			base = "."
+		}
+		sfuReleaseDir = filepath.Join(base, "sfu-releases")
+	}
+	if err := os.MkdirAll(sfuReleaseDir, 0o755); err != nil {
 		return nil, err
 	}
 	router.GET("/sfu-releases/:name", func(c *gin.Context) {
@@ -242,7 +251,7 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 			c.Status(http.StatusNotFound)
 			return
 		}
-		path := filepath.Join(cfg.SFUReleaseDir, name)
+		path := filepath.Join(sfuReleaseDir, name)
 		if st, err := os.Stat(path); err != nil || st.IsDir() {
 			c.Status(http.StatusNotFound)
 			return
