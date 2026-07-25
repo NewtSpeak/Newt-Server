@@ -27,6 +27,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/moderation"
 	"github.com/owlspeak/owl-server/backend/internal/observability"
+	"github.com/owlspeak/owl-server/backend/internal/oauth"
 	"github.com/owlspeak/owl-server/backend/internal/perms"
 	"github.com/owlspeak/owl-server/backend/internal/platformadmin"
 	"github.com/owlspeak/owl-server/backend/internal/presence"
@@ -64,7 +65,7 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	for _, mw := range observability.GinMiddleware() {
 		router.Use(mw)
 	}
-	// CORS 分平面：/gapi、/invite-api 面向桌面客户端（Tauri）跨域直连自部署服务端，
+	// CORS 分平面：/gapi、/invite-api、/oauth 面向桌面客户端（Tauri）与 CLI 授权页，
 	// 来源不可枚举（tauri://localhost / http://localhost:* / https://tauri.localhost 等），
 	// 放开任意 Origin（凭证走 Bearer header 而非 Cookie，无 CSRF 面）；
 	// 其余前缀（含 /api/v1 管理后台，生产同源）维持仅本地开发来源的收紧配置。
@@ -80,7 +81,7 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	})
 	router.Use(gin.Logger(), gin.Recovery(), func(c *gin.Context) {
 		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/gapi/") || strings.HasPrefix(path, "/invite-api/") {
+		if strings.HasPrefix(path, "/gapi/") || strings.HasPrefix(path, "/invite-api/") || strings.HasPrefix(path, "/oauth/") {
 			clientCORS(c)
 			return
 		}
@@ -178,6 +179,12 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 
 	// 用户端 API（/gapi/v1）：与后台管理 API 完全隔离的独立前缀与认证体系。
 	if err := clientapi.Register(router.Group("/gapi/v1"), deps); err != nil {
+		return nil, err
+	}
+
+	// OAuth2 AS（/oauth/v1）：CLI / AI Agent 设备码授权，签发 aud=agent。
+	// 授权 UI 在 Desktop/Web；本前缀仅 API。CORS 与 gapi 同策略。
+	if err := oauth.Register(router.Group(""), deps); err != nil {
 		return nil, err
 	}
 

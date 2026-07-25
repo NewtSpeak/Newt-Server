@@ -298,15 +298,40 @@ func (a *API) requireAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		// ParseAccessToken 内部强制 aud=admin：用户端（aud=client）token 打后台 API 一律 401。
-		userID, err := a.tokens.ParseAccessToken(strings.TrimPrefix(header, "Bearer "))
+		raw := strings.TrimPrefix(header, "Bearer ")
+		parsed, err := a.tokens.ParseAccess(raw)
 		if err != nil {
 			fail(c, 401, "UNAUTHORIZED", err.Error())
 			c.Abort()
 			return
 		}
+		switch parsed.Audience {
+		case security.AudienceAdmin:
+			// 管理台会话
+		case security.AudienceAgent:
+			// OAuth agent：需 platform.* scope；写操作需 platform.admin
+			if !security.ScopeHasAny(parsed.Scope, "platform.read", "platform.admin") {
+				fail(c, 403, "INSUFFICIENT_SCOPE", "缺少平台访问权限")
+				c.Abort()
+				return
+			}
+			if !security.ScopeContains(parsed.Scope, "platform.admin") {
+				switch c.Request.Method {
+				case http.MethodGet, http.MethodHead, http.MethodOptions:
+				default:
+					fail(c, 403, "INSUFFICIENT_SCOPE", "当前授权为平台只读")
+					c.Abort()
+					return
+				}
+			}
+		default:
+			// 用户端（aud=client）token 打后台 API 一律 401。
+			fail(c, 401, "UNAUTHORIZED", "无效或已过期的访问令牌")
+			c.Abort()
+			return
+		}
 		var user model.User
-		if err := a.db.First(&user, "id = ?", userID).Error; err != nil {
+		if err := a.db.First(&user, "id = ?", parsed.UserID).Error; err != nil {
 			fail(c, 401, "UNAUTHORIZED", "用户不存在")
 			c.Abort()
 			return
@@ -316,7 +341,15 @@ func (a *API) requireAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		// agent 访问平台 API 必须 dual-check system_admin（不轻信 token 内 flag）
+		if parsed.Audience == security.AudienceAgent && !user.SystemAdmin {
+			fail(c, 403, "FORBIDDEN", "需要系统管理员权限")
+			c.Abort()
+			return
+		}
 		c.Set(userContextKey, user)
+		c.Set("oauth_client_id", parsed.ClientID)
+		c.Set("oauth_scope", parsed.Scope)
 		c.Next()
 	}
 }

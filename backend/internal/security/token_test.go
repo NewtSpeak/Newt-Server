@@ -19,7 +19,7 @@ func newTestManager(t *testing.T) *TokenManager {
 func TestAudienceRoundTrip(t *testing.T) {
 	m := newTestManager(t)
 	userID := uuid.New()
-	for _, audience := range []string{AudienceAdmin, AudienceClient} {
+	for _, audience := range []string{AudienceAdmin, AudienceClient, AudienceAgent} {
 		raw, _, err := m.AccessTokenWithAudience(userID, audience)
 		if err != nil {
 			t.Fatalf("签发 %s token 失败: %v", audience, err)

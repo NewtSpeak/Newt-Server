@@ -39,10 +39,14 @@ type RefreshToken struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
 	UserID    uuid.UUID `gorm:"type:uuid;not null;index"`
 	TokenHash string    `gorm:"size:64;uniqueIndex;not null"`
-	// Audience 令牌受众（admin=后台管理 / client=用户端），与 JWT aud claim 对齐。
+	// Audience 令牌受众（admin=后台管理 / client=用户端 / agent=OAuth CLI），与 JWT aud claim 对齐。
 	// 历史数据（该列上线前签发的 refresh token）均来自后台登录，AutoMigrate 加列时
 	// 靠 default:'admin' 回填，不破坏现有数据。
 	Audience string `gorm:"size:16;not null;default:'admin'"`
+	// ClientID OAuth 客户端 ID（仅 audience=agent；client/admin 会话为空串）。
+	ClientID string `gorm:"size:64;not null;default:''"`
+	// Scope OAuth 授权范围空格串（仅 audience=agent）。
+	Scope string `gorm:"size:512;not null;default:''"`
 	// SessionID 登录会话链 ID：登录时生成，refresh 轮换后的新 token 继承同一值，
 	// 使「一次登录」在多次轮换后仍可作为单个会话被列出/吊销（docs 01 FR-27/FR-28）。
 	// access token 的 sid claim 与此对应。历史数据靠 gen_random_uuid() 回填（每行独立会话）。
@@ -84,9 +88,12 @@ type Guild struct {
 	RestrictionBadgeVisible bool `gorm:"not null;default:true" json:"restriction_badge_visible"`
 	// RestrictionReasonRequired Restriction 创建是否强制填写 reason
 	//（Owl-Desktop docs 08 AI.2/§8-9：系统管可按服配置，默认强制）。
-	RestrictionReasonRequired bool      `gorm:"not null;default:true" json:"restriction_reason_required"`
-	CreatedAt                 time.Time `json:"created_at"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	RestrictionReasonRequired bool `gorm:"not null;default:true" json:"restriction_reason_required"`
+	// DefaultChannelID 默认着陆文字频道（进服优先打开）；空=未配置。
+	// 应用层校验：须为本服 TEXT 频道；删除该频道时置空。
+	DefaultChannelID *uuid.UUID `gorm:"type:uuid" json:"default_channel_id"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 type Member struct {

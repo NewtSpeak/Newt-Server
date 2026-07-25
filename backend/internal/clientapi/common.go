@@ -1,6 +1,7 @@
 package clientapi
 
 import (
+	"net/http"
 	"strings"
 	"time"
 
@@ -32,8 +33,11 @@ func newAPI(deps appdeps.Deps, signupEnabled bool) *api {
 	}
 }
 
-// requireAuth 用户端登录校验：仅接受 aud=client 的 access token。
-// 后台（aud=admin）token 打用户端 API 一律 401，两个平面的凭证不可互通。
+// requireAuth 用户端登录校验：
+//   - aud=client：桌面/Web 用户会话（原有行为）；
+//   - aud=agent：OAuth CLI/AI 委托令牌，需具备 gapi.* scope；
+//     仅 gapi.read 时拒绝非安全方法（GET/HEAD/OPTIONS）。
+// 后台（aud=admin）token 打用户端 API 一律 401。
 func (h *api) requireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
@@ -42,14 +46,40 @@ func (h *api) requireAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		userID, err := h.tokens.ParseAccessTokenWithAudience(strings.TrimPrefix(header, "Bearer "), security.AudienceClient)
+		raw := strings.TrimPrefix(header, "Bearer ")
+		parsed, err := h.tokens.ParseAccess(raw)
 		if err != nil {
 			fail(c, 401, "UNAUTHORIZED", err.Error())
 			c.Abort()
 			return
 		}
+		switch parsed.Audience {
+		case security.AudienceClient:
+			// ok
+		case security.AudienceAgent:
+			if !security.ScopeHasAny(parsed.Scope, "gapi.full", "gapi.read", "gapi.guilds.manage") {
+				fail(c, 403, "INSUFFICIENT_SCOPE", "缺少 gapi 访问权限")
+				c.Abort()
+				return
+			}
+			// 只读 scope：禁止写操作
+			if !security.ScopeHasAny(parsed.Scope, "gapi.full", "gapi.guilds.manage") {
+				switch c.Request.Method {
+				case http.MethodGet, http.MethodHead, http.MethodOptions:
+					// ok
+				default:
+					fail(c, 403, "INSUFFICIENT_SCOPE", "当前授权为只读，无法执行写操作")
+					c.Abort()
+					return
+				}
+			}
+		default:
+			fail(c, 401, "UNAUTHORIZED", "无效或已过期的访问令牌")
+			c.Abort()
+			return
+		}
 		var user model.User
-		if err := h.deps.DB.First(&user, "id = ?", userID).Error; err != nil {
+		if err := h.deps.DB.First(&user, "id = ?", parsed.UserID).Error; err != nil {
 			fail(c, 401, "UNAUTHORIZED", "用户不存在")
 			c.Abort()
 			return
@@ -60,6 +90,8 @@ func (h *api) requireAuth() gin.HandlerFunc {
 			return
 		}
 		c.Set(clientUserContextKey, user)
+		c.Set("oauth_client_id", parsed.ClientID)
+		c.Set("oauth_scope", parsed.Scope)
 		c.Next()
 	}
 }
