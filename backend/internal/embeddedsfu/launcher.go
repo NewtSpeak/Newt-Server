@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -308,8 +307,8 @@ func (p *Process) runOnce(ctx context.Context, enrollToken string) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Env = p.childEnv(enrollToken)
-	// 独立进程组：服务器退出时可一并信号。
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// 独立进程组（Unix）：服务器退出时可一并信号；Windows 走平台实现。
+	setChildProcGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动 owl-sfu 失败: %w", err)
@@ -365,28 +364,7 @@ func (p *Process) stopChild() {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	// 向进程组发 SIGTERM（与 Setpgid 对应）。
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
-	if err == nil {
-		_ = syscall.Kill(-pgid, syscall.SIGTERM)
-	} else {
-		_ = cmd.Process.Signal(syscall.SIGTERM)
-	}
-	done := make(chan struct{})
-	go func() {
-		_, _ = cmd.Process.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(8 * time.Second):
-		if err == nil {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		} else {
-			_ = cmd.Process.Kill()
-		}
-		<-done
-	}
+	stopProcess(cmd, 8*time.Second)
 	p.log.Info("内嵌 SFU 已停止")
 }
 
@@ -511,37 +489,12 @@ func killStalePID(log *slog.Logger, pidFile string) {
 		_ = os.Remove(pidFile)
 		return
 	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		_ = os.Remove(pidFile)
-		return
-	}
-	// 探测是否仍存活（信号 0）。
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
+	if !processAlive(pid) {
 		_ = os.Remove(pidFile)
 		return
 	}
 	log.Info("终止残留内嵌 SFU 进程", "pid", pid)
-	pgid, err := syscall.Getpgid(pid)
-	if err == nil {
-		_ = syscall.Kill(-pgid, syscall.SIGTERM)
-	} else {
-		_ = proc.Signal(syscall.SIGTERM)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := proc.Signal(syscall.Signal(0)); err != nil {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if err := proc.Signal(syscall.Signal(0)); err == nil {
-		if pgid, gerr := syscall.Getpgid(pid); gerr == nil {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		} else {
-			_ = proc.Kill()
-		}
-	}
+	killPID(pid, 3*time.Second)
 	_ = os.Remove(pidFile)
 }
 
