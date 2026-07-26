@@ -3,18 +3,23 @@ import {
   ActivityIcon,
   BotIcon,
   GaugeIcon,
+  GiftIcon,
   LayoutDashboardIcon,
   MessageSquareIcon,
   EyeOffIcon,
   MicIcon,
   MonitorUpIcon,
   NetworkIcon,
+  PackageIcon,
   ScrollTextIcon,
   SearchIcon,
   ServerIcon,
+  ShapesIcon,
+  ShoppingBagIcon,
   Settings2Icon,
   ShieldBanIcon,
   ShieldOffIcon,
+  TagsIcon,
   UserCogIcon,
   Users2Icon,
 } from "lucide-react"
@@ -67,6 +72,16 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ title: "机器人", url: "/bots", icon: BotIcon }],
   },
   {
+    label: "装扮商店",
+    items: [
+      { title: "单品", url: "/cosmetics/items", icon: ShoppingBagIcon },
+      { title: "捆绑包", url: "/cosmetics/bundles", icon: PackageIcon },
+      { title: "品类", url: "/cosmetics/categories", icon: ShapesIcon },
+      { title: "标签", url: "/cosmetics/tags", icon: TagsIcon },
+      { title: "发放工具", url: "/cosmetics/grants", icon: GiftIcon },
+    ],
+  },
+  {
     label: "系统",
     items: [
       { title: "平台用户", url: "/users", icon: UserCogIcon },
@@ -79,6 +94,7 @@ export const NAV_ICON_FALLBACK = GaugeIcon
 
 export function pageTitle(pathname: string): string {
   if (/^\/servers\/[^/]+/.test(pathname)) return "服务器详情"
+  if (/^\/cosmetics\/items\/[^/]+/.test(pathname)) return "单品详情"
   if (pathname === "/governance/presence") return "临场与音频审计"
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {

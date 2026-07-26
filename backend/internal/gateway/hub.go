@@ -105,6 +105,29 @@ func (h *hub) userSessions(userID uuid.UUID) []*session {
 	return result
 }
 
+// allSessions 返回全部会话快照（含断开待 resume 的会话——事件继续入其回放缓冲）。
+func (h *hub) allSessions() []*session {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	result := make([]*session, 0, len(h.sessions))
+	for _, sess := range h.sessions {
+		result = append(result, sess)
+	}
+	return result
+}
+
+// isGlobalBroadcastEvent 允许无 GuildID/UserIDs 全站广播的平台级事件白名单。
+// 触发源均为低频管理操作（装扮目录 CRUD），无需服务端节流；
+// 客户端收到后回源拉取建议加随机抖动（见 Desktop gateway-bindings）。
+func isGlobalBroadcastEvent(eventType string) bool {
+	switch eventType {
+	case eventbus.EventCosmeticCatalogUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
 // sweepLoop 定期清理断开超过 resumeWindow 的会话（随进程存活）。
 func (h *hub) sweepLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -189,6 +212,11 @@ func (h *hub) dispatch(event eventbus.Event) {
 		return
 	}
 	if event.GuildID == nil {
+		// 平台级事件（白名单）允许无路由全站广播；其余无路由事件保持丢弃，
+		// 防止某模块误发无 GuildID/UserIDs 的事件变成意外全站广播。
+		if isGlobalBroadcastEvent(event.Type) {
+			h.push(h.allSessions(), event.Type, payload)
+		}
 		return
 	}
 	memberIDs, err := h.dir.GuildMemberIDs(*event.GuildID)

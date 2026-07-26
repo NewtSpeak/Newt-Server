@@ -1646,3 +1646,226 @@ export const revokeOtherSessions = () =>
   api<{ revoked: number }>("/users/@me/sessions", { method: "DELETE" })
 /** 服务器时间（docs 08 §8-9：客户端校准时钟偏差） */
 export const getServerTime = () => api<{ server_time: string; unix_ms: number }>("/time")
+
+// ---------------------------------------------------------------------------
+// 装扮商店运营（/admin/cosmetics，系统管理员）
+// 字段对齐 backend/internal/cosmetics 的 views.go / schema.go json tag。
+// ---------------------------------------------------------------------------
+
+/** 品类 schema：单个资产槽定义（schema.go AssetSlotDef） */
+export type CosmeticAssetSlotDef = {
+  key: string
+  label?: string
+  required: boolean
+  /** image | animated_image | video | audio */
+  mime_groups: string[] | null
+  /** 字节上限；缺省时前端按 mime_groups 推导（audio 2MiB / 其他 12MiB） */
+  max_bytes?: number
+}
+
+/** 品类 schema：payload 字段定义（schema.go PayloadFieldDef） */
+export type CosmeticPayloadFieldDef = {
+  key: string
+  /** string | enum | bool | number | object | color */
+  type: string
+  values?: string[]
+  default?: unknown
+}
+
+/** 品类 schema（后端 JSON 内联输出，前端拿到即对象） */
+export type CosmeticCategorySchema = {
+  asset_slots?: CosmeticAssetSlotDef[] | null
+  payload_fields?: CosmeticPayloadFieldDef[] | null
+  render_hint?: string
+}
+
+export type CosmeticCategory = {
+  key: string
+  name: string
+  description: string
+  slot: string
+  schema: CosmeticCategorySchema
+  sort_order: number
+  enabled: boolean
+}
+
+export type CosmeticTag = {
+  id: string
+  key: string
+  name: string
+  /** #RRGGBB，空串 = 未设置 */
+  color: string
+}
+
+export type CosmeticAssetView = {
+  id: string
+  url: string
+  mime: string
+  width: number
+  height: number
+  animated: boolean
+  size_bytes: number
+}
+
+export type CosmeticItemStatus = "draft" | "published" | "archived"
+
+export type CosmeticItem = {
+  id: string
+  category_key: string
+  slot?: string
+  name: string
+  description: string
+  preview_url?: string
+  /** slotKey -> 资产视图 */
+  assets: Record<string, CosmeticAssetView>
+  /** 后端 JSON 内联输出，前端拿到即对象 */
+  payload: Record<string, unknown>
+  price_points: number
+  status?: CosmeticItemStatus | string
+  sort_order: number
+  tags?: CosmeticTag[]
+  owned?: boolean
+  available_from?: string | null
+  available_until?: string | null
+}
+
+export type CosmeticBundle = {
+  id: string
+  name: string
+  description: string
+  preview_url?: string
+  price_points: number
+  status?: CosmeticItemStatus | string
+  sort_order: number
+  tags?: CosmeticTag[]
+  item_ids?: string[]
+  /** 详情接口（GET /bundles/:id）展开成员单品 */
+  items?: CosmeticItem[]
+  owned_all?: boolean
+  available_from?: string | null
+  available_until?: string | null
+}
+
+// ----- 品类（无 DELETE，用 enabled=false 停用） -----
+
+export const listCosmeticCategories = () =>
+  api<{ categories: CosmeticCategory[]; version: string }>("/admin/cosmetics/categories")
+
+export type CosmeticCategoryUpsert = {
+  key?: string
+  name?: string
+  description?: string
+  slot?: string
+  schema?: CosmeticCategorySchema
+  sort_order?: number
+  enabled?: boolean
+}
+
+export const createCosmeticCategory = (body: CosmeticCategoryUpsert) =>
+  api<CosmeticCategory>("/admin/cosmetics/categories", { method: "POST", body: JSON.stringify(body) })
+export const patchCosmeticCategory = (key: string, body: CosmeticCategoryUpsert) =>
+  api<CosmeticCategory>(`/admin/cosmetics/categories/${encodeURIComponent(key)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+
+// ----- 标签 -----
+
+export const listCosmeticTags = () => api<{ tags: CosmeticTag[] }>("/admin/cosmetics/tags")
+
+export type CosmeticTagUpsert = { key?: string; name?: string; color?: string; sort_order?: number }
+
+export const createCosmeticTag = (body: CosmeticTagUpsert) =>
+  api<CosmeticTag>("/admin/cosmetics/tags", { method: "POST", body: JSON.stringify(body) })
+export const patchCosmeticTag = (tagID: string, body: CosmeticTagUpsert) =>
+  api<CosmeticTag>(`/admin/cosmetics/tags/${tagID}`, { method: "PATCH", body: JSON.stringify(body) })
+export const deleteCosmeticTag = (tagID: string) =>
+  api<void>(`/admin/cosmetics/tags/${tagID}`, { method: "DELETE" })
+
+// ----- 单品 -----
+
+/** 服务端仅支持 category/status 筛选（最多 500 条）；tag/关键词在前端过滤 */
+export const listCosmeticItems = (params: { category?: string; status?: string } = {}) =>
+  api<{ items: CosmeticItem[] }>(`/admin/cosmetics/items${qs(params)}`)
+export const getCosmeticItem = (itemID: string) => api<CosmeticItem>(`/admin/cosmetics/items/${itemID}`)
+
+export type CosmeticItemWrite = {
+  category_key?: string
+  name?: string
+  description?: string
+  payload?: Record<string, unknown>
+  price_points?: number
+  status?: string
+  sort_order?: number
+  tag_ids?: string[]
+  /** ISO 时间；后端仅在非空时更新（时间窗只能改期不能清空） */
+  available_from?: string
+  available_until?: string
+}
+
+export const createCosmeticItem = (body: CosmeticItemWrite) =>
+  api<CosmeticItem>("/admin/cosmetics/items", { method: "POST", body: JSON.stringify(body) })
+export const patchCosmeticItem = (itemID: string, body: CosmeticItemWrite) =>
+  api<CosmeticItem>(`/admin/cosmetics/items/${itemID}`, { method: "PATCH", body: JSON.stringify(body) })
+
+/** 资产槽上传：raw body PUT（非 multipart）；响应即最新 itemView，直接回填 state */
+export async function uploadCosmeticItemAsset(itemID: string, slot: string, file: File) {
+  let session = getSession()
+  if (session && new Date(session.access_expires_at).getTime() <= Date.now()) {
+    session = await refreshSession(session)
+  }
+  const headers = new Headers()
+  headers.set("Content-Type", file.type || "application/octet-stream")
+  if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
+  const response = await fetch(`${baseURL}/admin/cosmetics/items/${itemID}/assets/${encodeURIComponent(slot)}`, {
+    method: "PUT",
+    headers,
+    body: file,
+  })
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as ApiError
+    throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
+  }
+  return response.json() as Promise<CosmeticItem>
+}
+
+// ----- 捆绑包 -----
+
+export const listCosmeticBundles = () => api<{ bundles: CosmeticBundle[] }>("/admin/cosmetics/bundles")
+/** 详情含 items 展开 */
+export const getCosmeticBundle = (bundleID: string) =>
+  api<CosmeticBundle>(`/admin/cosmetics/bundles/${bundleID}`)
+
+export type CosmeticBundleWrite = {
+  name?: string
+  description?: string
+  price_points?: number
+  status?: string
+  sort_order?: number
+  /** 全量提交成员单品 ID */
+  item_ids?: string[]
+  tag_ids?: string[]
+  available_from?: string
+  available_until?: string
+}
+
+export const createCosmeticBundle = (body: CosmeticBundleWrite) =>
+  api<CosmeticBundle>("/admin/cosmetics/bundles", { method: "POST", body: JSON.stringify(body) })
+export const patchCosmeticBundle = (bundleID: string, body: CosmeticBundleWrite) =>
+  api<CosmeticBundle>(`/admin/cosmetics/bundles/${bundleID}`, { method: "PATCH", body: JSON.stringify(body) })
+
+// ----- 发放工具 -----
+
+/** 发放装扮（幂等）：created=false 表示该用户已拥有 */
+export const grantCosmeticItem = (body: { user_id: string; item_id: string; expires_at?: string }) =>
+  api<{ ok: boolean; created: boolean; item_id: string }>("/admin/cosmetics/grant", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+
+/** 发放/扣减积分（amount 可负；扣减至负数后端返回 INSUFFICIENT_POINTS） */
+export const grantCosmeticPoints = (body: { user_id: string; amount: number; reason?: string }) =>
+  api<{ balance: number; user_id: string }>("/admin/cosmetics/points/grant", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })

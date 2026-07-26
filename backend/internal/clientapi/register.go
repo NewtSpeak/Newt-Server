@@ -14,6 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
 	"github.com/owlspeak/owl-server/backend/internal/auditapi"
+	"github.com/owlspeak/owl-server/backend/internal/botapi"
+	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
 	"github.com/owlspeak/owl-server/backend/internal/customization"
 	"github.com/owlspeak/owl-server/backend/internal/gateway"
 	"github.com/owlspeak/owl-server/backend/internal/guildapi"
@@ -106,6 +108,10 @@ func Register(root *gin.RouterGroup, deps appdeps.Deps) error {
 	if err := sticker.RegisterClient(root, clientDeps); err != nil {
 		return err
 	}
+	// 平台装扮商店。
+	if err := cosmetics.RegisterClient(root, clientDeps); err != nil {
+		return err
+	}
 
 	// 服务器管理端点投影（角色/频道/覆盖/guild 生命周期/治理/Restriction/节点池/
 	// 审计/语音管理）：服主/管理员管理本服；系统所有者（system_admin）保留全服短路
@@ -126,6 +132,10 @@ func Register(root *gin.RouterGroup, deps appdeps.Deps) error {
 	}
 	sfunode.RegisterClient(root, mgmtDeps)
 	voice.RegisterClientModeration(authed, mgmtDeps)
+	// 服级机器人：服主/MANAGE_BOTS 在本服创建独属 bot、签发 token、删除。
+	if err := botapi.RegisterClient(root, mgmtDeps); err != nil {
+		return err
+	}
 
 	// 用户端 Gateway：复用 internal/gateway 的 WS 协议实现，IDENTIFY 仅接受 aud=client。
 	return gateway.RegisterWithAudience(root, deps, security.AudienceClient)

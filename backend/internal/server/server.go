@@ -16,6 +16,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/botapi"
 	"github.com/owlspeak/owl-server/backend/internal/clientapi"
 	"github.com/owlspeak/owl-server/backend/internal/config"
+	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
 	"github.com/owlspeak/owl-server/backend/internal/customization"
 	"github.com/owlspeak/owl-server/backend/internal/publicinvite"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
@@ -160,7 +161,8 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 		// 社交层（隐私/好友/通知收件箱，Server-16）；DM 频道后续补齐。
 		social.Register,
 		message.Register,
-		sticker.Register, // 贴图与表情包（docs 17）
+		sticker.Register,   // 贴图与表情包（docs 17）
+		cosmetics.Register, // 平台装扮商店
 		gateway.Register,
 		auditapi.Register,
 		// AI 时代扩展功能（后台管理 API 部分）：
@@ -212,6 +214,10 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	}
 	// 贴图资产公开访问（/public-assets/stickers，docs 17 A1 内容 hash 文件名）。
 	if err := sticker.RegisterPublic(publicAssets, deps); err != nil {
+		return nil, err
+	}
+	// 装扮资产公开访问（/public-assets/cosmetics）。
+	if err := cosmetics.RegisterPublic(publicAssets, deps); err != nil {
 		return nil, err
 	}
 

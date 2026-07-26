@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 )
@@ -43,6 +44,8 @@ type memberDisplay struct {
 	NameStyle       json.RawMessage `json:"name_style"`
 	NameStyleRoleID *uuid.UUID      `json:"name_style_role_id"`
 	Badges          []badgeView     `json:"badges"`
+	// Cosmetics 当前装备装扮精简投影（列表：头像框+铭牌）。
+	Cosmetics map[string]cosmetics.EquippedSlotView `json:"cosmetics,omitempty"`
 }
 
 // listMembersDisplay GET /guilds/{gid}/members/display：成员展示聚合列表。
@@ -131,6 +134,9 @@ func (h *api) listMembersDisplay(c *gin.Context) {
 		}
 	}
 
+	// 装扮精简投影（头像框 + 铭牌）。
+	equippedByUser := cosmetics.ResolveEquippedForUsers(h.deps.DB, userIDs, true)
+
 	result := make([]memberDisplay, 0, len(rows))
 	for _, r := range rows {
 		roleIDs := bindings[r.Member.ID]
@@ -203,6 +209,7 @@ func (h *api) listMembersDisplay(c *gin.Context) {
 			NameStyle:       nameStyle,
 			NameStyleRoleID: styleRoleID,
 			Badges:          badges,
+			Cosmetics:       equippedByUser[r.Member.UserID],
 		})
 	}
 	c.JSON(http.StatusOK, result)

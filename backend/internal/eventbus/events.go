@@ -119,6 +119,12 @@ const (
 	EventStickerLibraryUpdate   = "STICKER_LIBRARY_UPDATE" // Install 软隐藏/恢复时推给安装者
 	EventGuildStickerPackBanAdd = "GUILD_STICKER_PACK_BAN_ADD"
 	EventGuildStickerPackBanRemove = "GUILD_STICKER_PACK_BAN_REMOVE"
+
+	// 平台装扮商店（Cosmetics）
+	EventCosmeticCatalogUpdate   = "COSMETIC_CATALOG_UPDATE"   // 品类/商品/标签变更
+	EventCosmeticInventoryUpdate = "COSMETIC_INVENTORY_UPDATE" // 库存获得（本人）
+	EventCosmeticLoadoutUpdate   = "COSMETIC_LOADOUT_UPDATE"   // 装备变更（本人+共享服）
+	EventCosmeticPointsUpdate    = "COSMETIC_POINTS_UPDATE"    // 积分变动（本人）
 )
 
 // 内部事件（仅服务内部流转，Gateway 必须过滤，不下发客户端）。

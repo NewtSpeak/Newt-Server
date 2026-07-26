@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/audit"
+	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/guildapi"
 	"github.com/owlspeak/owl-server/backend/internal/guildseed"
@@ -146,6 +147,8 @@ type memberSummary struct {
 	RoleIDs        []uuid.UUID `json:"role_ids"`
 	// NameStyleRoleID 本人选用的用户名样式来源角色；空 = 自动最高样式角色。
 	NameStyleRoleID *uuid.UUID `json:"name_style_role_id,omitempty"`
+	// Cosmetics 装扮精简投影（头像框 + 铭牌）。
+	Cosmetics map[string]cosmetics.EquippedSlotView `json:"cosmetics,omitempty"`
 }
 
 // listMembers GET /gapi/v1/guilds/{gid}/members：服务器成员列表（需本人是成员）。
@@ -221,6 +224,12 @@ func (h *api) listMembers(c *gin.Context) {
 			}
 		}
 	}
+	userIDs := make([]uuid.UUID, 0, len(rows))
+	for _, r := range rows {
+		userIDs = append(userIDs, r.Member.UserID)
+	}
+	equipped := cosmetics.ResolveEquippedForUsers(h.deps.DB, userIDs, true)
+
 	result := make([]memberSummary, 0, len(rows))
 	for _, r := range rows {
 		roleIDs := bindings[r.Member.ID]
@@ -240,6 +249,7 @@ func (h *api) listMembers(c *gin.Context) {
 			IsOwner:         r.Member.UserID == guild.OwnerUserID,
 			RoleIDs:         roleIDs,
 			NameStyleRoleID: r.Member.NameStyleRoleID,
+			Cosmetics:       equipped[r.Member.UserID],
 		})
 	}
 	c.JSON(http.StatusOK, result)

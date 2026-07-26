@@ -27,6 +27,13 @@ export default [
     route("screen-quota", "routes/screen-quota.tsx"),
     // 开放平台
     route("bots", "routes/bots.tsx"),
+    // 装扮商店
+    route("cosmetics/items", "routes/cosmetics-items.tsx"),
+    route("cosmetics/items/:itemId", "routes/cosmetics-item-detail.tsx"),
+    route("cosmetics/categories", "routes/cosmetics-categories.tsx"),
+    route("cosmetics/bundles", "routes/cosmetics-bundles.tsx"),
+    route("cosmetics/tags", "routes/cosmetics-tags.tsx"),
+    route("cosmetics/grants", "routes/cosmetics-grants.tsx"),
     // 系统
     route("users", "routes/users.tsx"),
     route("settings", "routes/settings.tsx"),

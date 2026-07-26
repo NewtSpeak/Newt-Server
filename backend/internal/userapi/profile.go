@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 )
@@ -76,6 +77,9 @@ type publicProfile struct {
 	Banner         string    `json:"banner"`
 	AccentColor    string    `json:"accent_color"`
 	Bio            string    `json:"bio"`
+	// Cosmetics 全量装备投影（full 模式，含 profile_border/profile_effect），
+	// 资料卡单请求拿全装扮；ACL 与本投影一致（共同 guild 才可见）。
+	Cosmetics map[string]cosmetics.EquippedSlotView `json:"cosmetics,omitempty"`
 }
 
 // publicProfile GET /users/:id：查看他人公开资料。
@@ -109,9 +113,11 @@ func (h *api) publicProfile(c *gin.Context) {
 		fail(c, http.StatusNotFound, "NOT_FOUND", "用户不存在")
 		return
 	}
+	equipped := cosmetics.ResolveEquippedForUsers(h.deps.DB, []uuid.UUID{target.ID}, false)
 	c.JSON(http.StatusOK, publicProfile{
 		ID: target.ID, Username: target.Username, DisplayName: target.DisplayName,
 		Avatar: target.AvatarURL, AvatarAnimated: target.AvatarAnimated,
 		Banner: target.BannerURL, AccentColor: target.AccentColor, Bio: target.Bio,
+		Cosmetics: equipped[target.ID],
 	})
 }
