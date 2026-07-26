@@ -198,34 +198,7 @@ func (h *adminHandlers) createToken(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var input createTokenRequest
-	if !bind(c, &input) {
-		return
-	}
-	plain, hash, displayPrefix, err := newBotToken()
-	if err != nil {
-		fail(c, http.StatusInternalServerError, "TOKEN_ERROR", "生成令牌失败")
-		return
-	}
-	token := model.BotToken{
-		ID:        uuid.New(),
-		BotID:     bot.ID,
-		Name:      strings.TrimSpace(input.Name),
-		TokenHash: hash,
-		Prefix:    displayPrefix,
-		ExpiresAt: input.ExpiresAt,
-	}
-	if err := h.db.Create(&token).Error; err != nil {
-		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存令牌失败")
-		return
-	}
-	actor := h.currentUser(c)
-	audit.Log(h.db, audit.Entry{
-		ActorID: &actor.ID, ActorType: "system_admin",
-		Action: "bot.token_create", TargetType: "bot", TargetID: bot.ID.String(),
-		Detail: map[string]any{"token_id": token.ID, "name": token.Name},
-	})
-	c.JSON(http.StatusCreated, gin.H{"token": token, "plain": plain})
+	h.createTokenForBot(c, bot)
 }
 
 // listTokens GET /bots/:botID/tokens（仅元数据，不含明文/哈希）。
@@ -319,8 +292,8 @@ func (h *adminHandlers) listGuildBots(c *gin.Context) {
 	c.JSON(http.StatusOK, views)
 }
 
-// installBot PUT /guilds/:guildID/bots/:botID：把 bot 安装进服务器（创建 Member）。
-// 安装后即可用既有成员角色端点为其手动赋权。
+// installBot PUT /guilds/:guildID/bots/:botID：把平台级 bot 安装进服务器（创建 Member）。
+// 服级 bot（home_guild 非空）禁止安装到其他服。
 func (h *adminHandlers) installBot(c *gin.Context) {
 	ctx, ok := h.guildAccess(c, rbac.ManageBots)
 	if !ok {
@@ -330,6 +303,11 @@ func (h *adminHandlers) installBot(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if bot.HomeGuildID != nil && *bot.HomeGuildID != ctx.Guild.ID {
+		fail(c, http.StatusForbidden, "BOT_HOME_MISMATCH",
+			"该机器人为其他服务器独属，无法安装到本服")
+		return
+	}
 	member := model.Member{GuildID: ctx.Guild.ID, UserID: bot.UserID}
 	if err := h.db.Where(member).Attrs(model.Member{ID: uuid.New()}).FirstOrCreate(&member).Error; err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "安装机器人失败")
@@ -337,7 +315,7 @@ func (h *adminHandlers) installBot(c *gin.Context) {
 	}
 	actor := h.currentUser(c)
 	audit.Log(h.db, audit.Entry{
-		ActorID: &actor.ID, ActorType: "system_admin", GuildID: &ctx.Guild.ID,
+		ActorID: &actor.ID, ActorType: h.actorType(actor), GuildID: &ctx.Guild.ID,
 		Action: "bot.install", TargetType: "bot", TargetID: bot.ID.String(),
 		Detail: map[string]any{"member_id": member.ID, "bot_user_id": bot.UserID},
 	})

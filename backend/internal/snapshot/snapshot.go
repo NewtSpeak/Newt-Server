@@ -55,6 +55,7 @@ type Presence struct {
 }
 
 // Guild 单个服务器的全量快照（READY guilds 数组元素 / GUILD_CREATE 载荷主体）。
+// Guild 实体含 default_channel_id（默认着陆文字频道，可空），随 model.Guild 一并下发。
 type Guild struct {
 	Guild    model.Guild  `json:"guild"`
 	Channels []Channel    `json:"channels"` // 已按该用户 VIEW_CHANNEL 过滤

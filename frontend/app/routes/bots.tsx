@@ -69,7 +69,7 @@ export default function BotsPage() {
     <main className="flex flex-1 flex-col gap-6 py-4 md:py-6">
       <PageHeader
         title="机器人"
-        description="机器人复用「用户 + 成员 + 角色」权限体系：创建后签发独立 bot token，安装到服务器并绑定角色即可独立收发消息、卡片、流式回复与接入语音。"
+        description="平台级机器人（无归属服）可安装到多服；服主也可在「服务器详情 → 机器人」直接创建本服独属机器人（自动绑定）。均复用用户+成员+角色权限体系，token 鉴权后可收发消息、流式回复与进语音。"
         actions={<CreateBotDialog onCreated={() => bots.reload(true)} />}
       />
 

@@ -21,12 +21,13 @@ import (
 )
 
 // Register 挂载后台管理侧机器人管理 API（/api/v1）。
-// 后台平面仅系统管理员可登录；服级安装/卸载仍按 ManageBots 权限位裁决。
+// 平台级 bot CRUD 需系统管理员登录；服级创建/token/卸载按 ManageBots 裁决。
 func Register(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 	svc := ensureService(deps.DB, deps.Bus, deps.Cfg)
 	h := &adminHandlers{service: svc, currentUser: deps.CurrentUser}
 
 	authed := v1.Group("", deps.Auth)
+	// 平台级机器人（无 home_guild，可跨服安装）
 	authed.POST("/bots", h.createBot)
 	authed.GET("/bots", h.listBots)
 	authed.GET("/bots/:botID", h.getBot)
@@ -35,9 +36,18 @@ func Register(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 	authed.POST("/bots/:botID/tokens", h.createToken)
 	authed.GET("/bots/:botID/tokens", h.listTokens)
 	authed.DELETE("/bots/:botID/tokens/:tokenID", h.revokeToken)
-	authed.GET("/guilds/:guildID/bots", h.listGuildBots)
-	authed.PUT("/guilds/:guildID/bots/:botID", h.installBot)
-	authed.DELETE("/guilds/:guildID/bots/:botID", h.uninstallBot)
+	// 服级机器人：创建即绑定本服 + token + 删除/卸载
+	h.mountGuildBotRoutes(authed)
+	return nil
+}
+
+// RegisterClient 挂载用户端服级机器人管理（/gapi/v1）。
+// 服主或持 MANAGE_BOTS 的成员可在本服创建/配置/签发 token/删除独属机器人。
+func RegisterClient(v1 *gin.RouterGroup, deps appdeps.Deps) error {
+	svc := ensureService(deps.DB, deps.Bus, deps.Cfg)
+	h := &adminHandlers{service: svc, currentUser: deps.CurrentUser}
+	authed := v1.Group("", deps.Auth)
+	h.mountGuildBotRoutes(authed)
 	return nil
 }
 

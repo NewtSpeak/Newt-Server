@@ -40,6 +40,9 @@ type updateGuildRequest struct {
 	RestrictionBadgeVisible *bool `json:"restriction_badge_visible"`
 	// RestrictionReasonRequired reason 强制开关（docs 08 AI.2，仅系统管理员可改）。
 	RestrictionReasonRequired *bool `json:"restriction_reason_required"`
+	// DefaultChannelID 默认着陆文字频道：nil=不改，非空 UUID 字符串=设置，空字符串=清空。
+	// 标准 JSON null 与 omit 均解码为 nil（不改）；清空请传 ""。
+	DefaultChannelID *string `json:"default_channel_id"`
 }
 
 // updateGuild PATCH /guilds/{gid}（需 MANAGE_GUILD）→ GUILD_UPDATE 全服广播。
@@ -78,6 +81,28 @@ func (h *api) updateGuild(c *gin.Context) {
 		}
 		guild.RestrictionReasonRequired = *input.RestrictionReasonRequired
 		updates["restriction_reason_required"] = guild.RestrictionReasonRequired
+	}
+	// 默认着陆频道：空串清空；非空须为本服 TEXT 频道。
+	if input.DefaultChannelID != nil {
+		raw := strings.TrimSpace(*input.DefaultChannelID)
+		if raw == "" {
+			guild.DefaultChannelID = nil
+			updates["default_channel_id"] = nil
+		} else {
+			channelID, err := uuid.Parse(raw)
+			if err != nil {
+				fail(c, http.StatusBadRequest, "INVALID_DEFAULT_CHANNEL", "默认频道必须是本服文字频道")
+				return
+			}
+			var channel model.Channel
+			if err := h.deps.DB.First(&channel, "id = ? AND guild_id = ? AND type = ?",
+				channelID, guild.ID, model.ChannelText).Error; err != nil {
+				fail(c, http.StatusBadRequest, "INVALID_DEFAULT_CHANNEL", "默认频道必须是本服文字频道")
+				return
+			}
+			guild.DefaultChannelID = &channelID
+			updates["default_channel_id"] = channelID
+		}
 	}
 	if len(updates) == 0 {
 		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "没有可更新的字段")

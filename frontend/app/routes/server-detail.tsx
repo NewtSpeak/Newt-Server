@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from "lucide-react"
 import { GuildAvatar } from "~/components/guild-avatar"
 import { GuildBannerHero } from "~/components/guild-banner"
 import { BadgesTab } from "~/components/server/badges-tab"
+import { BotsTab } from "~/components/server/bots-tab"
 import { ChannelsTab } from "~/components/server/channels-tab"
 import { InviteLandingTab } from "~/components/server/invite-landing-tab"
 import { MembersTab } from "~/components/server/members-tab"
@@ -94,6 +95,7 @@ export default function ServerDetailPage() {
           <TabsTrigger value="roles">角色权限</TabsTrigger>
           <TabsTrigger value="overwrites">权限覆盖</TabsTrigger>
           <TabsTrigger value="badges">徽章</TabsTrigger>
+          <TabsTrigger value="bots">机器人</TabsTrigger>
           <TabsTrigger value="invite">邀请页</TabsTrigger>
           <TabsTrigger value="settings">设置</TabsTrigger>
         </TabsList>
@@ -134,6 +136,9 @@ export default function ServerDetailPage() {
         </TabsContent>
         <TabsContent value="badges" className="pt-3">
           <BadgesTab guildID={guildId} members={members.data ?? []} />
+        </TabsContent>
+        <TabsContent value="bots" className="pt-3">
+          <BotsTab guildID={guildId} />
         </TabsContent>
         <TabsContent value="invite" className="pt-3">
           <InviteLandingTab guildID={guildId} isSystemAdmin={Boolean(user?.system_admin)} />

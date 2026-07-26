@@ -19,13 +19,17 @@ type Bot struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	// UserID 关联的 bot 用户（users.is_bot=true），一一对应。
 	UserID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_bot_user" json:"user_id"`
-	// OwnerUserID 创建者（后台管理员），用于归属展示与管理授权。
+	// OwnerUserID 创建者（系统管理员或服主/持 MANAGE_BOTS 的成员）。
 	OwnerUserID uuid.UUID `gorm:"type:uuid;not null;index:idx_bot_owner" json:"owner_user_id"`
-	Name        string    `gorm:"size:64;not null" json:"name"`
-	Description string    `gorm:"size:512;not null;default:''" json:"description"`
-	AvatarURL   string    `gorm:"size:512;not null;default:''" json:"avatar_url"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// HomeGuildID 归属服务器：非空表示「服级机器人」，仅可安装在该服，
+	// 由服主/MANAGE_BOTS 在服务器设置中创建与管理；空 = 平台级机器人
+	// （仅系统管理员创建，可安装到多服）。
+	HomeGuildID *uuid.UUID `gorm:"type:uuid;index:idx_bot_home_guild" json:"home_guild_id,omitempty"`
+	Name        string     `gorm:"size:64;not null" json:"name"`
+	Description string     `gorm:"size:512;not null;default:''" json:"description"`
+	AvatarURL   string     `gorm:"size:512;not null;default:''" json:"avatar_url"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // BotToken 机器人长期访问令牌（非密码登录）：
