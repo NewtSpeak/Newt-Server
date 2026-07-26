@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# OwlSpeak SFU 节点自动部署 —— 阶段二：写配置、装 systemd、启动并等待健康。
+# 本脚本含一次性 enrollment token，故全程禁用命令回显（不得开启 shell 调试跟踪）。
+set -euo pipefail
+
+INSTALL_DIR={{.InstallDir}}
+
+log()  { echo "[+] $*"; }
+warn() { echo "[!] $*"; }
+err()  { echo "[x] $*"; exit 1; }
+
+systemctl stop owl-sfu >/dev/null 2>&1 || true
+{{- if .ForceReinstall }}
+log "强制重装：清空节点身份目录（原证书作废，节点将重新 enroll）"
+rm -rf "$INSTALL_DIR/data/sfu"
+{{- end }}
+mkdir -p "$INSTALL_DIR/data/sfu"
+chmod 700 "$INSTALL_DIR/data/sfu"
+
+# ---- 环境变量 ----
+umask 077
+cat > "$INSTALL_DIR/owl-sfu.env" <<'OWLSFU_ENV_EOF'
+# 由 Owl-Server 自动部署生成，请勿手工编辑（重新部署会覆盖）
+OWLSFU_NODE_ID={{.NodeID}}
+OWLSFU_ENROLL_TOKEN={{.EnrollToken}}
+OWLSFU_SERVER_ENROLL_ENDPOINT={{.ControlEndpoint}}
+OWLSFU_ENROLL_INSECURE={{.EnrollInsecure}}
+OWLSFU_DATA_DIR={{.InstallDir}}/data/sfu
+OWLSFU_WSS_LISTEN={{.WSSListen}}
+OWLSFU_NO_TLS={{.NoTLS}}
+{{- if .TLSCertFile }}
+OWLSFU_TLS_CERT_FILE={{.TLSCertFile}}
+OWLSFU_TLS_KEY_FILE={{.TLSKeyFile}}
+{{- end }}
+OWLSFU_MEDIA_UDP_PORT={{.MediaUDPPort}}
+OWLSFU_PUBLIC_IP={{.PublicIP}}
+OWLSFU_ADVERTISE_WSS_URL={{.AdvertiseWssURL}}
+{{- if .EnableCascade }}
+OWLSFU_CASCADE_LISTEN=0.0.0.0:8843
+OWLSFU_ADVERTISE_CASCADE_ENDPOINT={{.PublicIP}}:8843
+{{- end }}
+OWLSFU_MAX_USERS={{.MaxUsers}}
+OWLSFU_ENV_EOF
+chmod 600 "$INSTALL_DIR/owl-sfu.env"
+log "已写入 $INSTALL_DIR/owl-sfu.env"
+
+# ---- systemd 单元 ----
+cat > /etc/systemd/system/owl-sfu.service <<'OWLSFU_UNIT_EOF'
+[Unit]
+Description=OwlSpeak SFU Media Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={{.InstallDir}}
+EnvironmentFile={{.InstallDir}}/owl-sfu.env
+ExecStart={{.InstallDir}}/bin/owl-sfu
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+ReadWritePaths={{.InstallDir}}/data
+
+[Install]
+WantedBy=multi-user.target
+OWLSFU_UNIT_EOF
+log "已写入 /etc/systemd/system/owl-sfu.service"
+
+{{- if .InstallCaddy }}
+
+# ---- Caddy 反向代理（自动申请 Let's Encrypt 证书）----
+mkdir -p /etc/caddy/owlspeak.d
+cat > /etc/caddy/owlspeak.d/owl-sfu.caddy <<'OWLSFU_CADDY_EOF'
+{{.Domain}} {
+	encode gzip zstd
+	reverse_proxy 127.0.0.1:{{.LocalWSSPort}} {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		transport http {
+			versions 1.1
+		}
+	}
+}
+OWLSFU_CADDY_EOF
+touch /etc/caddy/Caddyfile
+if ! grep -q 'owlspeak.d' /etc/caddy/Caddyfile 2>/dev/null; then
+  printf '\nimport /etc/caddy/owlspeak.d/*.caddy\n' >> /etc/caddy/Caddyfile
+fi
+log "已写入 Caddy 站点 {{.Domain}} → 127.0.0.1:{{.LocalWSSPort}}"
+systemctl enable caddy >/dev/null 2>&1 || true
+if systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1; then
+  log "Caddy 已重载"
+else
+  journalctl -u caddy -n 30 --no-pager || true
+  err "Caddy 重载失败，请检查 /etc/caddy/Caddyfile"
+fi
+{{- end }}
+
+# ---- 启动 ----
+systemctl daemon-reload
+systemctl reset-failed owl-sfu >/dev/null 2>&1 || true
+systemctl enable owl-sfu >/dev/null 2>&1 || true
+log "启动 owl-sfu..."
+systemctl restart owl-sfu
+
+HEALTHY=0
+for i in $(seq 1 20); do
+  sleep 2
+  if ! systemctl is-active --quiet owl-sfu; then
+    continue
+  fi
+  if curl -fsS --max-time 3 "http://127.0.0.1:{{.LocalWSSPort}}/healthz" >/dev/null 2>&1; then
+    HEALTHY=1
+    break
+  fi
+done
+
+if [ "$HEALTHY" -ne 1 ]; then
+  warn "owl-sfu 健康检查未通过，最近日志："
+  journalctl -u owl-sfu -n 60 --no-pager || true
+  err "owl-sfu 启动失败或未在 40 秒内就绪"
+fi
+log "owl-sfu 已启动并通过本机健康检查"
+
+{{- if .InstallCaddy }}
+if curl -skI --max-time 8 "https://{{.Domain}}/healthz" >/dev/null 2>&1; then
+  log "公网 HTTPS 可达：https://{{.Domain}}"
+else
+  warn "https://{{.Domain}} 暂不可达。若域名刚解析，Let's Encrypt 签发可能仍在进行；请确认 A 记录指向本机且 80/443 未被占用"
+fi
+{{- end }}
+
+echo "PHASE2_OK"

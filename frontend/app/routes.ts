@@ -12,6 +12,7 @@ export default [
     route("servers/:guildId", "routes/server-detail.tsx"),
     // 语音基础设施
     route("voice/nodes", "routes/voice-nodes.tsx"),
+    route("voice/deploy", "routes/voice-deploy.tsx"),
     route("voice/pools", "routes/node-pools.tsx"),
     route("voice/states", "routes/voice-states.tsx"),
     // 治理
@@ -34,6 +35,7 @@ export default [
     route("cosmetics/bundles", "routes/cosmetics-bundles.tsx"),
     route("cosmetics/tags", "routes/cosmetics-tags.tsx"),
     route("cosmetics/grants", "routes/cosmetics-grants.tsx"),
+    route("cosmetics/activity", "routes/cosmetics-activity.tsx"),
     // 系统
     route("users", "routes/users.tsx"),
     route("settings", "routes/settings.tsx"),

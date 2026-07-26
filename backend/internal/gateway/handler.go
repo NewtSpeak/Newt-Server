@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 	"github.com/owlspeak/owl-server/backend/internal/presence"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
@@ -133,6 +134,10 @@ func (h *handler) handshake(c *conn) (*session, bool) {
 	}
 }
 
+// OnIdentify 由 activity 模块注入（仿 voice.StealthPredicate 惯例）：
+// IDENTIFY 认证成功创建新会话时回调（RESUME 不触发）。默认 nil = 不回调。
+var OnIdentify func(user model.User)
+
 // identify 校验 IDENTIFY：认证成功则创建新会话并下发 READY 全量快照。
 func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 	var input identifyData
@@ -152,6 +157,9 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 	}
 	sess := &session{id: uuid.NewString(), user: user, conn: c}
 	h.hub.register(sess)
+	if OnIdentify != nil {
+		OnIdentify(user)
+	}
 	unionPresences := []snapshot.Presence{}
 	if h.presence != nil {
 		// 先登记 presence（默认 online，会触发本人/他人 PRESENCE_UPDATE 广播），

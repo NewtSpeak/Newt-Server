@@ -14,6 +14,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/owlspeak/owl-server/backend/internal/sfudeploy"
 	"gorm.io/gorm"
 )
 
@@ -28,6 +29,8 @@ type API struct {
 	refreshTokenTTL time.Duration
 	// sfu SFU 配套子系统依赖（节点注册表 + Media Token 签发），经 AttachSFU 注入。
 	sfu *SFUOptions
+	// sfuDeploy SFU 节点一键部署编排器，经 AttachSfuDeploy 注入；为 nil 时相关路由 503。
+	sfuDeploy *sfudeploy.Manager
 	// bus 事件总线（经 AttachEventBus 注入；为 nil 时静默不发布，纯单测场景兼容）。
 	bus *eventbus.Bus
 }
@@ -78,6 +81,18 @@ func (a *API) RegisterRoutes(group *gin.RouterGroup) {
 	admin.POST("/nodes/:nodeID/revoke", a.revokeSfuNode)
 	admin.POST("/nodes/:nodeID/update-binary", a.updateSfuBinary)
 	admin.GET("/releases", a.listSfuReleases)
+
+	// SFU 节点一键自动部署（handler 见 sfu_deploy.go，编排在 internal/sfudeploy）：
+	// SSH 登录目标机 → 装依赖 → 拉二进制 → 创建占位并签 token → 写 env/systemd →
+	// 启动 → 等待节点自行 enroll 上线。进度经 SFU_DEPLOYMENT_UPDATE 定向推给发起人。
+	admin.GET("/deploy-preflight", a.getSfuDeployPreflight)
+	admin.GET("/deploy-servers", a.listSfuDeployServers)
+	admin.POST("/deploy-servers", a.createSfuDeployServer)
+	admin.DELETE("/deploy-servers/:serverID", a.deleteSfuDeployServer)
+	admin.POST("/deployments", a.createSfuDeployment)
+	admin.GET("/deployments", a.listSfuDeployments)
+	admin.GET("/deployments/:deploymentID", a.getSfuDeployment)
+	admin.POST("/deployments/:deploymentID/cancel", a.cancelSfuDeployment)
 
 	// 语音会话收敛说明（端到端统一专项）：早期本文件平行实现的
 	// POST /guilds/:gid/channels/:cid/voice/join|leave、/guilds/:gid/voice/refresh-token、

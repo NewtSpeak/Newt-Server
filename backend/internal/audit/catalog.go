@@ -219,6 +219,25 @@ var catalog = map[string]ActionInfo{
 	"sticker.item.purge":      {Irreversible: true, Label: "清除贴图"},
 	"sticker.pack.soft_delete": {Irreversible: true, Label: "软删除贴图包"},
 
+	// —— SFU 节点自动部署（internal/sfudeploy）——
+	"sfu.deploy.start": {
+		Irreversible: true, Label: "发起 SFU 节点自动部署",
+	},
+	"sfu.deploy.finish": {
+		Irreversible: true, Label: "SFU 节点部署结束",
+	},
+	"sfu.deploy.cancel": {
+		Irreversible: true, Label: "取消 SFU 节点部署",
+	},
+	"sfu.deploy_server.create": {
+		Reversible: true, Label: "保存部署目标服务器",
+		UndoHint: "删除该服务器及其加密凭据",
+	},
+	"sfu.deploy_server.delete": {
+		Irreversible: true, Label: "删除部署目标服务器",
+		UndoHint: "凭据已随记录销毁，需重新录入",
+	},
+
 	// —— 撤销本身 ——
 	"audit.undo": {
 		Irreversible: true, Label: "撤销操作",

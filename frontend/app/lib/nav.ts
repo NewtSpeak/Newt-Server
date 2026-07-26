@@ -2,6 +2,8 @@ import type { LucideIcon } from "lucide-react"
 import {
   ActivityIcon,
   BotIcon,
+  CloudUploadIcon,
+  FlameIcon,
   GaugeIcon,
   GiftIcon,
   LayoutDashboardIcon,
@@ -40,6 +42,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "语音基础设施",
     items: [
       { title: "SFU 节点", url: "/voice/nodes", icon: ServerIcon },
+      { title: "自动部署", url: "/voice/deploy", icon: CloudUploadIcon },
       { title: "节点池", url: "/voice/pools", icon: NetworkIcon },
       { title: "语音状态", url: "/voice/states", icon: ActivityIcon },
     ],
@@ -79,6 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "品类", url: "/cosmetics/categories", icon: ShapesIcon },
       { title: "标签", url: "/cosmetics/tags", icon: TagsIcon },
       { title: "发放工具", url: "/cosmetics/grants", icon: GiftIcon },
+      { title: "活跃度", url: "/cosmetics/activity", icon: FlameIcon },
     ],
   },
   {

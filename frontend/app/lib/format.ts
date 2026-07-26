@@ -57,6 +57,37 @@ export function formatCountdown(expiresAt?: string | null): string | null {
   return `${secs} 秒`
 }
 
+/** 两个时间点之间的耗时文案（如「1 分 47 秒」）；无效返回 "—" */
+export function formatDuration(from?: string | null, to?: string | null): string {
+  if (!from) return "—"
+  const start = new Date(from).getTime()
+  const end = to ? new Date(to).getTime() : Date.now()
+  if (Number.isNaN(start) || Number.isNaN(end)) return "—"
+  return formatSeconds(Math.max(0, Math.round((end - start) / 1000)))
+}
+
+/** 秒数 → 「1 小时 2 分」/「1 分 47 秒」/「12 秒」 */
+export function formatSeconds(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—"
+  const hours = Math.floor(seconds / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  const secs = Math.floor(seconds % 60)
+  if (hours > 0) return `${hours} 小时 ${minutes} 分`
+  if (minutes > 0) return `${minutes} 分 ${secs} 秒`
+  return `${secs} 秒`
+}
+
+/** 秒数 → 计时器格式 mm:ss（超过 1 小时为 h:mm:ss）；配 tabular-nums 使用 */
+export function formatElapsed(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00"
+  const total = Math.floor(seconds)
+  const hours = Math.floor(total / 3_600)
+  const minutes = Math.floor((total % 3_600) / 60)
+  const secs = total % 60
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${pad(minutes)}:${pad(secs)}`
+}
+
 export function formatBytes(size?: number) {
   if (!size && size !== 0) return "—"
   if (size < 1024) return `${size} B`

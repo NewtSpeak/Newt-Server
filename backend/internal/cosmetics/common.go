@@ -26,13 +26,17 @@ const (
 	maxAudioBytes        = int64(2 << 20)  // 2 MiB 音效
 )
 
+// cosmeticsIDs 包级雪花单例：Register/RegisterClient 各构造一个 api 实例，
+// 若每实例各持一个生成器，同 machine 位同毫秒会撞 ID，必须全包共享。
+var cosmeticsIDs = newSnowflake()
+
 type api struct {
 	deps appdeps.Deps
 	ids  *snowflakeGen
 }
 
 func newAPI(deps appdeps.Deps) *api {
-	return &api{deps: deps, ids: newSnowflake()}
+	return &api{deps: deps, ids: cosmeticsIDs}
 }
 
 func (h *api) db() *gorm.DB          { return h.deps.DB }

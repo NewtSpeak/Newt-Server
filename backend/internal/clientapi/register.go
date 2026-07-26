@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/owlspeak/owl-server/backend/internal/activity"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
 	"github.com/owlspeak/owl-server/backend/internal/auditapi"
 	"github.com/owlspeak/owl-server/backend/internal/botapi"
@@ -112,6 +113,13 @@ func Register(root *gin.RouterGroup, deps appdeps.Deps) error {
 	if err := cosmetics.RegisterClient(root, clientDeps); err != nil {
 		return err
 	}
+	// 平台活跃度与每日积分。
+	if err := activity.RegisterClient(root, clientDeps); err != nil {
+		return err
+	}
+	// IDENTIFY 成功即"当日登录"活跃信号（装配层桥接，避免 activity→gateway 依赖成环；
+	// RESUME 不触发，bot 由 TrackLogin 内部排除）。
+	gateway.OnIdentify = activity.TrackLogin
 
 	// 服务器管理端点投影（角色/频道/覆盖/guild 生命周期/治理/Restriction/节点池/
 	// 审计/语音管理）：服主/管理员管理本服；系统所有者（system_admin）保留全服短路

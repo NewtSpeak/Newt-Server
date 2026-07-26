@@ -12,7 +12,8 @@ import { OverwritesTab } from "~/components/server/overwrites-tab"
 import { RolesTab } from "~/components/server/roles-tab"
 import { SettingsTab } from "~/components/server/settings-tab"
 import { EmptyState } from "~/components/states"
-import { Button } from "~/components/ui/button"
+import { Button, buttonVariants } from "~/components/ui/button"
+import { cn } from "~/lib/utils"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs"
 import { useAsyncData } from "~/hooks/use-async-data"
 import { useGatewayEvent } from "~/hooks/use-gateway"
@@ -63,10 +64,10 @@ export default function ServerDetailPage() {
           title="找不到该服务器"
           description="它可能已被删除，或你没有访问权限。"
           action={
-            <Button variant="outline" render={<Link to="/servers" />}>
+            <Link to="/servers" className={cn(buttonVariants({ variant: "outline" }))}>
               <ArrowLeftIcon data-icon="inline-start" />
               返回服务器列表
-            </Button>
+            </Link>
           }
         />
       </main>
@@ -78,9 +79,13 @@ export default function ServerDetailPage() {
       {guild && <GuildBannerHero guild={guild} className="mx-4 lg:mx-6" />}
 
       <div className="flex flex-wrap items-center gap-3 px-4 lg:px-6">
-        <Button variant="ghost" size="icon-sm" aria-label="返回服务器列表" render={<Link to="/servers" />}>
+        <Link
+          to="/servers"
+          aria-label="返回服务器列表"
+          className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+        >
           <ArrowLeftIcon />
-        </Button>
+        </Link>
         {guild && <GuildAvatar guild={guild} className="size-11" />}
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{guild?.name ?? "服务器详情"}</h1>

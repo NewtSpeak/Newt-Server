@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import {
+  CloudUploadIcon,
   CpuIcon,
   DownloadIcon,
   EllipsisVerticalIcon,
+  LoaderCircleIcon,
   PauseCircleIcon,
   PlayCircleIcon,
   PlusIcon,
@@ -17,6 +19,7 @@ import { toast } from "sonner"
 import { CopyButton } from "~/components/copy-button"
 import { NodeStatusBadge } from "~/components/node-status-badge"
 import { PageHeader } from "~/components/page-header"
+import { SfuDeployDialog } from "~/components/sfu-deploy-dialog"
 import { SfuTopologyInfoButton } from "~/components/sfu-topology-dialog"
 import { EmptyState, ErrorState, LoadingState } from "~/components/states"
 import { Button } from "~/components/ui/button"
@@ -39,6 +42,7 @@ import { Input } from "~/components/ui/input"
 import { Label } from "~/components/ui/label"
 import { useAsyncData } from "~/hooks/use-async-data"
 import { useGatewayEvent } from "~/hooks/use-gateway"
+import { useRunningSfuDeployment } from "~/hooks/use-sfu-deployment"
 import {
   createSfuNode,
   listSfuNodes,
@@ -71,6 +75,11 @@ export default function VoiceNodesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<SfuNodeCreated | null>(null)
+
+  // 一键自动部署：弹窗开关 + 需要恢复查看的进行中部署（进行中状态由共享 hook 提供）。
+  const [deployOpen, setDeployOpen] = useState(false)
+  const [resumeDeployID, setResumeDeployID] = useState<string | null>(null)
+  const { running: runningDeploy, refresh: refreshRunningDeploy } = useRunningSfuDeployment()
 
   const [upgradeNode, setUpgradeNode] = useState<SfuNode | null>(null)
   const [upgrading, setUpgrading] = useState(false)
@@ -252,11 +261,58 @@ export default function VoiceNodesPage() {
         titleExtra={<SfuTopologyInfoButton />}
         description="节点须完成 Enrollment（一次性令牌 → 证书 → mTLS）并显式启用调度后才进入调度池。"
         actions={
-          <Button onClick={() => { setCreated(null); setCreateOpen(true) }}>
-            <PlusIcon data-icon="inline-start" />
-            创建节点
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => {
+                setResumeDeployID(null)
+                setDeployOpen(true)
+              }}
+            >
+              <CloudUploadIcon data-icon="inline-start" />
+              自动部署到服务器
+            </Button>
+            <Button variant="outline" onClick={() => { setCreated(null); setCreateOpen(true) }}>
+              <PlusIcon data-icon="inline-start" />
+              创建节点
+            </Button>
+          </div>
         }
+      />
+
+      {runningDeploy && (
+        <div className="px-4 lg:px-6">
+          <button
+            type="button"
+            onClick={() => {
+              setResumeDeployID(runningDeploy.id)
+              setDeployOpen(true)
+            }}
+            className="flex w-full items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-left text-sm transition-colors hover:bg-primary/10"
+          >
+            <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-primary" />
+            <span className="truncate">
+              正在部署到 <span className="font-mono">{runningDeploy.host}</span>
+              {runningDeploy.params?.display_name ? `（${String(runningDeploy.params.display_name)}）` : ""}
+            </span>
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">点击查看进度</span>
+          </button>
+        </div>
+      )}
+
+      <SfuDeployDialog
+        open={deployOpen}
+        onOpenChange={open => {
+          setDeployOpen(open)
+          if (!open) {
+            setResumeDeployID(null)
+            refreshRunningDeploy()
+          }
+        }}
+        resumeDeploymentID={resumeDeployID}
+        onNodesChanged={() => {
+          nodes.reload(true)
+          refreshRunningDeploy()
+        }}
       />
 
       <Dialog
@@ -444,7 +500,7 @@ export default function VoiceNodesPage() {
           <EmptyState
             icon={ServerIcon}
             title="还没有 SFU 节点"
-            description="创建节点占位并下发 Enrollment Token，让 Owl-SFU 实例接入集群。"
+            description="点「自动部署到服务器」填写目标机 SSH 信息，系统会自动安装 owl-sfu 并接入集群；也可创建占位后手动下发 Enrollment Token。"
           />
         )}
         {list.length > 0 && (

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/activity"
 	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
@@ -80,6 +81,8 @@ type publicProfile struct {
 	// Cosmetics 全量装备投影（full 模式，含 profile_border/profile_effect），
 	// 资料卡单请求拿全装扮；ACL 与本投影一致（共同 guild 才可见）。
 	Cosmetics map[string]cosmetics.EquippedSlotView `json:"cosmetics,omitempty"`
+	// ActivityLevel 平台活跃度等级（资料卡展示；0 = 暂无活跃记录）。
+	ActivityLevel int `json:"activity_level"`
 }
 
 // publicProfile GET /users/:id：查看他人公开资料。
@@ -118,6 +121,7 @@ func (h *api) publicProfile(c *gin.Context) {
 		ID: target.ID, Username: target.Username, DisplayName: target.DisplayName,
 		Avatar: target.AvatarURL, AvatarAnimated: target.AvatarAnimated,
 		Banner: target.BannerURL, AccentColor: target.AccentColor, Bio: target.Bio,
-		Cosmetics: equipped[target.ID],
+		Cosmetics:     equipped[target.ID],
+		ActivityLevel: activity.LevelOf(h.deps.DB, target.ID),
 	})
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/secretstore"
 	"github.com/owlspeak/owl-server/backend/internal/server"
 	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
+	"github.com/owlspeak/owl-server/backend/internal/sfudeploy"
 	"github.com/owlspeak/owl-server/backend/internal/stage"
 	"github.com/owlspeak/owl-server/backend/internal/voice"
 )
@@ -148,7 +149,18 @@ func main() {
 		}()
 	}
 
-	router, err := server.New(cfg, db, bus, httpapi.SFUOptions{Registry: registry, MediaTokens: mediaTokens, Cfg: &cfg})
+	// SFU 节点一键自动部署：SSH 编排器（凭据加密主密钥与 CA 同存 ClusterSecret）。
+	// 构造失败不阻断启动，仅关闭部署功能（相关路由返回 503）。
+	var deployManager *sfudeploy.Manager
+	if mgr, err := sfudeploy.NewManager(db, bus, cfg, registry, secrets); err != nil {
+		slog.Error("SFU 自动部署子系统初始化失败（部署功能不可用）", "error", err)
+	} else {
+		deployManager = mgr
+	}
+
+	router, err := server.New(cfg, db, bus, httpapi.SFUOptions{
+		Registry: registry, MediaTokens: mediaTokens, Cfg: &cfg, Deploy: deployManager,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

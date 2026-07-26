@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -22,10 +21,9 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/mediatoken"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
+	"github.com/owlspeak/owl-server/backend/internal/sfudeploy"
 	"github.com/owlspeak/owl-server/backend/internal/voice"
 )
-
-const enrollmentTokenTTL = 30 * time.Minute
 
 // SFUOptions SFU 配套子系统依赖（由 main 装配注入）。
 type SFUOptions struct {
@@ -33,10 +31,17 @@ type SFUOptions struct {
 	MediaTokens *mediatoken.Manager
 	// Cfg 可选：用于发布目录 / PublicBaseURL 推导下载链接。
 	Cfg *config.Config
+	// Deploy 可选：SFU 节点一键部署编排器（internal/sfudeploy）；不传时部署路由 503。
+	Deploy *sfudeploy.Manager
 }
 
 // AttachSFU 注入 SFU 节点注册表与 Media Token 签发器；未注入时相关路由返回 503。
-func (a *API) AttachSFU(opts SFUOptions) { a.sfu = &opts }
+func (a *API) AttachSFU(opts SFUOptions) {
+	a.sfu = &opts
+	if opts.Deploy != nil {
+		a.AttachSfuDeploy(opts.Deploy)
+	}
+}
 
 // requireSFU SFU 子系统未装配时直接 503（理论上仅测试环境出现）。
 func (a *API) requireSFU(c *gin.Context) bool {
@@ -70,36 +75,15 @@ type createSfuNodeResponse struct {
 }
 
 // createSfuNode 创建节点占位并签发一次性 enrollment token（明文仅此一次返回，库中只存哈希）。
+// 核心逻辑在 sfucontrol.CreateNodeWithEnrollment（与自动部署编排共用）。
 func (a *API) createSfuNode(c *gin.Context) {
 	var input createSfuNodeRequest
 	if !bind(c, &input) {
 		return
 	}
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		fail(c, http.StatusInternalServerError, "TOKEN_ERROR", "生成 enrollment token 失败")
-		return
-	}
-	token := hex.EncodeToString(tokenBytes)
-	hash := sfucontrol.HashEnrollmentToken(token)
-	expiresAt := time.Now().UTC().Add(enrollmentTokenTTL)
-	labels := model.SfuLabelMap{}
-	for k, v := range input.Labels {
-		if k == "" {
-			continue
-		}
-		labels[k] = v
-	}
-	node := model.SfuNode{
-		ID:                       uuid.New(),
-		DisplayName:              input.DisplayName,
-		Status:                   model.SfuNodePendingEnrollment,
-		Labels:                   labels,
-		EnrollmentTokenHash:      hash,
-		EnrollmentTokenExpiresAt: &expiresAt,
-	}
-	if err := a.db.Create(&node).Error; err != nil {
-		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "创建 SFU 节点失败")
+	node, token, expiresAt, err := sfucontrol.CreateNodeWithEnrollment(a.db, input.DisplayName, input.Labels)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", err.Error())
 		return
 	}
 	c.JSON(http.StatusCreated, createSfuNodeResponse{NodeID: node.ID, EnrollmentToken: token, ExpiresAt: expiresAt})

@@ -15,7 +15,8 @@ import { PageHeader } from "~/components/page-header"
 import { SimpleSelect } from "~/components/simple-select"
 import { EmptyState, ErrorState, LoadingState } from "~/components/states"
 import { Badge } from "~/components/ui/badge"
-import { Button } from "~/components/ui/button"
+import { Button, buttonVariants } from "~/components/ui/button"
+import { cn } from "~/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card"
 import { Input } from "~/components/ui/input"
 import { Label } from "~/components/ui/label"
@@ -99,10 +100,10 @@ export default function CosmeticItemDetailPage() {
         description={`品类：${category?.name ?? item.category_key} · ID ${item.id}`}
         actions={
           <>
-            <Button variant="outline" size="sm" render={<Link to="/cosmetics/items" />}>
+            <Link to="/cosmetics/items" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
               <ArrowLeftIcon data-icon="inline-start" />
               返回列表
-            </Button>
+            </Link>
             {item.status === "draft" && (
               <Button size="sm" onClick={() => transition("published", "已发布上架")}>
                 <RocketIcon data-icon="inline-start" />

@@ -13,6 +13,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/adminpresence"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
 	"github.com/owlspeak/owl-server/backend/internal/auditapi"
+	"github.com/owlspeak/owl-server/backend/internal/activity"
 	"github.com/owlspeak/owl-server/backend/internal/botapi"
 	"github.com/owlspeak/owl-server/backend/internal/clientapi"
 	"github.com/owlspeak/owl-server/backend/internal/config"
@@ -163,6 +164,7 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 		message.Register,
 		sticker.Register,   // 贴图与表情包（docs 17）
 		cosmetics.Register, // 平台装扮商店
+		activity.Register,  // 平台活跃度与每日积分
 		gateway.Register,
 		auditapi.Register,
 		// AI 时代扩展功能（后台管理 API 部分）：
@@ -177,6 +179,12 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 		if err := register(v1, deps); err != nil {
 			return nil, err
 		}
+	}
+
+	// 活跃度语音采样的隐身过滤：在装配层桥接 voice.StealthPredicate（包装而非取值，
+	// 因该谓词由 adminpresence 稍后注入），避免 activity→voice 直接依赖成环。
+	activity.StealthCheck = func(guildID, userID uuid.UUID) bool {
+		return voice.StealthPredicate(guildID, userID)
 	}
 
 	// 用户端 API（/gapi/v1）：与后台管理 API 完全隔离的独立前缀与认证体系。

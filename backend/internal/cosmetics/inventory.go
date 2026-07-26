@@ -165,10 +165,15 @@ func (h *api) ensurePointsRow(tx *gorm.DB, userID uuid.UUID) error {
 }
 
 func (h *api) adjustPoints(tx *gorm.DB, userID uuid.UUID, delta int64, reason, refType, refID string) (int64, error) {
-	if err := h.ensurePointsRow(tx, userID); err != nil {
+	return adjustPointsIn(tx, userID, delta, reason, refType, refID)
+}
+
+// adjustPointsIn 包级积分调整（行锁 + 流水，事务内使用）；ledger ID 用包级雪花单例。
+func adjustPointsIn(tx *gorm.DB, userID uuid.UUID, delta int64, reason, refType, refID string) (int64, error) {
+	row := model.UserPoints{UserID: userID, Balance: 0, UpdatedAt: time.Now().UTC()}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
 		return 0, err
 	}
-	var row model.UserPoints
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, "user_id = ?", userID).Error; err != nil {
 		return 0, err
 	}
@@ -182,7 +187,7 @@ func (h *api) adjustPoints(tx *gorm.DB, userID uuid.UUID, delta int64, reason, r
 		return 0, err
 	}
 	ledger := model.UserPointsLedger{
-		ID: h.ids.Next(), UserID: userID, Delta: delta, BalanceAfter: next,
+		ID: cosmeticsIDs.Next(), UserID: userID, Delta: delta, BalanceAfter: next,
 		Reason: reason, RefType: refType, RefID: refID, CreatedAt: time.Now().UTC(),
 	}
 	if err := tx.Create(&ledger).Error; err != nil {

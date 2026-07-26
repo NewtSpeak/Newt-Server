@@ -1,3 +1,4 @@
+import { ThemeToggle } from "~/components/theme-toggle"
 import { Separator } from "~/components/ui/separator"
 import { SidebarTrigger } from "~/components/ui/sidebar"
 
@@ -11,6 +12,7 @@ export function SiteHeader({ title = "控制台" }: { title?: string }) {
           className="mx-2 h-4 data-vertical:self-auto"
         />
         <h1 className="text-base font-medium">{title}</h1>
+        <ThemeToggle className="ml-auto" />
       </div>
     </header>
   )
