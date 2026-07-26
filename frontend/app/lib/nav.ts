@@ -17,6 +17,7 @@ import {
   SearchIcon,
   ServerIcon,
   ShapesIcon,
+  ShieldCheckIcon,
   ShoppingBagIcon,
   Settings2Icon,
   ShieldBanIcon,
@@ -89,6 +90,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "系统",
     items: [
       { title: "平台用户", url: "/users", icon: UserCogIcon },
+      { title: "账号安全", url: "/account", icon: ShieldCheckIcon },
       { title: "系统设置", url: "/settings", icon: Settings2Icon },
     ],
   },

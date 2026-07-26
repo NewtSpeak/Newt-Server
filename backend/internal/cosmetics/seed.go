@@ -28,19 +28,10 @@ func SeedCategories(db *gorm.DB) error {
 			CreatedAt: now, UpdatedAt: now,
 		},
 		{
-			Key: "profile_border", Name: "资料卡片边框", Description: "适配紧凑/完整两种尺寸的资料卡边框",
+			Key: "profile_border", Name: "资料卡片边框", Description: "上下两段式资料卡边框：上半贴卡片顶部、下半贴底部，中段随卡片高度伸缩",
 			Slot: "profile_border", SortOrder: 20, Enabled: true,
-			SchemaJSON: mustJSON(CategorySchema{
-				RenderHint: "profile_border",
-				AssetSlots: []AssetSlotDef{
-					{Key: "compact", Label: "紧凑卡片边框", Required: true, MIMEGroups: []string{"image", "animated_image", "video"}, MaxBytes: 8 << 20},
-					{Key: "full", Label: "完整卡片边框", Required: true, MIMEGroups: []string{"image", "animated_image", "video"}, MaxBytes: 12 << 20},
-				},
-				PayloadFields: []PayloadFieldDef{
-					{Key: "motion", Type: "enum", Values: []string{"static", "animated"}, Default: "static"},
-				},
-			}),
-			CreatedAt: now, UpdatedAt: now,
+			SchemaJSON: mustJSON(profileBorderSchema()),
+			CreatedAt:  now, UpdatedAt: now,
 		},
 		{
 			Key: "profile_effect", Name: "资料卡内特效", Description: "资料卡内容区特效，可附带音效",
@@ -71,7 +62,9 @@ func SeedCategories(db *gorm.DB) error {
 					{Key: "mode", Type: "enum", Values: []string{"gradient", "video", "image"}, Default: "gradient"},
 					{Key: "base_color", Type: "color", Default: "#1e1f22"},
 					{Key: "gradient", Type: "object"},
-					{Key: "video_opacity", Type: "number", Default: 0.85},
+					{Key: "video_opacity", Type: "number", Default: 1},
+					// normal = 原样播放（alpha 通道素材原生透明）；screen = 黑底无 alpha 素材扣黑
+					{Key: "video_blend", Type: "enum", Values: []string{"normal", "screen"}, Default: "normal"},
 				},
 			}),
 			CreatedAt: now, UpdatedAt: now,
@@ -88,7 +81,41 @@ func SeedCategories(db *gorm.DB) error {
 			return err
 		}
 	}
-	return nil
+	return migrateProfileBorderSchema(db, now)
+}
+
+// profileBorderSchema 资料卡边框品类 schema：资产分上/下两段，
+// 分别锚定卡片顶部与底部，中段留白随卡片高度伸缩，紧凑/完整卡共用一套资产。
+func profileBorderSchema() CategorySchema {
+	return CategorySchema{
+		RenderHint: "profile_border",
+		AssetSlots: []AssetSlotDef{
+			{Key: "top", Label: "上半部分", Required: true, MIMEGroups: []string{"image", "animated_image", "video"}, MaxBytes: 8 << 20},
+			{Key: "bottom", Label: "下半部分", Required: true, MIMEGroups: []string{"image", "animated_image", "video"}, MaxBytes: 8 << 20},
+		},
+		PayloadFields: []PayloadFieldDef{
+			{Key: "motion", Type: "enum", Values: []string{"static", "animated"}, Default: "static"},
+		},
+	}
+}
+
+// migrateProfileBorderSchema 将 profile_border 的旧默认 schema（整幅 compact/full 两槽）
+// 原地升级为上/下两段式。仅当库中 schema 与旧默认值完全一致时才覆盖——
+// 运营通过 PATCH /admin/cosmetics/categories 自定义过的 schema 不动。
+func migrateProfileBorderSchema(db *gorm.DB, now time.Time) error {
+	legacy := mustJSON(CategorySchema{
+		RenderHint: "profile_border",
+		AssetSlots: []AssetSlotDef{
+			{Key: "compact", Label: "紧凑卡片边框", Required: true, MIMEGroups: []string{"image", "animated_image", "video"}, MaxBytes: 8 << 20},
+			{Key: "full", Label: "完整卡片边框", Required: true, MIMEGroups: []string{"image", "animated_image", "video"}, MaxBytes: 12 << 20},
+		},
+		PayloadFields: []PayloadFieldDef{
+			{Key: "motion", Type: "enum", Values: []string{"static", "animated"}, Default: "static"},
+		},
+	})
+	return db.Model(&model.CosmeticCategory{}).
+		Where("key = ? AND schema_json = ?", "profile_border", legacy).
+		Updates(map[string]any{"schema_json": mustJSON(profileBorderSchema()), "updated_at": now}).Error
 }
 
 func mustJSON(v any) string {

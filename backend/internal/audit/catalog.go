@@ -238,6 +238,12 @@ var catalog = map[string]ActionInfo{
 		UndoHint: "凭据已随记录销毁，需重新录入",
 	},
 
+	// —— 平台账号 ——
+	"platform.account_username_change": {
+		Irreversible: true, Label: "修改自己的用户名",
+		UndoHint: "旧用户名可能已被占用，不支持自动撤销；可再次手动改回",
+	},
+
 	// —— 撤销本身 ——
 	"audit.undo": {
 		Irreversible: true, Label: "撤销操作",

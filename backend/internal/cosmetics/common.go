@@ -117,7 +117,8 @@ func (h *api) publishToUser(userID uuid.UUID, eventType string, payload any) {
 	})
 }
 
-// publishLoadoutToUserGuilds 装备变更：本人全部端 + 所在各服在线成员。
+// publishLoadoutToUserGuilds 装备变更：本人全部端 + 所在各服在线成员 +
+// 好友与私信对端（纯私信关系无共同服，需定向补发，否则对端头像框陈旧）。
 func (h *api) publishLoadoutToUserGuilds(userID uuid.UUID, payload any) {
 	if h.bus() == nil {
 		return
@@ -132,11 +133,40 @@ func (h *api) publishLoadoutToUserGuilds(userID uuid.UUID, payload any) {
 			Payload: payload,
 		})
 	}
+	targets := append(h.loadoutSocialAudience(userID), userID)
 	h.bus().Publish(eventbus.Event{
 		Type:    eventbus.EventCosmeticLoadoutUpdate,
-		UserIDs: []uuid.UUID{userID},
+		UserIDs: targets,
 		Payload: payload,
 	})
+}
+
+// loadoutSocialAudience 好友 + 私信/群聊对端（去重，不含本人；共同服成员会经
+// guild 广播重复收到一次，客户端按 user_id 覆盖写 store，幂等无害）。
+func (h *api) loadoutSocialAudience(userID uuid.UUID) []uuid.UUID {
+	seen := map[uuid.UUID]struct{}{}
+	var friendIDs []uuid.UUID
+	_ = h.db().Model(&model.Relationship{}).
+		Where("user_id = ? AND type = ?", userID, model.RelationshipFriend).
+		Pluck("target_user_id", &friendIDs).Error
+	var peerIDs []uuid.UUID
+	_ = h.db().Raw(`
+		SELECT DISTINCT cr2.user_id FROM channel_recipients cr1
+		INNER JOIN channel_recipients cr2 ON cr1.channel_id = cr2.channel_id
+		WHERE cr1.user_id = ? AND cr2.user_id <> ?
+	`, userID, userID).Scan(&peerIDs).Error
+	out := make([]uuid.UUID, 0, len(friendIDs)+len(peerIDs))
+	for _, id := range append(friendIDs, peerIDs...) {
+		if id == userID {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func (h *api) publishCatalogUpdate(payload any) {

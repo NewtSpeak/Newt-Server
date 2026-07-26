@@ -9,6 +9,7 @@ import { toast } from "sonner"
 
 import { MessageCard } from "~/components/message-card"
 import { Avatar, AvatarFallback } from "~/components/ui/avatar"
+import { FramedAvatar } from "~/components/user-avatar-frame"
 import { Badge } from "~/components/ui/badge"
 import {
   Sheet,
@@ -17,18 +18,26 @@ import {
   SheetHeader,
   SheetTitle,
 } from "~/components/ui/sheet"
-import { listMessageEdits, type Message, type MessageEdit } from "~/lib/api"
+import {
+  listMessageEdits,
+  type EquippedSlotView,
+  type Message,
+  type MessageEdit,
+} from "~/lib/api"
 import { formatBytes, formatFullTime, formatTime } from "~/lib/format"
 
 export function MessageItem({
   message,
   index,
   memberNames,
+  avatarFrame,
 }: {
   message: Message
   index: number
   /** user_id → 展示名映射（ephemeral 名单显示名字；缺省回退 uuid 前 8 位） */
   memberNames?: Record<string, string>
+  /** 作者头像框（页面层按可见作者批量查询后传入；bot 作者不传） */
+  avatarFrame?: EquippedSlotView | null
 }) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [edits, setEdits] = useState<MessageEdit[] | null>(null)
@@ -85,9 +94,11 @@ export function MessageItem({
         ephemeral ? "border-dashed border-amber-500/25" : ""
       }`}
     >
-      <Avatar className="size-9 shrink-0">
-        <AvatarFallback>{author.slice(0, 2).toUpperCase()}</AvatarFallback>
-      </Avatar>
+      <FramedAvatar frame={avatarFrame}>
+        <Avatar className="size-9 shrink-0">
+          <AvatarFallback>{author.slice(0, 2).toUpperCase()}</AvatarFallback>
+        </Avatar>
+      </FramedAvatar>
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="text-sm font-medium">{author}</span>

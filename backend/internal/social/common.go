@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"gorm.io/gorm"
@@ -45,6 +46,9 @@ type userSummary struct {
 	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name,omitempty"`
 	AvatarURL   string    `json:"avatar_url,omitempty"`
+	// Cosmetics 装备投影（listMode：avatar_frame + nameplate），
+	// 好友列表 / 私信侧栏渲染头像框用；无装备时省略。
+	Cosmetics map[string]cosmetics.EquippedSlotView `json:"cosmetics,omitempty"`
 }
 
 func (h *api) loadUserSummary(userID uuid.UUID) (userSummary, error) {
@@ -53,9 +57,11 @@ func (h *api) loadUserSummary(userID uuid.UUID) (userSummary, error) {
 		First(&user, "id = ?", userID).Error; err != nil {
 		return userSummary{}, err
 	}
+	equipped := cosmetics.ResolveEquippedForUsers(h.deps.DB, []uuid.UUID{userID}, true)
 	return userSummary{
 		ID: user.ID, Username: user.Username,
 		DisplayName: user.DisplayName, AvatarURL: user.AvatarURL,
+		Cosmetics: equipped[userID],
 	}, nil
 }
 

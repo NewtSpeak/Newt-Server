@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react"
+import { useTheme } from "next-themes"
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip"
 import type { MemberBadgeView, RoleBadgeStyle, RoleStyle, RoleSurfaceStyle } from "~/lib/api"
@@ -13,27 +14,43 @@ function animDurationSec(style: RoleSurfaceStyle | RoleStyle | undefined | null)
   return DEFAULT_SPEED
 }
 
-function gradientImage(style: RoleSurfaceStyle): string | undefined {
-  if (!style.type || !style.colors?.length) return undefined
+/** 当前是否暗色主题（跟随 next-themes 切换） */
+function useIsDark(): boolean {
+  const { resolvedTheme } = useTheme()
+  return resolvedTheme === "dark"
+}
+
+/** 按亮暗主题选色：暗色主题优先 colors_dark，缺省共用 colors */
+function surfaceColors(style: RoleSurfaceStyle, dark: boolean): string[] {
+  if (dark && style.colors_dark?.length) return style.colors_dark
+  return style.colors ?? []
+}
+
+function gradientImage(style: RoleSurfaceStyle, dark: boolean): string | undefined {
+  const base = surfaceColors(style, dark)
+  if (!style.type || !base.length) return undefined
   if (style.type === "solid") return undefined
-  const colors = style.animated ? [...style.colors, style.colors[0]] : style.colors
+  const colors = style.animated ? [...base, base[0]] : base
   const stops = colors.join(", ")
   return style.type === "radial"
     ? `radial-gradient(${style.shape ?? "circle"}, ${stops})`
     : `linear-gradient(${style.angle ?? 90}deg, ${stops})`
 }
 
-/** RoleStyle / 表面样式 → 文本渲染 CSS */
-export function roleStyleCss(style: RoleStyle | RoleSurfaceStyle | Record<string, never> | undefined | null): {
+/** RoleStyle / 表面样式 → 文本渲染 CSS；dark 为当前是否暗色主题 */
+export function roleStyleCss(
+  style: RoleStyle | RoleSurfaceStyle | Record<string, never> | undefined | null,
+  dark = false,
+): {
   style: CSSProperties
   className: string
 } {
   const parsed = style as RoleSurfaceStyle | undefined
   if (!parsed?.type || !parsed.colors?.length) return { style: {}, className: "" }
   if (parsed.type === "solid") {
-    return { style: { color: parsed.colors[0] }, className: "" }
+    return { style: { color: surfaceColors(parsed, dark)[0] }, className: "" }
   }
-  const image = gradientImage(parsed)
+  const image = gradientImage(parsed, dark)
   const duration = animDurationSec(parsed)
   return {
     style: {
@@ -52,8 +69,11 @@ export function roleStyleCss(style: RoleStyle | RoleSurfaceStyle | Record<string
   }
 }
 
-/** 角色色点 / icon 填充 CSS（背景渐变，非文字 clip） */
-export function roleIconFillCss(style: RoleSurfaceStyle | null | undefined): {
+/** 角色色点 / icon 填充 CSS（背景渐变，非文字 clip）；dark 为当前是否暗色主题 */
+export function roleIconFillCss(
+  style: RoleSurfaceStyle | null | undefined,
+  dark = false,
+): {
   style: CSSProperties
   className: string
 } {
@@ -61,9 +81,12 @@ export function roleIconFillCss(style: RoleSurfaceStyle | null | undefined): {
     return { style: {}, className: "" }
   }
   if (style.type === "solid") {
-    return { style: { backgroundColor: style.colors[0] }, className: "" }
+    return {
+      style: { backgroundColor: surfaceColors(style, dark)[0] },
+      className: "",
+    }
   }
-  const image = gradientImage(style)
+  const image = gradientImage(style, dark)
   const duration = animDurationSec(style)
   return {
     style: {
@@ -104,7 +127,8 @@ export function StyledName({
   className?: string
   children: ReactNode
 }) {
-  const css = roleStyleCss(nameStyle)
+  const dark = useIsDark()
+  const css = roleStyleCss(nameStyle, dark)
   const decor = nameStyle as RoleStyle | undefined
   return (
     <span
@@ -147,7 +171,8 @@ export function RoleStyleIcon({
     surface = resolveRoleIconStyle(style as RoleStyle)
   }
 
-  const fill = roleIconFillCss(surface)
+  const dark = useIsDark()
+  const fill = roleIconFillCss(surface, dark)
   const bg =
     fill.style.backgroundImage || fill.style.backgroundColor
       ? fill.style
@@ -181,8 +206,9 @@ export function RoleBadgePill({
   fallbackColor?: string
   className?: string
 }) {
+  const dark = useIsDark()
   const bg = badge?.background
-  const fill = roleIconFillCss(bg ?? undefined)
+  const fill = roleIconFillCss(bg ?? undefined, dark)
   const bgImageUrl = badge?.background_image_url?.trim()
   const hasGradient = Boolean(fill.style.backgroundImage || fill.style.backgroundColor)
   const hasBgImage = Boolean(bgImageUrl)

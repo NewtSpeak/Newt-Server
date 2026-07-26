@@ -651,6 +651,17 @@ function PayloadField({
       )
     }
     case "object":
+      if (field.key === "gradient") {
+        return (
+          <GradientObjectField
+            field={field}
+            value={value}
+            objText={objText}
+            objError={objError}
+            onObjectChange={onObjectChange}
+          />
+        )
+      }
       return (
         <div className="flex flex-col gap-2">
           {label}
@@ -679,4 +690,233 @@ function PayloadField({
         </div>
       )
   }
+}
+
+// ---------------------------------------------------------------------------
+// ④ gradient 字段可视化编辑器（铭牌等品类的渐变配置）
+// ---------------------------------------------------------------------------
+
+/** 渐变对象（与客户端 nameplate.tsx GradientPayload 对齐；from/to 支持 #RRGGBBAA） */
+type GradientDraft = {
+  type?: string
+  from?: string
+  to?: string
+  angle?: number
+  animated?: boolean
+  colors?: string[]
+  [key: string]: unknown
+}
+
+const GRADIENT_MODE_OPTIONS = [
+  { value: "linear", label: "线性渐变" },
+  { value: "radial", label: "径向渐变" },
+  { value: "solid", label: "纯色" },
+]
+
+/** 6 位或 8 位（带透明度）hex */
+const HEX_COLOR_ALPHA = /^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/
+
+/** #RRGGBBAA -> RGB 部分 + 不透明度百分比（0-100） */
+function splitHexAlpha(hex: string): { rgb: string; alphaPct: number } {
+  if (!HEX_COLOR_ALPHA.test(hex)) return { rgb: "#000000", alphaPct: 100 }
+  const rgb = hex.slice(0, 7)
+  if (hex.length === 9) {
+    return { rgb, alphaPct: Math.round((parseInt(hex.slice(7, 9), 16) / 255) * 100) }
+  }
+  return { rgb, alphaPct: 100 }
+}
+
+/** RGB + 不透明度百分比 -> hex（100% 时输出 6 位，否则 8 位） */
+function composeHexAlpha(rgb: string, alphaPct: number): string {
+  const pct = Math.min(100, Math.max(0, Math.round(alphaPct)))
+  if (pct >= 100) return rgb
+  return rgb + Math.round((pct / 100) * 255).toString(16).padStart(2, "0")
+}
+
+/** 预览 CSS（与客户端渲染逻辑一致：solid 取单色，radial 圆形，linear 按角度） */
+function gradientPreviewCss(g: GradientDraft): string | undefined {
+  const colors = (
+    g.colors?.length ? g.colors : [g.from, g.to].filter(c => typeof c === "string" && c)
+  ) as string[]
+  if (!colors.length) return undefined
+  if (g.type === "solid" || colors.length === 1) return colors[0]
+  if (g.type === "radial") return `radial-gradient(circle, ${colors.join(", ")})`
+  const angle = typeof g.angle === "number" ? g.angle : 90
+  return `linear-gradient(${angle}deg, ${colors.join(", ")})`
+}
+
+/** 单个色标：取色器（RGB）+ hex 文本 + 不透明度，组合为 #RRGGBB[AA] */
+function ColorAlphaInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (hex: string) => void
+}) {
+  const valid = HEX_COLOR_ALPHA.test(value)
+  const { rgb, alphaPct } = splitHexAlpha(value)
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="w-12 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <input
+        type="color"
+        aria-label={`${label}取色器`}
+        value={valid ? rgb : "#000000"}
+        onChange={event => onChange(composeHexAlpha(event.target.value, valid ? alphaPct : 100))}
+        className="size-9 cursor-pointer rounded-lg border bg-transparent p-1"
+      />
+      <Input
+        aria-label={`${label} hex`}
+        value={value}
+        onChange={event => onChange(event.target.value.trim())}
+        placeholder="#RRGGBB 或 #RRGGBBAA"
+        className="w-40 font-mono"
+        maxLength={9}
+        aria-invalid={(value !== "" && !valid) || undefined}
+      />
+      <div className="flex items-center gap-1">
+        <Input
+          type="number"
+          min={0}
+          max={100}
+          step={1}
+          aria-label={`${label}不透明度`}
+          value={valid ? alphaPct : ""}
+          onChange={event => {
+            const pct = Number(event.target.value)
+            if (Number.isFinite(pct)) onChange(composeHexAlpha(valid ? rgb : "#000000", pct))
+          }}
+          className="w-20"
+        />
+        <span className="text-xs text-muted-foreground">%</span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * gradient 字段编辑器：可视化（模式/双色标/角度/动画 + 实时预览）与 JSON 双模式。
+ * 可视化编辑写出 {type, from, to, angle, animated}；历史 colors 数组格式默认进 JSON 模式，
+ * 一旦用可视化编辑会移除 colors 键（客户端优先读 colors，避免两套色标并存打架）。
+ */
+function GradientObjectField({
+  field,
+  value,
+  objText,
+  objError,
+  onObjectChange,
+}: {
+  field: CosmeticPayloadFieldDef
+  value: unknown
+  objText: string
+  objError: boolean
+  onObjectChange: (text: string) => void
+}) {
+  const id = `payload-${field.key}`
+  const draft: GradientDraft =
+    value && typeof value === "object" && !Array.isArray(value) ? (value as GradientDraft) : {}
+  const isLegacy = Array.isArray(draft.colors) && draft.colors.length > 0 && !draft.from && !draft.to
+  const [uiMode, setUiMode] = useState<"visual" | "json">(isLegacy ? "json" : "visual")
+
+  const mode = typeof draft.type === "string" && draft.type ? draft.type : "linear"
+  const previewCss = gradientPreviewCss(draft)
+
+  function patch(partial: Partial<GradientDraft>) {
+    const next: GradientDraft = { ...draft, ...partial }
+    if (!next.type) next.type = "linear"
+    delete next.colors // 可视化编辑统一收敛到 from/to
+    onObjectChange(JSON.stringify(next, null, 2))
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id} className="gap-1.5">
+          {field.key}
+          <span className="font-normal text-muted-foreground">（{field.type}）</span>
+        </Label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setUiMode(current => (current === "visual" ? "json" : "visual"))}
+        >
+          {uiMode === "visual" ? "切换为 JSON 编辑" : "切换为可视化编辑"}
+        </Button>
+      </div>
+      {uiMode === "json" ? (
+        <>
+          <Textarea
+            id={id}
+            value={objText}
+            onChange={event => onObjectChange(event.target.value)}
+            placeholder='JSON 对象，如 {"type": "linear", "from": "#2D54011A", "to": "#2D540166", "angle": 90}'
+            aria-invalid={objError || undefined}
+            className="min-h-28 font-mono text-xs"
+            spellCheck={false}
+          />
+          {objError && <p className="text-xs text-destructive">JSON 语法非法</p>}
+        </>
+      ) : (
+        <div className="flex flex-col gap-3 rounded-xl border p-4">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">渐变模式</span>
+              <SimpleSelect
+                ariaLabel="渐变模式"
+                value={mode}
+                onChange={next => patch({ type: next })}
+                options={GRADIENT_MODE_OPTIONS}
+                className="w-32"
+              />
+            </div>
+            {mode === "linear" && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">角度</span>
+                <Input
+                  type="number"
+                  step={1}
+                  aria-label="渐变角度"
+                  value={typeof draft.angle === "number" ? draft.angle : 90}
+                  onChange={event => {
+                    const angle = Number(event.target.value)
+                    patch({ angle: Number.isFinite(angle) ? angle : 90 })
+                  }}
+                  className="w-20"
+                />
+                <span className="text-xs text-muted-foreground">°</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <Switch
+                id={`${id}-animated`}
+                checked={Boolean(draft.animated)}
+                onCheckedChange={next => patch({ animated: Boolean(next) })}
+              />
+              <Label htmlFor={`${id}-animated`} className="text-xs font-normal text-muted-foreground">
+                流动动画
+              </Label>
+            </div>
+          </div>
+          <ColorAlphaInput
+            label={mode === "solid" ? "颜色" : "起始色"}
+            value={typeof draft.from === "string" ? draft.from : ""}
+            onChange={hex => patch({ from: hex })}
+          />
+          {mode !== "solid" && (
+            <ColorAlphaInput
+              label="结束色"
+              value={typeof draft.to === "string" ? draft.to : ""}
+              onChange={hex => patch({ to: hex })}
+            />
+          )}
+          <div className="h-10 rounded-lg border bg-muted">
+            {previewCss && <div className="size-full rounded-lg" style={{ background: previewCss }} />}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

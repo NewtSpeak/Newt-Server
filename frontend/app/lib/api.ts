@@ -1324,6 +1324,8 @@ export type RoleStyleType = "" | "solid" | "linear" | "radial"
 export type RoleSurfaceStyle = {
   type: RoleStyleType
   colors?: string[]
+  /** 暗色主题独立配色；空则亮暗共用 colors */
+  colors_dark?: string[]
   angle?: number
   shape?: "circle" | "ellipse"
   animated?: boolean
@@ -1372,6 +1374,7 @@ function parseSurface(
   return {
     type: raw.type,
     colors: raw.colors,
+    colors_dark: raw.colors_dark,
     angle: raw.angle,
     shape: raw.shape,
     animated: raw.animated,
@@ -1432,6 +1435,7 @@ export function parseRoleStyle(raw: string | undefined | null): RoleStyle {
     return {
       type,
       colors: parsed.colors,
+      colors_dark: parsed.colors_dark,
       angle: parsed.angle,
       shape: parsed.shape,
       animated: parsed.animated,
@@ -2274,6 +2278,12 @@ export type LoginSession = {
   ip_address?: string
 }
 
+/** 修改自己的用户名（platformadmin，仅系统管理员；密码二次确认，不吊销会话） */
+export const changeMyUsername = (username: string, password: string) =>
+  api<User>("/admin/account/username", {
+    method: "PATCH",
+    body: JSON.stringify({ username, password }),
+  })
 export const changeMyPassword = (
   currentPassword: string,
   newPassword: string
@@ -2552,6 +2562,32 @@ export const patchCosmeticBundle = (
     method: "PATCH",
     body: JSON.stringify(body),
   })
+
+// ----- 用户装备头像框（管理台头像展示） -----
+
+/** 用户已装备的装扮槽视图（后端 EquippedSlotView）；头像框图取 assets.primary */
+export type EquippedSlotView = {
+  item_id: string
+  category_key: string
+  slot: string
+  name: string
+  assets: Record<string, CosmeticAssetView>
+  payload: Record<string, unknown>
+  render_hint?: string
+}
+
+/**
+ * 批量查询用户装备的头像框（≤200 个 id，系统管理员）。
+ * 响应仅包含装备了头像框的用户；空数组直接返回空对象不发请求。
+ */
+export const getAvatarFrames = (
+  ids: string[]
+): Promise<Record<string, EquippedSlotView>> => {
+  if (ids.length === 0) return Promise.resolve({})
+  return api<{ frames?: Record<string, EquippedSlotView> }>(
+    `/admin/cosmetics/avatar-frames?ids=${ids.slice(0, 200).join(",")}`
+  ).then((raw) => raw.frames ?? {})
+}
 
 // ----- 发放工具 -----
 

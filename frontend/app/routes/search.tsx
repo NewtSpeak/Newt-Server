@@ -7,6 +7,7 @@ import { PageHeader } from "~/components/page-header"
 import { SimpleSelect } from "~/components/simple-select"
 import { EmptyState, ErrorState, LoadingState } from "~/components/states"
 import { Input } from "~/components/ui/input"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 import { searchMessages, type Message } from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
 
@@ -55,6 +56,13 @@ export default function SearchPage() {
   }, [query, guildFilter])
 
   const guildNames = new Map(guilds.map(guild => [guild.id, guild.name]))
+
+  // 搜索结果作者的头像框（bot 作者与软删消息不查询）
+  const avatarFrames = useAvatarFrames(
+    (results ?? [])
+      .filter(message => !message.author_is_bot && !message.deleted_at)
+      .map(message => message.author_id)
+  )
 
   return (
     <main className="flex flex-1 flex-col gap-6 py-4 md:py-6">
@@ -107,7 +115,11 @@ export default function SearchPage() {
                 {message.guild_id && (
                   <p className="px-1 text-[10px] text-muted-foreground">{guildNames.get(message.guild_id) ?? message.guild_id}</p>
                 )}
-                <MessageItem message={message} index={index} />
+                <MessageItem
+                  message={message}
+                  index={index}
+                  avatarFrame={message.author_is_bot ? undefined : avatarFrames[message.author_id]}
+                />
               </div>
             ))}
           </div>

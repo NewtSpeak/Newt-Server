@@ -3,6 +3,7 @@
 //   - 账号禁用/解禁（禁用即吊销全部会话，两认证平面登录/续期/鉴权均拒绝）;
 //   - 管理员重置密码（吊销全部会话）;
 //   - 系统管理员授予/回收（防自锁：不能操作自己、至少保留一名系统管理员）;
+//   - 系统管理员修改自己的登录用户名（密码二次确认，不吊销会话）;
 //   - 用户端注册开关落库（PlatformSetting，clientapi 读取 DB 优先、环境变量兜底）。
 package platformadmin
 
@@ -23,6 +24,7 @@ func Register(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 	admin.POST("/users/:userID/enable", h.enableUser)
 	admin.POST("/users/:userID/reset-password", h.resetPassword)
 	admin.PATCH("/users/:userID/system-admin", h.patchSystemAdmin)
+	admin.PATCH("/account/username", h.changeOwnUsername)
 	admin.GET("/registration", h.getRegistration)
 	admin.PUT("/registration", h.putRegistration)
 	return nil

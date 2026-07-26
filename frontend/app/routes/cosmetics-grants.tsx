@@ -13,7 +13,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Input } from "~/components/ui/input"
 import { Label } from "~/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs"
+import { FramedAvatar } from "~/components/user-avatar-frame"
 import { useAsyncData } from "~/hooks/use-async-data"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 import {
   grantCosmeticItem,
   grantCosmeticPoints,
@@ -42,6 +44,13 @@ export default function CosmeticGrantsPage() {
     [search]
   )
 
+  // 搜索候选 + 已选中用户的头像框（bot 用户不查询）
+  const avatarFrames = useAvatarFrames(
+    [...(users.data ?? []), ...(selected ? [selected] : [])]
+      .filter(user => !user.is_bot)
+      .map(user => user.id)
+  )
+
   return (
     <main className="flex flex-1 flex-col gap-6 py-4 md:py-6">
       <PageHeader
@@ -68,10 +77,12 @@ export default function CosmeticGrantsPage() {
             </div>
             {selected && (
               <div className="flex items-center gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3">
-                <Avatar className="size-9">
-                  {selected.avatar_url && <AvatarImage src={selected.avatar_url} alt="" />}
-                  <AvatarFallback>{selected.username.slice(0, 2).toUpperCase()}</AvatarFallback>
-                </Avatar>
+                <FramedAvatar frame={avatarFrames[selected.id]}>
+                  <Avatar className="size-9">
+                    {selected.avatar_url && <AvatarImage src={selected.avatar_url} alt="" />}
+                    <AvatarFallback>{selected.username.slice(0, 2).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </FramedAvatar>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 truncate text-sm font-medium">
                     {selected.username}
@@ -107,10 +118,12 @@ export default function CosmeticGrantsPage() {
                       "outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
                     )}
                   >
-                    <Avatar className="size-8">
-                      {user.avatar_url && <AvatarImage src={user.avatar_url} alt="" />}
-                      <AvatarFallback>{user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
+                    <FramedAvatar frame={avatarFrames[user.id]}>
+                      <Avatar className="size-8">
+                        {user.avatar_url && <AvatarImage src={user.avatar_url} alt="" />}
+                        <AvatarFallback>{user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                    </FramedAvatar>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{user.username}</p>
                       <p className="truncate font-mono text-xs text-muted-foreground">

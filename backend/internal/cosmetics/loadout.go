@@ -89,9 +89,9 @@ func (h *api) unequipSlot(c *gin.Context) {
 	c.JSON(http.StatusOK, h.buildLoadoutView(user.ID, false))
 }
 
-// getUserEquipped GET /users/:userID/cosmetics/equipped
+// getUserEquipped GET /users/:id/cosmetics/equipped
 func (h *api) getUserEquipped(c *gin.Context) {
-	userID, ok := parseUUIDParam(c, "userID")
+	userID, ok := parseUUIDParam(c, "id")
 	if !ok {
 		return
 	}

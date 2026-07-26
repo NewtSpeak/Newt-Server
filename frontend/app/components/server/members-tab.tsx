@@ -18,6 +18,8 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu"
 import { Input } from "~/components/ui/input"
+import { FramedAvatar } from "~/components/user-avatar-frame"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 import {
   addMemberRole,
   createInvite,
@@ -56,6 +58,8 @@ export function MembersTab({
   const [inviteOpen, setInviteOpen] = useState(false)
   const [profileMember, setProfileMember] = useState<MemberDisplay | null>(null)
   const roleByID = new Map(roles.map(role => [role.id, role]))
+  // 成员列表可见用户的头像框（bot 成员不查询）
+  const avatarFrames = useAvatarFrames(members.filter(member => !member.is_bot).map(member => member.user_id))
 
   async function onInvite() {
     try {
@@ -158,12 +162,14 @@ export function MembersTab({
                 onClick={() => setProfileMember(member)}
                 className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none"
               >
-                <Avatar className="size-9">
-                  {member.avatar_url && <AvatarImage src={member.avatar_url} alt="" />}
-                  <AvatarFallback style={member.accent_color ? { backgroundColor: `${member.accent_color}33` } : undefined}>
-                    {displayName(member).slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
+                <FramedAvatar frame={avatarFrames[member.user_id]}>
+                  <Avatar className="size-9">
+                    {member.avatar_url && <AvatarImage src={member.avatar_url} alt="" />}
+                    <AvatarFallback style={member.accent_color ? { backgroundColor: `${member.accent_color}33` } : undefined}>
+                      {displayName(member).slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                </FramedAvatar>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 truncate text-sm font-medium">
                     <StyledName nameStyle={member.name_style} className="truncate">
@@ -249,6 +255,8 @@ function MemberProfileDialog({
   const roleByID = new Map(roles.map(role => [role.id, role]))
   const [nickname, setNickname] = useState("")
   const [savingNickname, setSavingNickname] = useState(false)
+  // 弹窗内单个成员的头像框（bot 不查询；列表已预热缓存，通常直接命中）
+  const avatarFrames = useAvatarFrames(member && !member.is_bot ? [member.user_id] : [])
 
   useEffect(() => {
     setNickname(member?.nickname ?? "")
@@ -283,10 +291,12 @@ function MemberProfileDialog({
               }
             />
             <div className="-mt-10 px-6 pb-6">
-              <Avatar className="size-16 ring-4 ring-background">
-                {member.avatar_url && <AvatarImage src={member.avatar_url} alt="" />}
-                <AvatarFallback className="text-lg">{displayName(member).slice(0, 2).toUpperCase()}</AvatarFallback>
-              </Avatar>
+              <FramedAvatar frame={avatarFrames[member.user_id]}>
+                <Avatar className="size-16 ring-4 ring-background">
+                  {member.avatar_url && <AvatarImage src={member.avatar_url} alt="" />}
+                  <AvatarFallback className="text-lg">{displayName(member).slice(0, 2).toUpperCase()}</AvatarFallback>
+                </Avatar>
+              </FramedAvatar>
               <DialogHeader className="mt-3 text-left">
                 <DialogTitle className="flex items-center gap-2">
                   <StyledName nameStyle={member.name_style}>{displayName(member)}</StyledName>

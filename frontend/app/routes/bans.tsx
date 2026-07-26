@@ -18,7 +18,9 @@ import {
 } from "~/components/ui/dialog"
 import { Input } from "~/components/ui/input"
 import { Label } from "~/components/ui/label"
+import { FramedAvatar } from "~/components/user-avatar-frame"
 import { useAsyncData } from "~/hooks/use-async-data"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 import { useGatewayEvent } from "~/hooks/use-gateway"
 import { useGuildID } from "~/hooks/use-guild-id"
 import { banUser, listBans, listMembers, memberName, unbanUser, type Ban, type GuildMember } from "~/lib/api"
@@ -72,6 +74,8 @@ export default function BansPage() {
   }
 
   const list = bans.data ?? []
+  // 封禁列表用户的头像框（Ban 无 is_bot 字段，直接按 user_id 查询）
+  const avatarFrames = useAvatarFrames(list.map(ban => ban.user_id))
 
   return (
     <main className="flex flex-1 flex-col gap-6 py-4 md:py-6">
@@ -145,9 +149,11 @@ export default function BansPage() {
                 style={{ "--stagger-index": index } as React.CSSProperties}
                 className="anim-item flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3"
               >
-                <Avatar className="size-9">
-                  <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                </Avatar>
+                <FramedAvatar frame={avatarFrames[ban.user_id]}>
+                  <Avatar className="size-9">
+                    <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </FramedAvatar>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{name}</p>
                   <p className="truncate text-xs text-muted-foreground">

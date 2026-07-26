@@ -38,6 +38,7 @@ export default [
     route("cosmetics/activity", "routes/cosmetics-activity.tsx"),
     // 系统
     route("users", "routes/users.tsx"),
+    route("account", "routes/account.tsx"),
     route("settings", "routes/settings.tsx"),
   ]),
 ] satisfies RouteConfig

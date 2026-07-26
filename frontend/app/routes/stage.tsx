@@ -21,7 +21,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Label } from "~/components/ui/label"
 import { Slider } from "~/components/ui/slider"
 import { Switch } from "~/components/ui/switch"
+import { FramedAvatar } from "~/components/user-avatar-frame"
 import { useAsyncData } from "~/hooks/use-async-data"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 import { useGatewayEvent } from "~/hooks/use-gateway"
 import { useGuildID } from "~/hooks/use-guild-id"
 import {
@@ -118,6 +120,8 @@ export default function StagePage() {
 
   const speakers = (states.data ?? []).filter(state => state.stage_role === "SPEAKER")
   const queueList = queue.data ?? []
+  // 台上成员的头像框（申请队列行无头像，不查询）
+  const avatarFrames = useAvatarFrames(speakers.map(speaker => speaker.user_id))
 
   return (
     <main className="flex flex-1 flex-col gap-6 py-4 md:py-6">
@@ -255,9 +259,11 @@ export default function StagePage() {
                       style={{ "--stagger-index": index } as React.CSSProperties}
                       className="anim-item flex items-center gap-3 rounded-xl border px-3 py-2.5"
                     >
-                      <Avatar className="size-8">
-                        <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                      </Avatar>
+                      <FramedAvatar frame={avatarFrames[speaker.user_id]}>
+                        <Avatar className="size-8">
+                          <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                      </FramedAvatar>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{name}</p>
                         {(speaker.server_mute || speaker.self_mute) && (

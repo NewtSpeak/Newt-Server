@@ -54,6 +54,56 @@ func TestRoleStyleValidateLinearSpeed(t *testing.T) {
 	}
 }
 
+func TestRoleStyleValidateColorsDark(t *testing.T) {
+	// 渐变：暗色配色 2–8 个，随主表面持久化
+	s := RoleStyle{
+		Type:       "linear",
+		Colors:     []string{"#ff0000", "#00ff00"},
+		ColorsDark: []string{"#220000", "#002200"},
+	}
+	out, err := s.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed RoleStyle
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.ColorsDark) != 2 || parsed.ColorsDark[0] != "#220000" {
+		t.Fatalf("colors_dark should persist: %+v", parsed.ColorsDark)
+	}
+
+	// 渐变：暗色配色只给 1 个 → 报错
+	bad := RoleStyle{
+		Type:       "linear",
+		Colors:     []string{"#ff0000", "#00ff00"},
+		ColorsDark: []string{"#220000"},
+	}
+	if _, err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "暗色") {
+		t.Fatalf("expected colors_dark count error, got %v", err)
+	}
+
+	// 纯色：暗色配色最多 1 个
+	badSolid := RoleStyle{
+		Type:       "solid",
+		Colors:     []string{"#ff0000"},
+		ColorsDark: []string{"#220000", "#002200"},
+	}
+	if _, err := badSolid.Validate(); err == nil || !strings.Contains(err.Error(), "暗色") {
+		t.Fatalf("expected solid colors_dark error, got %v", err)
+	}
+
+	// 非法 hex
+	badHex := RoleStyle{
+		Type:       "solid",
+		Colors:     []string{"#ff0000"},
+		ColorsDark: []string{"red"},
+	}
+	if _, err := badHex.Validate(); err == nil || !strings.Contains(err.Error(), "#RRGGBB") {
+		t.Fatalf("expected hex error, got %v", err)
+	}
+}
+
 func TestRoleStyleValidateSpeedRange(t *testing.T) {
 	s := RoleStyle{
 		Type: "linear", Colors: []string{"#ff0000", "#00ff00"},

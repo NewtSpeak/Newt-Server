@@ -18,13 +18,19 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "~/components/ui/sidebar"
-import { EllipsisVerticalIcon, CircleUserRoundIcon, CreditCardIcon, BellIcon, LogOutIcon } from "lucide-react"
+import { EllipsisVerticalIcon, LogOutIcon, ShieldCheckIcon } from "lucide-react"
+import { useNavigate } from "react-router"
+
+import { FramedAvatar } from "~/components/user-avatar-frame"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 
 export function NavUser({
   user,
   onLogout,
 }: {
   user: {
+    /** 当前登录管理员的用户 id（查询本人头像框） */
+    id: string
     name: string
     email: string
     avatar: string
@@ -32,6 +38,10 @@ export function NavUser({
   onLogout: () => void
 }) {
   const { isMobile } = useSidebar()
+  const navigate = useNavigate()
+  // 当前管理员本人的头像框
+  const avatarFrames = useAvatarFrames(user.id ? [user.id] : [])
+  const frame = avatarFrames[user.id]
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -41,10 +51,12 @@ export function NavUser({
               <SidebarMenuButton size="lg" className="aria-expanded:bg-muted" />
             }
           >
-            <Avatar className="size-8 rounded-lg grayscale">
-              <AvatarImage src={user.avatar} alt={user.name} />
-              <AvatarFallback className="rounded-lg">CN</AvatarFallback>
-            </Avatar>
+            <FramedAvatar frame={frame}>
+              <Avatar className="size-8 rounded-lg grayscale">
+                <AvatarImage src={user.avatar} alt={user.name} />
+                <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+              </Avatar>
+            </FramedAvatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-medium">{user.name}</span>
               <span className="truncate text-xs text-foreground/70">
@@ -62,10 +74,12 @@ export function NavUser({
             <DropdownMenuGroup>
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                  <Avatar className="size-8">
-                    <AvatarImage src={user.avatar} alt={user.name} />
-                    <AvatarFallback className="rounded-lg">CN</AvatarFallback>
-                  </Avatar>
+                  <FramedAvatar frame={frame}>
+                    <Avatar className="size-8">
+                      <AvatarImage src={user.avatar} alt={user.name} />
+                      <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+                    </Avatar>
+                  </FramedAvatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-medium">{user.name}</span>
                     <span className="truncate text-xs text-muted-foreground">
@@ -77,20 +91,9 @@ export function NavUser({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
-                <CircleUserRoundIcon
-                />
-                Account
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <CreditCardIcon
-                />
-                Billing
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <BellIcon
-                />
-                Notifications
+              <DropdownMenuItem onClick={() => navigate("/account")}>
+                <ShieldCheckIcon />
+                账号安全
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

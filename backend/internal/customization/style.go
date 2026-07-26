@@ -17,13 +17,15 @@ import (
 //   - type=solid：纯色，colors 恰好 1 个；
 //   - type=linear：线性渐变，colors 2–8 个，angle 0–360（默认 90）；
 //   - type=radial：径向渐变，colors 2–8 个，shape=circle|ellipse（默认 circle）；
-//   - animated=true 时前端按 speed（秒/周期，0.5–20，默认 4）做流动动画。
+//   - animated=true 时前端按 speed（秒/周期，0.5–20，默认 4）做流动动画；
+//   - colors_dark：暗色主题独立配色（数量规则同 colors）；空则亮暗共用 colors。
 type RoleSurfaceStyle struct {
-	Type     string   `json:"type"`
-	Colors   []string `json:"colors,omitempty"`
-	Angle    *int     `json:"angle,omitempty"`
-	Shape    string   `json:"shape,omitempty"`
-	Animated bool     `json:"animated,omitempty"`
+	Type       string   `json:"type"`
+	Colors     []string `json:"colors,omitempty"`
+	ColorsDark []string `json:"colors_dark,omitempty"`
+	Angle      *int     `json:"angle,omitempty"`
+	Shape      string   `json:"shape,omitempty"`
+	Animated   bool     `json:"animated,omitempty"`
 	// Speed 流动动画周期（秒）；仅 animated 时有效。
 	Speed *float64 `json:"speed,omitempty"`
 }
@@ -62,12 +64,13 @@ type RoleBadgeStyle struct {
 //   - Badge：角色徽章（背景 + 自定义 icon + 文字样式）。
 // type 与 badge 可独立：仅配徽章或仅配文字样式时 type 可为空。
 type RoleStyle struct {
-	Type     string   `json:"type"`
-	Colors   []string `json:"colors,omitempty"`
-	Angle    *int     `json:"angle,omitempty"`
-	Shape    string   `json:"shape,omitempty"`
-	Animated bool     `json:"animated,omitempty"`
-	Speed    *float64 `json:"speed,omitempty"`
+	Type       string   `json:"type"`
+	Colors     []string `json:"colors,omitempty"`
+	ColorsDark []string `json:"colors_dark,omitempty"`
+	Angle      *int     `json:"angle,omitempty"`
+	Shape      string   `json:"shape,omitempty"`
+	Animated   bool     `json:"animated,omitempty"`
+	Speed      *float64 `json:"speed,omitempty"`
 	// 用户名文字样式（可与颜色/渐变独立配置）
 	Bold          bool `json:"bold,omitempty"`
 	Italic        bool `json:"italic,omitempty"`
@@ -100,6 +103,7 @@ func validateSurface(s *RoleSurfaceStyle, allowEmpty bool) error {
 			return fmt.Errorf("样式类型不能为空")
 		}
 		s.Colors = nil
+		s.ColorsDark = nil
 		s.Angle = nil
 		s.Shape = ""
 		s.Animated = false
@@ -111,6 +115,9 @@ func validateSurface(s *RoleSurfaceStyle, allowEmpty bool) error {
 		if len(s.Colors) != 1 {
 			return fmt.Errorf("纯色样式需要且仅需要 1 个颜色")
 		}
+		if len(s.ColorsDark) > 1 {
+			return fmt.Errorf("纯色样式暗色配色最多 1 个颜色")
+		}
 		s.Animated = false
 		s.Speed = nil
 		s.Angle = nil
@@ -119,12 +126,23 @@ func validateSurface(s *RoleSurfaceStyle, allowEmpty bool) error {
 		if len(s.Colors) < 2 || len(s.Colors) > 8 {
 			return fmt.Errorf("渐变样式需要 2–8 个颜色")
 		}
+		if len(s.ColorsDark) > 0 && (len(s.ColorsDark) < 2 || len(s.ColorsDark) > 8) {
+			return fmt.Errorf("渐变样式暗色配色需要 2–8 个颜色")
+		}
 	default:
 		return fmt.Errorf("不支持的样式类型 %q（可选 solid/linear/radial）", s.Type)
+	}
+	if len(s.ColorsDark) == 0 {
+		s.ColorsDark = nil
 	}
 	for _, color := range s.Colors {
 		if !hexColorPattern.MatchString(color) {
 			return fmt.Errorf("颜色 %q 不是合法的 #RRGGBB", color)
+		}
+	}
+	for _, color := range s.ColorsDark {
+		if !hexColorPattern.MatchString(color) {
+			return fmt.Errorf("暗色配色 %q 不是合法的 #RRGGBB", color)
 		}
 	}
 	if s.Type == "linear" {
@@ -217,6 +235,7 @@ func (s *RoleStyle) Validate() (string, error) {
 		// 无颜色/渐变：清空颜色相关字段，但保留文字装饰（加粗/斜体等）
 		s.Type = ""
 		s.Colors = nil
+		s.ColorsDark = nil
 		s.Angle = nil
 		s.Shape = ""
 		s.Animated = false
@@ -225,7 +244,7 @@ func (s *RoleStyle) Validate() (string, error) {
 		s.Icon = nil
 	} else {
 		surface := RoleSurfaceStyle{
-			Type: s.Type, Colors: s.Colors, Angle: s.Angle,
+			Type: s.Type, Colors: s.Colors, ColorsDark: s.ColorsDark, Angle: s.Angle,
 			Shape: s.Shape, Animated: s.Animated, Speed: s.Speed,
 		}
 		if err := validateSurface(&surface, false); err != nil {
@@ -233,6 +252,7 @@ func (s *RoleStyle) Validate() (string, error) {
 		}
 		s.Type = surface.Type
 		s.Colors = surface.Colors
+		s.ColorsDark = surface.ColorsDark
 		s.Angle = surface.Angle
 		s.Shape = surface.Shape
 		s.Animated = surface.Animated

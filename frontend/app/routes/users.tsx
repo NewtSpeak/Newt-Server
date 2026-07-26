@@ -34,7 +34,9 @@ import {
 } from "~/components/ui/dialog"
 import { Input } from "~/components/ui/input"
 import { Switch } from "~/components/ui/switch"
+import { FramedAvatar } from "~/components/user-avatar-frame"
 import { useAsyncData } from "~/hooks/use-async-data"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 import {
   createRegistrationInvite,
   disablePlatformUser,
@@ -92,6 +94,8 @@ export default function PlatformUsersPage() {
 
   const users = page.data?.users ?? []
   const total = page.data?.total ?? 0
+  // 当前页可见用户的头像框（bot 用户不查询）
+  const avatarFrames = useAvatarFrames(users.filter(user => !user.is_bot).map(user => user.id))
 
   async function run(action: () => Promise<unknown>, message: string) {
     try {
@@ -145,10 +149,12 @@ export default function PlatformUsersPage() {
                 style={{ "--stagger-index": index } as React.CSSProperties}
                 className="anim-item flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3"
               >
-                <Avatar className="size-9">
-                  {user.avatar_url && <AvatarImage src={user.avatar_url} alt="" />}
-                  <AvatarFallback>{user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
-                </Avatar>
+                <FramedAvatar frame={avatarFrames[user.id]}>
+                  <Avatar className="size-9">
+                    {user.avatar_url && <AvatarImage src={user.avatar_url} alt="" />}
+                    <AvatarFallback>{user.username.slice(0, 2).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </FramedAvatar>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 truncate text-sm font-medium">
                     {user.username}

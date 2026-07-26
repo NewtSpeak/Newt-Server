@@ -5,7 +5,7 @@ import { AppSidebar } from "~/components/app-sidebar"
 import { SiteHeader } from "~/components/site-header"
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar"
 import { useGatewayEvent } from "~/hooks/use-gateway"
-import { api, getSession, logout, type Guild, type User } from "~/lib/api"
+import { api, getSession, logout, saveSession, type Guild, type User } from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
 import { gsap, MOTION, MOTION_OK, useGSAP } from "~/lib/gsap"
 import { pageTitle } from "~/lib/nav"
@@ -86,6 +86,11 @@ export default function ConsoleLayout() {
     refreshGuilds: async () => {
       const next = await api<Guild[]>("/guilds").catch(() => null)
       if (next) setGuilds(next)
+    },
+    updateUser: next => {
+      setUser(next)
+      const session = getSession()
+      if (session) saveSession({ ...session, user: next })
     },
   }
 

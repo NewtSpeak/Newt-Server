@@ -54,7 +54,8 @@ func mountUser(group *gin.RouterGroup, h *api, auth gin.HandlerFunc) {
 	me.GET("/cosmetics/points/ledger", h.listMyLedger)
 	me.POST("/cosmetics/points/exchange", h.exchangeCurrencyStub)
 
-	authed.GET("/users/:userID/cosmetics/equipped", h.getUserEquipped)
+	// 参数名必须与 userapi 的 /users/:id 一致，否则 gin 路由树冲突 panic
+	authed.GET("/users/:id/cosmetics/equipped", h.getUserEquipped)
 }
 
 func mountAdmin(group *gin.RouterGroup, h *api, auth gin.HandlerFunc) {
@@ -86,4 +87,6 @@ func mountAdmin(group *gin.RouterGroup, h *api, auth gin.HandlerFunc) {
 
 	admin.POST("/grant", h.adminGrant)
 	admin.POST("/points/grant", h.adminGrantPoints)
+
+	admin.GET("/avatar-frames", h.adminAvatarFrames)
 }

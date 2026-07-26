@@ -17,6 +17,7 @@ import { EmptyState, ErrorState, LoadingState } from "~/components/states"
 import { Button } from "~/components/ui/button"
 import { Input } from "~/components/ui/input"
 import { useAsyncData } from "~/hooks/use-async-data"
+import { useAvatarFrames } from "~/hooks/use-avatar-frames"
 import { useGatewayEvent } from "~/hooks/use-gateway"
 import { useGuildID } from "~/hooks/use-guild-id"
 import {
@@ -69,6 +70,16 @@ export default function MessagesPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const channelRef = useRef(activeChannel)
   channelRef.current = activeChannel
+
+  // 可见消息作者的头像框（bot 作者不查询）
+  const authorIDs = useMemo(
+    () =>
+      messages
+        .filter((message) => !message.author_is_bot && !message.deleted_at)
+        .map((message) => message.author_id),
+    [messages]
+  )
+  const avatarFrames = useAvatarFrames(authorIDs)
 
   const loadLatest = useCallback(async (channel: string, silent = false) => {
     if (!silent) setStatus("loading")
@@ -230,6 +241,11 @@ export default function MessagesPage() {
                     message={message}
                     index={index}
                     memberNames={memberNames}
+                    avatarFrame={
+                      message.author_is_bot
+                        ? undefined
+                        : avatarFrames[message.author_id]
+                    }
                   />
                 ))}
                 {hasMore && (
