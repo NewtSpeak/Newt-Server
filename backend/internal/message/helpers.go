@@ -28,7 +28,9 @@ type service struct {
 	storage     Storage
 	index       SearchIndex
 	searchLimit *userLimiter
-	ids         *snowflakeGen
+	// interactLimit 按钮交互限流（设计文档 2026-07-26）：每用户 2 QPS、突发 5。
+	interactLimit *userLimiter
+	ids           *snowflakeGen
 	currentUser func(*gin.Context) model.User
 	// urlPrefix 响应中 upload_url/download_url 的挂载前缀（如 /api/v1、/gapi/v1）。
 	// 用户端响应绝不能出现 /api/v1 字样（本专项安全要求）。
@@ -83,9 +85,10 @@ func parseMessageIDParam(c *gin.Context) (int64, bool) {
 }
 
 // dmPermissionBits 私信域固定权限（Server-16 BN.2：不参与 RBAC）。
-// 含消息读写/反应/附件；不含 ManageMessages / MentionEveryone（删除仅作者本人）。
+// 含消息读写/反应/附件/交互按钮；不含 ManageMessages / MentionEveryone（删除仅作者本人）。
 const dmPermissionBits = rbac.ViewChannel | rbac.SendMessages | rbac.ReadMessageHistory |
-	rbac.AddReactions | rbac.AttachFiles | rbac.EmbedLinks | rbac.UseExternalEmojis
+	rbac.AddReactions | rbac.AttachFiles | rbac.EmbedLinks | rbac.UseExternalEmojis |
+	rbac.UseApplicationCommands
 
 // channelAccess 按频道 ID 定位所属服并计算调用者的频道权限。
 // 频道不存在 / 不可见（含 Restriction 禁看）一律 404，不泄露存在性。
@@ -284,10 +287,19 @@ func (s *service) messageViews(messages []model.Message, viewer ...uuid.UUID) ([
 		}
 		reactionGroups[row.MessageID] = append(reactionGroups[row.MessageID], summary)
 	}
+	// 差异化按钮裁剪（设计文档 2026-07-26）：仅当 card 含 visible_to 声明时才付出
+	// 解析成本；viewer 角色集一次批查（搜索结果可跨服，按消息 guild 全集查询）。
+	viewerRoles := s.viewerRolesForTrim(messages, viewerID)
 	for _, message := range messages {
 		var card json.RawMessage
 		if message.Card != nil && *message.Card != "" {
 			card = json.RawMessage(*message.Card)
+			if cardNeedsTrim(message.Card) && message.AuthorID != viewerID {
+				if buttons, err := parseCardButtons(*message.Card); err == nil && len(buttons) > 0 {
+					bitmap := buttonVisibilityBitmap(buttons, viewerID, viewerRoles)
+					card = json.RawMessage(trimCardButtons(*message.Card, buttons, bitmap))
+				}
+			}
 		}
 		var stickerItems json.RawMessage
 		if message.StickerItems != nil && *message.StickerItems != "" {
@@ -310,6 +322,40 @@ func (s *service) messageViews(messages []model.Message, viewer ...uuid.UUID) ([
 	return views, nil
 }
 
+// viewerRolesForTrim 为按钮裁剪批量取 viewer 在相关服的角色集合：
+// 仅当批次内存在需裁剪的 card 且 viewer 非空时才查询（角色 UUID 全局唯一，跨服并集安全）。
+func (s *service) viewerRolesForTrim(messages []model.Message, viewerID uuid.UUID) map[uuid.UUID]bool {
+	if viewerID == uuid.Nil {
+		return nil
+	}
+	guildIDs := make([]uuid.UUID, 0, 2)
+	seen := make(map[uuid.UUID]struct{}, 2)
+	for _, message := range messages {
+		if message.GuildID == uuid.Nil || message.AuthorID == viewerID || !cardNeedsTrim(message.Card) {
+			continue
+		}
+		if _, ok := seen[message.GuildID]; !ok {
+			seen[message.GuildID] = struct{}{}
+			guildIDs = append(guildIDs, message.GuildID)
+		}
+	}
+	if len(guildIDs) == 0 {
+		return nil
+	}
+	var roleIDs []uuid.UUID
+	err := s.db.Raw(`SELECT member_roles.role_id FROM members
+		JOIN member_roles ON member_roles.member_id = members.id
+		WHERE members.user_id = ? AND members.guild_id IN ?`, viewerID, guildIDs).Scan(&roleIDs).Error
+	if err != nil {
+		return nil
+	}
+	roles := make(map[uuid.UUID]bool, len(roleIDs))
+	for _, id := range roleIDs {
+		roles[id] = true
+	}
+	return roles
+}
+
 func (s *service) messageViewOne(message model.Message, viewer ...uuid.UUID) (messageView, error) {
 	views, err := s.messageViews([]model.Message{message}, viewer...)
 	if err != nil {
@@ -323,6 +369,45 @@ func (s *service) loadLiveMessage(channelID uuid.UUID, messageID int64) (model.M
 	var message model.Message
 	err := s.db.First(&message, "id = ? AND channel_id = ? AND deleted_at IS NULL", messageID, channelID).Error
 	return message, err
+}
+
+// loadVisibleMessage loadLiveMessage 的 viewer 感知变体：ephemeral 消息对
+// 名单外用户视同不存在（不可见即 404，防泄露存在性）。
+func (s *service) loadVisibleMessage(channelID uuid.UUID, messageID int64, viewer uuid.UUID) (model.Message, error) {
+	message, err := s.loadLiveMessage(channelID, messageID)
+	if err != nil {
+		return message, err
+	}
+	if !ephemeralVisibleTo(message, viewer) {
+		return model.Message{}, gorm.ErrRecordNotFound
+	}
+	return message, nil
+}
+
+// ephemeralVisibleTo ephemeral 可见性判定：公开消息恒可见；否则仅作者与名单内用户。
+func ephemeralVisibleTo(message model.Message, viewer uuid.UUID) bool {
+	if !message.IsEphemeral() {
+		return true
+	}
+	if message.AuthorID == viewer {
+		return true
+	}
+	for _, id := range message.VisibleTo {
+		if id == viewer {
+			return true
+		}
+	}
+	return false
+}
+
+// visibleToScope ephemeral 历史过滤谓词（listMessages / search 共用）：
+// 公开消息 OR 作者本人 OR 名单内用户（jsonb @> 包含判定）。
+func visibleToScope(viewer uuid.UUID) func(*gorm.DB) *gorm.DB {
+	member, _ := json.Marshal([]uuid.UUID{viewer})
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where("(visible_to = '[]'::jsonb OR author_id = ? OR visible_to @> ?::jsonb)",
+			viewer, string(member))
+	}
 }
 
 func isRecordNotFound(err error) bool { return errors.Is(err, gorm.ErrRecordNotFound) }

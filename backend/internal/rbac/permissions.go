@@ -66,7 +66,10 @@ const (
 
 const AllDefined Permission = (1 << 55) - 1
 
-const DefaultEveryone = ViewChannel | SendMessages | ReadMessageHistory | Connect | Speak | ChangeNickname | AddReactions | UseVAD
+// DefaultEveryone 新建服 everyone 角色的初始权限。
+// UseApplicationCommands（bot 交互按钮点击，设计文档 2026-07-26）默认放开；
+// 存量服由启动幂等回填补齐（database.ensureEveryoneInteractionPermission）。
+const DefaultEveryone = ViewChannel | SendMessages | ReadMessageHistory | Connect | Speak | ChangeNickname | AddReactions | UseVAD | UseApplicationCommands
 
 type RolePermissions struct {
 	ID          string

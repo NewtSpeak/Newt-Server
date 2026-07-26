@@ -117,6 +117,9 @@ type SendMessageOptions struct {
 	ReplyToID     string   `json:"reply_to_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	Nonce         string   `json:"nonce,omitempty"`
+	// VisibleToUserIDs ephemeral 白名单（≤20 个 user_id）：
+	// 带此字段即仅名单用户 + bot 自己可见，且不能带附件。
+	VisibleToUserIDs []string `json:"visible_to_user_ids,omitempty"`
 }
 
 // VoiceJoinResult 语音进房结果。
@@ -181,6 +184,15 @@ func (c *Client) SendText(channelID, content string) (*Message, error) {
 // SendCard 发送卡片消息（语法糖）。
 func (c *Client) SendCard(channelID string, card any) (*Message, error) {
 	return c.SendMessage(channelID, SendMessageOptions{Card: card})
+}
+
+// SendEphemeral 发送 ephemeral 消息（语法糖）：仅 userID 与 bot 自己可见；card 可为 nil。
+func (c *Client) SendEphemeral(channelID, userID, content string, card any) (*Message, error) {
+	return c.SendMessage(channelID, SendMessageOptions{
+		Content:          content,
+		Card:             card,
+		VisibleToUserIDs: []string{userID},
+	})
 }
 
 // GetMessages 拉取历史消息。

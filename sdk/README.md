@@ -33,7 +33,8 @@ OwlSpeak 为机器人提供独立的开放 API 平面（`/bot-api/v1`），配�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/channels/{cid}/messages` | 发消息：`{content?, card?, reply_to_id?, attachment_ids?, nonce?}`；`card` 为任意 JSON 对象（≤8KB），可发纯卡片消息 |
+| POST | `/channels/{cid}/messages` | 发消息：`{content?, card?, reply_to_id?, attachment_ids?, nonce?, visible_to_user_ids?}`；`card` 为任意 JSON 对象（≤8KB），可发纯卡片消息；带 `visible_to_user_ids`（≤20）即 ephemeral：仅名单用户 + bot 自己可见，且不能带附件 |
+| POST | `/interactions/{id}/callback` | 回应按钮点击（`{token, type: "ack"\|"reply"\|"update_message", content?, card?, ephemeral?}`，见下） |
 | GET | `/channels/{cid}/messages?before=&after=&limit=` | 拉历史（需 READ_MESSAGE_HISTORY） |
 | PATCH / DELETE | `/channels/{cid}/messages/{mid}` | 编辑 / 删除 |
 | PUT / DELETE | `/channels/{cid}/messages/{mid}/reactions/{emoji}/@me` | 表情反应 |
@@ -81,11 +82,12 @@ S→C DISPATCH {t: 事件名, d: 载荷}
 
 可收到的事件与用户端一致（按频道可见性过滤）：`MESSAGE_CREATE/UPDATE/DELETE`、
 `MESSAGE_REACTION_ADD/REMOVE`、`TYPING_START`、`MESSAGE_STREAM_*`、`VOICE_STATE_UPDATE`、
-`VOICE_CAPS_UPDATE`、`PERMISSIONS_UPDATE` 等。
+`VOICE_CAPS_UPDATE`、`PERMISSIONS_UPDATE` 等；bot 专属事件 `INTERACTION_CREATE`
+（自己消息上的按钮被点击，载荷 `{id, token, guild_id, channel_id, message_id, custom_id, member, expires_at}`）。
 
 ### 卡片（card）载荷约定
 
-服务端只校验「JSON 对象、≤8KB」，渲染 schema 由客户端约定。推荐结构：
+服务端只校验「JSON 对象、≤8KB」（`buttons` 字段除外，见下），渲染 schema 由客户端约定。推荐结构：
 
 ```json
 {
@@ -93,10 +95,50 @@ S→C DISPATCH {t: 事件名, d: 载荷}
   "description": "版本 v1.4.2 已发布到生产环境",
   "color": "#22c55e",
   "fields": [{ "name": "耗时", "value": "42s", "inline": true }],
-  "buttons": [{ "label": "查看日志", "url": "https://..." }],
+  "buttons": [
+    { "label": "查看日志", "url": "https://ci.example.com/run/42" },
+    { "label": "批准", "custom_id": "approve:42", "style": "success" },
+    { "label": "拒绝", "custom_id": "reject:42", "style": "danger", "row": 1 }
+  ],
   "footer": "CI Bot"
 }
 ```
+
+`card.buttons` 元素 schema（服务端校验，每消息 ≤25 个按钮；旧 `{label, url}` 兼容）：
+
+| 字段 | 说明 |
+|---|---|
+| `label` | 必填，1-40 字 |
+| `url` / `custom_id` | 二选一互斥、必居其一；`custom_id` 消息内唯一，字符集 `[A-Za-z0-9_\-:.]`，1-64 字符，点击触发 `INTERACTION_CREATE` |
+| `style` | `primary` / `secondary`（缺省）/ `success` / `danger` |
+| `size` | `xs` / `sm`（缺省）/ `md` / `lg` |
+| `disabled` | bool，可选 |
+| `row` | 0-4，可选 |
+| `visible_to` | 可选；`{users: [uuid]≤20, roles: [uuid]≤10}` 按钮级可见性 |
+
+### 按钮交互与 ephemeral（Owl 扩展）
+
+用户点击 `custom_id` 按钮后，bot 的 Gateway 连接收到 `INTERACTION_CREATE`，须在 15 分钟内
+携带载荷中的一次性 `token` 调 `POST /interactions/{id}/callback` 回应：
+`ack`（仅确认，之后仍可再 reply/update 一次）、`reply`（原频道发新消息，`ephemeral` 缺省 true 仅点击者可见）
+或 `update_message`（更新原消息 card/content）。错误：404（token 不符/非本 bot）、
+410 `INTERACTION_EXPIRED`、409 `ALREADY_RESPONDED`。
+
+```js
+// JavaScript SDK
+await bot.sendCard(channelId, {
+  title: "发布 v1.4.2？",
+  buttons: [{ label: "批准", custom_id: "approve:42", style: "success" }],
+})
+await bot.sendEphemeral(channelId, userId, "只有你能看到这条提示")
+
+const gw = bot.connectGateway()
+gw.on("interaction", async (interaction) => {
+  await interaction.updateMessage({ card: { title: "已批准 ✅" } })
+})
+```
+
+完整协议（含各语言等价 API）见 OwlBotSdk 仓库 `docs/API.md` 的 Interactions 章节。
 
 ## 管理 API（后台 `/api/v1`，管理员 JWT）
 

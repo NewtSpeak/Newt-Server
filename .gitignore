@@ -12,3 +12,7 @@ backend/tmp/
 # 环境变量（示例文件 .env.example 保留）
 .env
 backend/.env
+
+# Python 字节码缓存（sdk 镜像）
+__pycache__/
+*.pyc

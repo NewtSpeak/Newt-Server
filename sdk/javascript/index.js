@@ -71,21 +71,34 @@ export class OwlBotClient {
   /**
    * 发送消息。
    * @param {string} channelId
-   * @param {{ content?: string, card?: object, replyToId?: string, attachmentIds?: string[], nonce?: string }} message
+   * @param {{ content?: string, card?: object, replyToId?: string, attachmentIds?: string[], nonce?: string, visibleToUserIds?: string[] }} message
+   *   visibleToUserIds：ephemeral 白名单（≤20 个 user_id）；带此字段即仅名单用户 + bot 自己可见，且不能带附件。
    */
-  sendMessage(channelId, { content, card, replyToId, attachmentIds, nonce } = {}) {
+  sendMessage(channelId, { content, card, replyToId, attachmentIds, nonce, visibleToUserIds } = {}) {
     return this.request("POST", `/channels/${channelId}/messages`, {
       content,
       card,
       reply_to_id: replyToId,
       attachment_ids: attachmentIds,
       nonce: nonce ?? crypto.randomUUID(),
+      visible_to_user_ids: visibleToUserIds,
     })
   }
 
   /** 发送卡片消息（语法糖）。 */
   sendCard(channelId, card, options = {}) {
     return this.sendMessage(channelId, { ...options, card })
+  }
+
+  /**
+   * 发送 ephemeral 消息（语法糖）：仅 userId 与 bot 自己可见。
+   * @param {string} channelId
+   * @param {string} userId
+   * @param {string} content
+   * @param {{ card?: object }} [options]
+   */
+  sendEphemeral(channelId, userId, content, { card } = {}) {
+    return this.sendMessage(channelId, { content, card, visibleToUserIds: [userId] })
   }
 
   getMessages(channelId, { before, after, limit } = {}) {
@@ -183,10 +196,70 @@ export class OwlBotClient {
    * 连接 Gateway 订阅实时事件，返回 BotGateway（EventTarget 风格）：
    *   const gw = bot.connectGateway()
    *   gw.on("MESSAGE_CREATE", message => { ... })
+   *   gw.on("interaction", interaction => { ... })  // 按钮点击（Interaction 包装）
    *   gw.on("ready", data => { ... })
    */
   connectGateway() {
-    return new BotGateway(this.apiBase, this.token)
+    return new BotGateway(this.apiBase, this.token, this)
+  }
+}
+
+/**
+ * 按钮点击交互（Gateway INTERACTION_CREATE 载荷包装）。
+ * 通过 gw.on("interaction", handler) 获取；15 分钟内需用一次性 token 回应：
+ *   ack() 仅确认（按钮停止转圈）；之后仍可再 reply/updateMessage 一次（defer 模式）
+ *   reply() 以 bot 身份在原频道发新消息，默认 ephemeral（仅点击者可见）
+ *   updateMessage() 更新原消息的 card 和/或 content
+ * 服务端错误：404（token 不符/非本 bot）、410 INTERACTION_EXPIRED、409 ALREADY_RESPONDED。
+ */
+export class Interaction {
+  constructor(client, payload) {
+    this.client = client
+    this.raw = payload
+    this.id = payload.id
+    this.token = payload.token
+    this.guildId = payload.guild_id
+    this.channelId = payload.channel_id
+    this.messageId = payload.message_id
+    this.customId = payload.custom_id
+    this.member = payload.member
+    this.expiresAt = payload.expires_at
+  }
+
+  /** 仅确认，让用户按钮停止转圈；之后仍可再 reply / updateMessage 一次。 */
+  ack() {
+    return this.client.request("POST", `/interactions/${this.id}/callback`, {
+      token: this.token,
+      type: "ack",
+    })
+  }
+
+  /**
+   * 以 bot 身份在原频道回复；ephemeral 缺省 true（仅点击者可见）。返回新消息对象。
+   * @param {string} content
+   * @param {{ card?: object, ephemeral?: boolean }} [options]
+   */
+  reply(content, { card, ephemeral } = {}) {
+    return this.client.request("POST", `/interactions/${this.id}/callback`, {
+      token: this.token,
+      type: "reply",
+      content,
+      card,
+      ephemeral: ephemeral ?? true,
+    })
+  }
+
+  /**
+   * 更新原消息的 card 和/或 content。
+   * @param {{ content?: string, card?: object }} [options]
+   */
+  updateMessage({ content, card } = {}) {
+    return this.client.request("POST", `/interactions/${this.id}/callback`, {
+      token: this.token,
+      type: "update_message",
+      content,
+      card,
+    })
   }
 }
 
@@ -221,16 +294,17 @@ export class MessageStream {
 
 /** Gateway 连接：HELLO/IDENTIFY/HEARTBEAT 自动处理，断线指数退避重连。 */
 export class BotGateway {
-  constructor(apiBase, token) {
+  constructor(apiBase, token, client) {
     this.wsUrl = apiBase.replace(/^http/, "ws") + "/gateway"
     this.token = token
+    this.client = client
     this.handlers = new Map()
     this.closed = false
     this.backoffMs = 1000
     this._connect()
   }
 
-  /** 订阅事件：事件名（如 MESSAGE_CREATE）或内置 "ready" / "close"。 */
+  /** 订阅事件：事件名（如 MESSAGE_CREATE）、包装事件 "interaction" 或内置 "ready" / "close"。 */
   on(event, handler) {
     if (!this.handlers.has(event)) this.handlers.set(event, [])
     this.handlers.get(event).push(handler)
@@ -273,6 +347,10 @@ export class BotGateway {
           break
         case "DISPATCH":
           this._emit(frame.t, frame.d)
+          // 按钮点击：包装成 Interaction 再派发 "interaction" 事件
+          if (frame.t === "INTERACTION_CREATE" && this.client) {
+            this._emit("interaction", new Interaction(this.client, frame.d))
+          }
           break
       }
     }

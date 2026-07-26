@@ -10,9 +10,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/activity"
 	"github.com/owlspeak/owl-server/backend/internal/audit"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/owlspeak/owl-server/backend/internal/perms"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/sticker"
 	"gorm.io/gorm"
@@ -36,7 +38,13 @@ type createMessageRequest struct {
 	// StickerItems 贴图消息（docs 17）：长度必须为 1；与正文/附件/卡片互斥。
 	// 每项至少提供 item_id；pack_id/mark 由服务端按权威数据回填。
 	StickerItems []stickerItemInput `json:"sticker_items"`
+	// VisibleToUserIDs ephemeral 定向可见名单（bot 专项，设计文档 2026-07-26）：
+	// 非空即 ephemeral——仅名单用户 + 作者可见；≤20 人、仅 bot 可用、禁止携带附件。
+	VisibleToUserIDs []string `json:"visible_to_user_ids"`
 }
+
+// maxEphemeralTargets ephemeral 可见名单人数上限。
+const maxEphemeralTargets = 20
 
 // stickerItemInput 发送贴图时的客户端引用。
 type stickerItemInput struct {
@@ -87,7 +95,7 @@ func (s *service) createMessage(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
-	card, err := validateCard(input.Card)
+	card, _, err := validateCard(input.Card)
 	if err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_CARD", err.Error())
 		return
@@ -110,13 +118,20 @@ func (s *service) createMessage(c *gin.Context) {
 	user := s.currentUser(c)
 	now := time.Now().UTC()
 
+	// ephemeral 定向可见校验（设计文档 2026-07-26）：仅 bot、≤20 人、禁附件、
+	// 目标必须可见该频道（防越权塞消息）。
+	visibleTo, ok := s.resolveVisibleTo(c, user, channel, input.VisibleToUserIDs, len(input.AttachmentIDs))
+	if !ok {
+		return
+	}
+
 	// nonce 幂等（AR.6）：短窗口内同 channel+author+nonce 直接返回原消息，不重复落库。
 	if input.Nonce != "" {
 		var existing model.Message
 		err := s.db.Where("channel_id = ? AND author_id = ? AND nonce = ? AND deleted_at IS NULL", channel.ID, user.ID, input.Nonce).
 			Order("id DESC").First(&existing).Error
 		if err == nil && nonceDuplicate(existing.CreatedAt, now) {
-			view, viewErr := s.messageViewOne(existing)
+			view, viewErr := s.messageViewOne(existing, user.ID)
 			if viewErr != nil {
 				fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
 				return
@@ -126,7 +141,8 @@ func (s *service) createMessage(c *gin.Context) {
 		}
 	}
 
-	// 单层回复（AP.6）：只校验被回复消息存在于同频道，不限制其本身是否为回复。
+	// 单层回复（AP.6）：只校验被回复消息存在于同频道，不限制其本身是否为回复；
+	// ephemeral 消息禁止被回复（公开引用他人不可见消息会破坏语义，对齐 Discord）。
 	var replyToID *int64
 	if input.ReplyToID != "" {
 		parsed, err := strconv.ParseInt(input.ReplyToID, 10, 64)
@@ -134,8 +150,13 @@ func (s *service) createMessage(c *gin.Context) {
 			fail(c, http.StatusBadRequest, "INVALID_REPLY", "reply_to_id 非法")
 			return
 		}
-		if _, err := s.loadLiveMessage(channel.ID, parsed); err != nil {
+		replied, err := s.loadLiveMessage(channel.ID, parsed)
+		if err != nil {
 			fail(c, http.StatusBadRequest, "INVALID_REPLY", "被回复的消息不存在")
+			return
+		}
+		if replied.IsEphemeral() {
+			fail(c, http.StatusBadRequest, "INVALID_REPLY", "不能回复定向可见消息")
 			return
 		}
 		replyToID = &parsed
@@ -223,6 +244,7 @@ func (s *service) createMessage(c *gin.Context) {
 		MentionRoles:    mentions.Roles,
 		MentionEveryone: mentions.Everyone,
 		StickerItems:    stickerItemsJSON,
+		VisibleTo:       visibleTo,
 		CreatedAt:       now,
 	}
 	if card != "" {
@@ -266,7 +288,81 @@ func (s *service) createMessage(c *gin.Context) {
 	// 为被提及者（在线与离线）批量递增其该频道 mention_count（可见性过滤，docs 15 FR-04）。
 	s.bumpMentionCounts(message)
 	s.index.IndexMessage(message.ID)
+	// 活跃度累计（bot 与 30s 限流由 activity 内部处理）。
+	activity.TrackMessage(user)
+	// 含差异化按钮时，REST 响应对作者重建全量视图（广播用 view 已做安全裁剪）。
+	if cardNeedsTrim(message.Card) {
+		if authorView, viewErr := s.messageViewOne(message, user.ID); viewErr == nil {
+			view = authorView
+		}
+	}
 	c.JSON(http.StatusCreated, view)
+}
+
+// resolveVisibleTo 解析并校验 ephemeral 定向可见名单（空名单 = 普通公开消息）。
+// 校验失败时已写入错误响应，返回 (nil, false)。
+func (s *service) resolveVisibleTo(c *gin.Context, user model.User, channel model.Channel, raw []string, attachmentCount int) (model.UUIDList, bool) {
+	if len(raw) == 0 {
+		return model.UUIDList{}, true
+	}
+	if !user.IsBot {
+		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "仅机器人可发送定向可见消息")
+		return nil, false
+	}
+	if attachmentCount > 0 {
+		fail(c, http.StatusBadRequest, "INVALID_VISIBLE_TO", "定向可见消息禁止携带附件")
+		return nil, false
+	}
+	if len(raw) > maxEphemeralTargets {
+		fail(c, http.StatusBadRequest, "INVALID_VISIBLE_TO",
+			fmt.Sprintf("visible_to_user_ids 超过上限 %d", maxEphemeralTargets))
+		return nil, false
+	}
+	targets := make(model.UUIDList, 0, len(raw))
+	seen := make(map[uuid.UUID]struct{}, len(raw))
+	for _, item := range raw {
+		id, err := uuid.Parse(item)
+		if err != nil {
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_TO", "visible_to_user_ids 含非法 ID")
+			return nil, false
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		targets = append(targets, id)
+	}
+	// 目标可见性：DM 要求 ∈ recipients；服频道要求成员且可见该频道
+	//（防 bot 把消息「塞给」无频道权限的人造成越权可见）。
+	if channel.Type.IsPrivate() {
+		recipients := make(map[uuid.UUID]struct{})
+		for _, id := range s.loadDMRecipientIDs(channel.ID) {
+			recipients[id] = struct{}{}
+		}
+		for _, id := range targets {
+			if _, ok := recipients[id]; !ok {
+				fail(c, http.StatusBadRequest, "INVALID_VISIBLE_TO", "目标用户不在本私信频道内")
+				return nil, false
+			}
+		}
+		return targets, true
+	}
+	var users []model.User
+	if err := s.db.Where("id IN ?", []uuid.UUID(targets)).Find(&users).Error; err != nil {
+		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取目标用户失败")
+		return nil, false
+	}
+	if len(users) != len(targets) {
+		fail(c, http.StatusBadRequest, "INVALID_VISIBLE_TO", "目标用户不存在")
+		return nil, false
+	}
+	for _, target := range users {
+		if !perms.CanSeeChannel(s.db, target, channel.GuildID, channel.ID) {
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_TO", "目标用户不可见该频道")
+			return nil, false
+		}
+	}
+	return targets, true
 }
 
 var errAttachmentBind = fmt.Errorf("附件绑定校验失败")
@@ -318,7 +414,9 @@ func (s *service) listMessages(c *gin.Context) {
 		}
 		limit = parsed
 	}
-	query := s.db.Where("channel_id = ? AND deleted_at IS NULL", channel.ID)
+	// ephemeral 历史过滤：公开消息 OR 本人为作者 OR 本人在可见名单内。
+	query := s.db.Scopes(visibleToScope(s.currentUser(c).ID)).
+		Where("channel_id = ? AND deleted_at IS NULL", channel.ID)
 	for _, cursor := range []struct {
 		name string
 		op   string
@@ -364,7 +462,7 @@ func (s *service) getMessage(c *gin.Context) {
 		notFound(c)
 		return
 	}
-	message, err := s.loadLiveMessage(channel.ID, messageID)
+	message, err := s.loadVisibleMessage(channel.ID, messageID, s.currentUser(c).ID)
 	if err != nil {
 		notFound(c)
 		return
@@ -397,12 +495,12 @@ func (s *service) editMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	message, err := s.loadLiveMessage(channel.ID, messageID)
+	user := s.currentUser(c)
+	message, err := s.loadVisibleMessage(channel.ID, messageID, user.ID)
 	if err != nil {
 		notFound(c)
 		return
 	}
-	user := s.currentUser(c)
 	if message.AuthorID != user.ID {
 		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "仅作者可编辑消息正文")
 		return
@@ -472,6 +570,12 @@ func (s *service) editMessage(c *gin.Context) {
 	}
 	s.publishMessageEvent(eventbus.EventMessageUpdate, message, view)
 	s.index.IndexMessage(message.ID)
+	// 含差异化按钮时，REST 响应对作者重建全量视图（编辑仅作者可达）。
+	if cardNeedsTrim(message.Card) {
+		if authorView, viewErr := s.messageViewOne(message, user.ID); viewErr == nil {
+			view = authorView
+		}
+	}
 	c.JSON(http.StatusOK, view)
 }
 
@@ -489,12 +593,12 @@ func (s *service) deleteMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	message, err := s.loadLiveMessage(channel.ID, messageID)
+	user := s.currentUser(c)
+	message, err := s.loadVisibleMessage(channel.ID, messageID, user.ID)
 	if err != nil {
 		notFound(c)
 		return
 	}
-	user := s.currentUser(c)
 	isAuthor := message.AuthorID == user.ID
 	if !isAuthor && !rbac.Has(bits, rbac.ManageMessages) {
 		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "缺少删除他人消息权限")
@@ -515,11 +619,17 @@ func (s *service) deleteMessage(c *gin.Context) {
 			})
 		}
 	}
-	s.publishChannelScopedEvent(eventbus.EventMessageDelete, message.GuildID, message.ChannelID, gin.H{
+	deletePayload := gin.H{
 		"id":         strconv.FormatInt(message.ID, 10),
 		"channel_id": message.ChannelID,
 		"guild_id":   message.GuildID,
-	})
+	}
+	if message.IsEphemeral() {
+		// ephemeral 删除事件仅定向可见名单（其他人本就不知道这条消息的存在）。
+		s.publishEphemeralScopedEvent(eventbus.EventMessageDelete, message, deletePayload)
+	} else {
+		s.publishChannelScopedEvent(eventbus.EventMessageDelete, message.GuildID, message.ChannelID, deletePayload)
+	}
 	s.index.RemoveMessage(message.ID)
 	c.Status(http.StatusNoContent)
 }
@@ -539,12 +649,12 @@ func (s *service) listEdits(c *gin.Context) {
 	if !ok {
 		return
 	}
-	message, err := s.loadLiveMessage(channel.ID, messageID)
+	user := s.currentUser(c)
+	message, err := s.loadVisibleMessage(channel.ID, messageID, user.ID)
 	if err != nil {
 		notFound(c)
 		return
 	}
-	user := s.currentUser(c)
 	isSysAdmin := ctx != nil && ctx.SystemAdmin
 	if message.AuthorID != user.ID && !rbac.Has(bits, rbac.ManageMessages) && !isSysAdmin {
 		notFound(c)
@@ -558,10 +668,20 @@ func (s *service) listEdits(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"edits": edits, "edit_count": message.EditCount})
 }
 
-// publishMessageEvent 广播消息事件；Gateway 按 GuildID+ChannelID 做频道可见性过滤后下发。
-// 私信域（GuildID=Nil）改为按 recipients 定向 UserIDs 推送。
+// publishMessageEvent 消息事件分发三分支（设计文档 2026-07-26）：
+//  1. ephemeral → 仅定向可见名单 ∪ 作者（按接收者裁剪差异化按钮）；
+//  2. 含差异化按钮（card.buttons 有 visible_to）→ 按「按钮可见位图」分组，
+//     每组裁剪一次 card、定向推送一次（绕开 hub 单次序列化限制）；
+//  3. 其余 → 原 guild+channel 广播 / DM recipients 定向（零额外成本）。
 func (s *service) publishMessageEvent(eventType string, message model.Message, view messageView) {
-	s.publishChannelScopedEvent(eventType, message.GuildID, message.ChannelID, view)
+	switch {
+	case message.IsEphemeral():
+		s.publishEphemeralMessageEvent(eventType, message, view)
+	case cardNeedsTrim(message.Card):
+		s.publishGroupedMessageEvent(eventType, message, view)
+	default:
+		s.publishChannelScopedEvent(eventType, message.GuildID, message.ChannelID, view)
+	}
 }
 
 // publishChannelScopedEvent 服频道走 Guild+Channel 广播；私信走 recipients 定向。

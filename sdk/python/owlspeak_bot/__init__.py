@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, AsyncIterator, Callable, Dict, Iterable, List, Optional
 
-__all__ = ["OwlBotClient", "OwlBotError", "MessageStream", "run_gateway"]
+__all__ = ["OwlBotClient", "OwlBotError", "MessageStream", "Interaction", "run_gateway"]
 
 
 class OwlBotError(Exception):
@@ -65,6 +65,61 @@ class MessageStream:
     def __exit__(self, exc_type, exc, tb) -> None:
         if not self.ended:
             self.end()
+
+
+class Interaction:
+    """按钮点击交互（Gateway ``INTERACTION_CREATE`` 载荷包装）。
+
+    15 分钟内需用一次性 token 回应：
+
+    - ``ack()`` 仅确认（用户按钮停止转圈）；之后仍可再 reply/update_message 一次（defer 模式）
+    - ``reply()`` 以 bot 身份在原频道发新消息，缺省 ephemeral（仅点击者可见）
+    - ``update_message()`` 更新原消息的 card 和/或 content
+
+    服务端错误：404（token 不符/非本 bot）、410 INTERACTION_EXPIRED、409 ALREADY_RESPONDED。
+    """
+
+    def __init__(self, client: "OwlBotClient", payload: Dict[str, Any]):
+        self._client = client
+        self.raw = payload
+        self.id = str(payload.get("id", ""))
+        self.token = payload.get("token", "")
+        self.guild_id = payload.get("guild_id", "")
+        self.channel_id = payload.get("channel_id", "")
+        self.message_id = str(payload.get("message_id", ""))
+        self.custom_id = payload.get("custom_id", "")
+        self.member = payload.get("member") or {}
+        self.expires_at = payload.get("expires_at", "")
+
+    def _callback(self, body: Dict[str, Any]) -> Any:
+        body["token"] = self.token
+        return self._client._request("POST", f"/interactions/{self.id}/callback", body)
+
+    def ack(self) -> None:
+        """仅确认，让用户按钮停止转圈；之后仍可再 reply / update_message 一次。"""
+        self._callback({"type": "ack"})
+
+    def reply(
+        self, content: Optional[str] = None, *, card: Optional[Dict[str, Any]] = None, ephemeral: bool = True
+    ) -> Dict[str, Any]:
+        """以 bot 身份在原频道回复；ephemeral 缺省 True（仅点击者可见）。返回新消息对象。"""
+        body: Dict[str, Any] = {"type": "reply", "ephemeral": ephemeral}
+        if content is not None:
+            body["content"] = content
+        if card is not None:
+            body["card"] = card
+        return self._callback(body)
+
+    def update_message(
+        self, content: Optional[str] = None, *, card: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """更新原消息的 card 和/或 content。"""
+        body: Dict[str, Any] = {"type": "update_message"}
+        if content is not None:
+            body["content"] = content
+        if card is not None:
+            body["card"] = card
+        return self._callback(body)
 
 
 class OwlBotClient:
@@ -126,21 +181,32 @@ class OwlBotClient:
         reply_to_id: Optional[str] = None,
         attachment_ids: Optional[Iterable[str]] = None,
         nonce: Optional[str] = None,
+        visible_to_user_ids: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
-        return self._request(
-            "POST",
-            f"/channels/{channel_id}/messages",
-            {
-                "content": content or "",
-                "card": card,
-                "reply_to_id": reply_to_id or "",
-                "attachment_ids": list(attachment_ids or []),
-                "nonce": nonce or uuid.uuid4().hex,
-            },
-        )
+        """发送消息。
+
+        visible_to_user_ids：ephemeral 白名单（≤20 个 user_id）；
+        带此字段即仅名单用户 + bot 自己可见，且不能带附件。
+        """
+        body: Dict[str, Any] = {
+            "content": content or "",
+            "card": card,
+            "reply_to_id": reply_to_id or "",
+            "attachment_ids": list(attachment_ids or []),
+            "nonce": nonce or uuid.uuid4().hex,
+        }
+        if visible_to_user_ids is not None:
+            body["visible_to_user_ids"] = list(visible_to_user_ids)
+        return self._request("POST", f"/channels/{channel_id}/messages", body)
 
     def send_card(self, channel_id: str, card: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
         return self.send_message(channel_id, card=card, **kwargs)
+
+    def send_ephemeral(
+        self, channel_id: str, user_id: str, content: Optional[str] = None, *, card: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """发送 ephemeral 消息（语法糖）：仅 user_id 与 bot 自己可见。"""
+        return self.send_message(channel_id, content, card=card, visible_to_user_ids=[user_id])
 
     def get_messages(
         self, channel_id: str, *, before: Optional[str] = None, after: Optional[str] = None, limit: Optional[int] = None
@@ -233,6 +299,9 @@ async def run_gateway(
 
     需要可选依赖 websockets（pip install owlspeak-bot[gateway]）。
     on_event 可为普通函数或协程；内置事件 "READY" 也会回调。
+    按钮点击（INTERACTION_CREATE）除原始事件外，还会以包装事件
+    ``on_event("interaction", Interaction)`` 再次回调，可直接
+    ``interaction.ack()`` / ``reply()`` / ``update_message()``。
     """
     try:
         import websockets
@@ -263,9 +332,15 @@ async def run_gateway(
                         if asyncio.iscoroutine(result):
                             await result
                     elif op == "DISPATCH":
-                        result = on_event(frame.get("t", ""), frame.get("d"))
+                        event_type = frame.get("t", "")
+                        payload = frame.get("d")
+                        result = on_event(event_type, payload)
                         if asyncio.iscoroutine(result):
                             await result
+                        if event_type == "INTERACTION_CREATE" and isinstance(payload, dict):
+                            result = on_event("interaction", Interaction(client, payload))
+                            if asyncio.iscoroutine(result):
+                                await result
                 if heartbeat_task:
                     heartbeat_task.cancel()
         except asyncio.CancelledError:

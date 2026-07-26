@@ -5,6 +5,7 @@ import (
 
 	"github.com/owlspeak/owl-server/backend/internal/guildseed"
 	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/plugin/opentelemetry/tracing"
@@ -30,7 +31,21 @@ func Open(databaseURL string) (*gorm.DB, error) {
 	if err := guildseed.EnsureManagedAdminRoles(db); err != nil {
 		return nil, fmt.Errorf("回填内置管理员角色: %w", err)
 	}
+	// 存量回填：everyone 角色补 USE_APPLICATION_COMMANDS（bot 交互按钮，
+	// 设计文档 2026-07-26）。该位此前无任何使用点，不存在管理员刻意关闭的情形，
+	// 幂等 OR 回填安全。
+	if err := ensureEveryoneInteractionPermission(db); err != nil {
+		return nil, fmt.Errorf("回填交互组件权限: %w", err)
+	}
 	return db, nil
+}
+
+func ensureEveryoneInteractionPermission(db *gorm.DB) error {
+	bit := int64(rbac.UseApplicationCommands)
+	return db.Exec(
+		"UPDATE roles SET permissions = permissions | ? WHERE is_everyone = true AND permissions & ? = 0",
+		bit, bit,
+	).Error
 }
 
 func ensureFirstUserSystemAdmin(db *gorm.DB) error {

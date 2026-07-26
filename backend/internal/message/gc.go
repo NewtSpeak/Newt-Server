@@ -37,6 +37,7 @@ func (s *service) runGCOnce() {
 	s.gcUnboundAttachments(now)
 	s.gcDeletedMessageAttachments(now)
 	s.gcStaleStreams(now)
+	s.gcExpiredInteractions(now)
 	s.applyRetention(now)
 }
 

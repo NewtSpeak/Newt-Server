@@ -54,6 +54,32 @@ func main() {
 }
 ```
 
+## 按钮交互与 ephemeral
+
+```go
+// 1. 发带交互按钮的卡片（custom_id 触发 INTERACTION_CREATE；url 为链接按钮）
+_, _ = bot.SendCard(channelID, map[string]any{
+	"title": "发布 v1.4.2？",
+	"buttons": []map[string]any{
+		{"label": "批准", "custom_id": "approve:42", "style": "success"},
+		{"label": "查看日志", "url": "https://ci.example.com/run/42"},
+	},
+})
+
+// 2. ephemeral 消息：仅指定用户 + bot 自己可见（card 可为 nil）
+_, _ = bot.SendEphemeral(channelID, userID, "只有你能看到这条提示", nil)
+
+// 3. 处理按钮点击（15 分钟内回应；Reply 缺省 ephemeral）
+gw.OnInteraction(func(interaction *owlbot.Interaction) {
+	if interaction.CustomID == "approve:42" {
+		_ = interaction.UpdateMessage("", map[string]any{"title": "已批准 ✅"})
+	} else {
+		_, _ = interaction.ReplyText("已驳回") // 仅点击者可见
+	}
+	// 耗时任务可先 interaction.Ack()，稍后再 Reply / UpdateMessage 一次（defer 模式）
+})
+```
+
 ## 语音接入
 
 ```go

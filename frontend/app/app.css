@@ -25,6 +25,8 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -64,6 +66,9 @@
     --accent: oklch(0.966 0.005 106.5);
     --accent-foreground: oklch(0.228 0.013 107.4);
     --destructive: oklch(0.577 0.245 27.325);
+    /* success：确认类交互按钮（bot 卡片 style=success 等），与 Owl-Desktop 同值 */
+    --success: oklch(0.627 0.194 149.214);
+    --success-foreground: oklch(0.985 0 0);
     --border: oklch(0.93 0.007 106.5);
     --input: oklch(0.93 0.007 106.5);
     --ring: oklch(0.737 0.021 106.9);
@@ -99,6 +104,8 @@
     --accent: oklch(0.286 0.016 107.4);
     --accent-foreground: oklch(0.988 0.003 106.5);
     --destructive: oklch(0.704 0.191 22.216);
+    --success: oklch(0.723 0.219 149.579);
+    --success-foreground: oklch(0.266 0.065 152.934);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.58 0.031 107.3);
@@ -298,10 +305,71 @@
   animation-iteration-count: infinite;
 }
 
+/* 部署步骤条：active 圆点低频呼吸。只改 ring 颜色的 alpha，不动 scale 与位移——
+   2.4s 周期远低于人眼周边视觉的敏感区间，盯着看能察觉、余光里几乎不存在。 */
+@keyframes owl-step-breathe {
+  from {
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 30%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 62%, transparent);
+  }
+}
+.step-breathe {
+  animation: owl-step-breathe 2400ms cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+}
+
+/* 日志新行入场：仅在少量追加时启用（刷屏时由组件跳过）。
+   刻意不加 blur —— 12px 等宽字体上的模糊等于动画期间不可读。 */
+@keyframes owl-log-line-in {
+  from {
+    opacity: 0;
+    translate: 0 2px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+.log-line-in {
+  animation: owl-log-line-in 140ms var(--page-fade-ease) both;
+}
+
+/* 日志「输出中」细线的流光 */
+@keyframes owl-log-shimmer {
+  from {
+    translate: -60% 0;
+  }
+  to {
+    translate: 260% 0;
+  }
+}
+.log-shimmer {
+  animation: owl-log-shimmer 1600ms linear infinite;
+}
+
+/* ---- bot 卡片交互按钮（设计文档 2026-07-26，对齐 Owl-Desktop） ---- */
+
+/* pending→acked/responded：spinner 原位换 check 的弹性 pop */
+@keyframes t-card-check-pop {
+  from {
+    opacity: 0;
+    scale: 0.5;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+.t-card-check {
+  animation: t-card-check-pop 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-item,
   .t-text-swap,
-  .t-number-pop {
+  .t-number-pop,
+  .t-card-check {
     animation: none;
   }
   .t-icon-swap > * {
@@ -309,5 +377,29 @@
   }
   .name-gradient-animated {
     animation: none;
+  }
+  .step-breathe,
+  .log-line-in,
+  .log-shimmer {
+    animation: none;
+  }
+  /* 保留终态，去掉过程：步骤连接线、进度条填充、折叠面板高度 */
+  [data-slot="step-connector-fill"],
+  [data-slot="deploy-progress-fill"],
+  [data-slot="collapsible-content"] {
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Windows 高对比度模式会抹掉 ring 与 box-shadow，
+   给依赖它们表达状态的元素补上实体边框。 */
+@media (forced-colors: active) {
+  [data-slot="step-dot"] {
+    border: 1px solid CanvasText;
+  }
+  [data-level="warn"],
+  [data-level="error"] {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
   }
 }

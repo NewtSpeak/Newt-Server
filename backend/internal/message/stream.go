@@ -188,7 +188,7 @@ func (s *service) endStream(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
-	card, err := validateCard(input.Card)
+	card, _, err := validateCard(input.Card)
 	if err != nil {
 		fail(c, http.StatusBadRequest, "INVALID_CARD", err.Error())
 		return

@@ -316,6 +316,21 @@ func (s *service) bumpMentionCounts(message model.Message) {
 		log.Printf("message: 计算提及接收者失败（message=%d）: %v", message.ID, err)
 		return
 	}
+	// ephemeral：仅可见名单内的被提及者计数（名单外用户收不到消息事件，
+	// 若仍加角标会形成永远消不掉的幽灵计数 + 存在性泄露）。
+	if message.IsEphemeral() {
+		allowed := make(map[uuid.UUID]struct{}, len(message.VisibleTo))
+		for _, id := range message.VisibleTo {
+			allowed[id] = struct{}{}
+		}
+		filtered := recipients[:0]
+		for _, id := range recipients {
+			if _, ok := allowed[id]; ok {
+				filtered = append(filtered, id)
+			}
+		}
+		recipients = filtered
+	}
 	if len(recipients) == 0 {
 		return
 	}

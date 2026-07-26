@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react"
 import { useOutletContext } from "react-router"
 import { HashIcon, HistoryIcon, SendIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -12,7 +19,16 @@ import { Input } from "~/components/ui/input"
 import { useAsyncData } from "~/hooks/use-async-data"
 import { useGatewayEvent } from "~/hooks/use-gateway"
 import { useGuildID } from "~/hooks/use-guild-id"
-import { listChannels, listMessages, sendMessage, type Channel, type Message } from "~/lib/api"
+import {
+  listChannels,
+  listMembers,
+  listMessages,
+  memberName,
+  sendMessage,
+  type Channel,
+  type GuildMember,
+  type Message,
+} from "~/lib/api"
 import type { ConsoleContext } from "~/lib/console-context"
 
 const PAGE_SIZE = 50
@@ -22,13 +38,32 @@ export default function MessagesPage() {
   const [guildID, setGuildID] = useGuildID(guilds)
   const [channelID, setChannelID] = useState<string | null>(null)
 
-  const channels = useAsyncData<Channel[]>(guildID ? () => listChannels(guildID) : null, [guildID])
-  const textChannels = useMemo(() => (channels.data ?? []).filter(channel => channel.type === "TEXT"), [channels.data])
+  const channels = useAsyncData<Channel[]>(
+    guildID ? () => listChannels(guildID) : null,
+    [guildID]
+  )
+  const textChannels = useMemo(
+    () => (channels.data ?? []).filter((channel) => channel.type === "TEXT"),
+    [channels.data]
+  )
+  // 成员名映射：ephemeral「仅 @xxx 可见」显示名字（加载失败静默回退 uuid 前 8 位）
+  const members = useAsyncData<GuildMember[]>(
+    guildID ? () => listMembers(guildID) : null,
+    [guildID]
+  )
+  const memberNames = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const member of members.data ?? [])
+      map[member.user_id] = memberName(member)
+    return map
+  }, [members.data])
   const activeChannel = channelID ?? textChannels[0]?.id ?? null
 
   // 消息流手动管理：支持「加载更早」游标分页与实时追加
   const [messages, setMessages] = useState<Message[]>([])
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
+  const [status, setStatus] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle")
   const [error, setError] = useState("")
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -60,18 +95,28 @@ export default function MessagesPage() {
     loadLatest(activeChannel)
   }, [activeChannel, loadLatest])
 
-  useGatewayEvent(["MESSAGE_CREATE", "MESSAGE_UPDATE", "MESSAGE_DELETE"], payload => {
-    const data = payload as { channel_id?: string } | undefined
-    if (activeChannel && (!data?.channel_id || data.channel_id === activeChannel)) loadLatest(activeChannel, true)
-  })
+  useGatewayEvent(
+    ["MESSAGE_CREATE", "MESSAGE_UPDATE", "MESSAGE_DELETE"],
+    (payload) => {
+      const data = payload as { channel_id?: string } | undefined
+      if (
+        activeChannel &&
+        (!data?.channel_id || data.channel_id === activeChannel)
+      )
+        loadLatest(activeChannel, true)
+    }
+  )
 
   async function loadOlder() {
     if (!activeChannel || messages.length === 0) return
     setLoadingMore(true)
     try {
       const oldest = messages[messages.length - 1]
-      const older = await listMessages(activeChannel, { before: oldest.id, limit: PAGE_SIZE })
-      setMessages(current => [...current, ...older])
+      const older = await listMessages(activeChannel, {
+        before: oldest.id,
+        limit: PAGE_SIZE,
+      })
+      setMessages((current) => [...current, ...older])
       setHasMore(older.length >= PAGE_SIZE)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "加载更早消息失败")
@@ -86,7 +131,9 @@ export default function MessagesPage() {
     event.preventDefault()
     if (!activeChannel) return
     const form = event.currentTarget
-    const content = String(new FormData(form).get("message-content") ?? "").trim()
+    const content = String(
+      new FormData(form).get("message-content") ?? ""
+    ).trim()
     if (!content) return
     setSending(true)
     try {
@@ -113,11 +160,14 @@ export default function MessagesPage() {
             ariaLabel="选择服务器"
             placeholder="选择服务器"
             value={guildID}
-            onChange={next => {
+            onChange={(next) => {
               setGuildID(next)
               setChannelID(null)
             }}
-            options={guilds.map(guild => ({ value: guild.id, label: guild.name }))}
+            options={guilds.map((guild) => ({
+              value: guild.id,
+              label: guild.name,
+            }))}
             className="w-52"
           />
           <SimpleSelect
@@ -125,14 +175,21 @@ export default function MessagesPage() {
             placeholder="选择文字频道"
             value={activeChannel}
             onChange={setChannelID}
-            options={textChannels.map(channel => ({ value: channel.id, label: `# ${channel.name}` }))}
+            options={textChannels.map((channel) => ({
+              value: channel.id,
+              label: `# ${channel.name}`,
+            }))}
             className="w-52"
             disabled={textChannels.length === 0}
           />
         </div>
 
         {channels.status === "success" && textChannels.length === 0 && (
-          <EmptyState icon={HashIcon} title="该服务器没有文字频道" description="先在服务器详情中创建文字频道。" />
+          <EmptyState
+            icon={HashIcon}
+            title="该服务器没有文字频道"
+            description="先在服务器详情中创建文字频道。"
+          />
         )}
 
         {activeChannel && (
@@ -152,17 +209,36 @@ export default function MessagesPage() {
             </form>
 
             {status === "loading" && <LoadingState rows={6} />}
-            {status === "error" && <ErrorState message={error} onRetry={() => loadLatest(activeChannel)} />}
+            {status === "error" && (
+              <ErrorState
+                message={error}
+                onRetry={() => loadLatest(activeChannel)}
+              />
+            )}
             {status === "success" && messages.length === 0 && (
-              <EmptyState icon={HistoryIcon} title="频道还没有消息" description="发送第一条消息，或等待成员发言。" />
+              <EmptyState
+                icon={HistoryIcon}
+                title="频道还没有消息"
+                description="发送第一条消息，或等待成员发言。"
+              />
             )}
             {status === "success" && messages.length > 0 && (
               <div className="flex flex-col gap-2">
                 {messages.map((message, index) => (
-                  <MessageItem key={message.id} message={message} index={index} />
+                  <MessageItem
+                    key={message.id}
+                    message={message}
+                    index={index}
+                    memberNames={memberNames}
+                  />
                 ))}
                 {hasMore && (
-                  <Button variant="outline" onClick={loadOlder} disabled={loadingMore} className="mx-auto mt-2">
+                  <Button
+                    variant="outline"
+                    onClick={loadOlder}
+                    disabled={loadingMore}
+                    className="mx-auto mt-2"
+                  >
                     {loadingMore ? "加载中…" : "加载更早消息"}
                   </Button>
                 )}

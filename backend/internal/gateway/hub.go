@@ -206,8 +206,19 @@ func (h *hub) dispatch(event eventbus.Event) {
 		return
 	}
 	if len(event.UserIDs) > 0 {
+		// 定向路径不做频道可见性过滤（发布方保证目标可见），但内容类事件
+		// 仍需上锁频道解锁校验（ephemeral / 差异化按钮分组事件带 Guild+Channel，
+		// 防消息内容推进「可见但未解锁」的上锁频道，设计文档 2026-07-26）。
+		lockedCheck := event.GuildID != nil && event.ChannelID != nil && isLockedContentEvent(event.Type)
 		for _, userID := range event.UserIDs {
-			h.push(h.userSessions(userID), event.Type, payload)
+			sessions := h.userSessions(userID)
+			if len(sessions) == 0 {
+				continue
+			}
+			if lockedCheck && !h.dir.CanAccessChannelContent(sessions[0].user, *event.GuildID, *event.ChannelID) {
+				continue
+			}
+			h.push(sessions, event.Type, payload)
 		}
 		return
 	}

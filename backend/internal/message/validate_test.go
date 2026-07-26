@@ -35,10 +35,10 @@ func TestValidateContent(t *testing.T) {
 
 // TestValidateCard 卡片载荷校验（bot 专项）：JSON 对象、大小受限。
 func TestValidateCard(t *testing.T) {
-	if card, err := validateCard(nil); err != nil || card != "" {
+	if card, _, err := validateCard(nil); err != nil || card != "" {
 		t.Errorf("空卡片应放行并返回空串，got (%q, %v)", card, err)
 	}
-	if card, err := validateCard([]byte(`{"title":"hi"}`)); err != nil || card != `{"title":"hi"}` {
+	if card, _, err := validateCard([]byte(`{"title":"hi"}`)); err != nil || card != `{"title":"hi"}` {
 		t.Errorf("合法卡片被拒绝：(%q, %v)", card, err)
 	}
 	invalid := [][]byte{
@@ -48,7 +48,7 @@ func TestValidateCard(t *testing.T) {
 		[]byte(`{"big":"` + strings.Repeat("x", maxCardBytes) + `"}`),
 	}
 	for _, raw := range invalid {
-		if _, err := validateCard(raw); err == nil {
+		if _, _, err := validateCard(raw); err == nil {
 			t.Errorf("非法卡片 %.40q 未被拒绝", raw)
 		}
 	}

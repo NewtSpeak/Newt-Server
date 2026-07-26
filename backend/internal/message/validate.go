@@ -31,11 +31,12 @@ var (
 	errContentEmpty   = errors.New("正文与附件不能同时为空")
 	errTooManyFiles   = errors.New("每条消息最多携带 10 个附件")
 	errBadEmoji       = errors.New("emoji 非法：需为合法 Unicode 字符串且长度受限")
-	errBadCard        = errors.New("card 非法：需为 JSON 对象且不超过 8KB")
+	errBadCard        = errors.New("card 非法：需为 JSON 对象且不超过 16KB")
 )
 
-// maxCardBytes 卡片消息载荷上限（bot 专项）：8KB 足以容纳嵌入/字段/按钮结构。
-const maxCardBytes = 8 << 10
+// maxCardBytes 卡片消息载荷上限（bot 专项）：16KB 容纳嵌入/字段/交互按钮
+//（含 visible_to 声明）结构；病态膨胀由按钮数量与名单上限约束（见 card.go）。
+const maxCardBytes = 16 << 10
 
 // validateContent 校验消息正文与附件数量组合（AP.3/AP.4/AT.3）。
 // hasCard=true 时允许正文与附件同时为空（纯卡片消息，bot 专项）。
@@ -52,20 +53,25 @@ func validateContent(content string, attachmentCount int, hasCard bool) error {
 	return nil
 }
 
-// validateCard 校验卡片载荷（bot 专项）：必须是 JSON 对象（客户端按 schema 渲染），
-// 大小受限。返回归一化（原样）字符串。
-func validateCard(raw []byte) (string, error) {
+// validateCard 校验卡片载荷（bot 专项）：必须是 JSON 对象且大小受限；
+// buttons 键（若有）按 card.go 规则强校验（设计文档 2026-07-26），其余键不解释。
+// 返回归一化（原样）字符串与解析后的按钮列表（无 buttons 键时为 nil）。
+func validateCard(raw []byte) (string, []cardButton, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return "", nil
+		return "", nil, nil
 	}
 	if len(raw) > maxCardBytes {
-		return "", errBadCard
+		return "", nil, errBadCard
 	}
 	trimmed := strings.TrimSpace(string(raw))
 	if !strings.HasPrefix(trimmed, "{") || !json.Valid(raw) {
-		return "", errBadCard
+		return "", nil, errBadCard
 	}
-	return trimmed, nil
+	buttons, err := parseCardButtons(trimmed)
+	if err != nil {
+		return "", nil, err
+	}
+	return trimmed, buttons, nil
 }
 
 // nonceDuplicate nonce 幂等判定：已有消息落在窗口内视为重复（AR.6）。

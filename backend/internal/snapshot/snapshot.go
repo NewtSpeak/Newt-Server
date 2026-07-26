@@ -146,6 +146,8 @@ func BuildGuilds(db *gorm.DB, user model.User, guildIDs []uuid.UUID) ([]Guild, e
 
 // ChannelLastMessageIDs 批量取各频道当前最大消息雪花 ID（单条聚合 SQL）。
 // 无消息的频道不出现在结果中（调用方经 map 零值自然得到 0）。
+// ephemeral（visible_to 非空）消息不参与：它对非目标用户不可见，计入会产生
+// 指向「看不见的消息」的幽灵未读白点（设计文档 2026-07-26，对齐 Discord 不计未读）。
 func ChannelLastMessageIDs(db *gorm.DB, channelIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	result := make(map[uuid.UUID]int64, len(channelIDs))
 	if len(channelIDs) == 0 {
@@ -156,7 +158,7 @@ func ChannelLastMessageIDs(db *gorm.DB, channelIDs []uuid.UUID) (map[uuid.UUID]i
 		MaxID     int64
 	}
 	err := db.Model(&model.Message{}).Select("channel_id, MAX(id) AS max_id").
-		Where("channel_id IN ?", channelIDs).Group("channel_id").Scan(&rows).Error
+		Where("channel_id IN ? AND visible_to = '[]'::jsonb", channelIDs).Group("channel_id").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +249,7 @@ func BuildReadStates(db *gorm.DB, userID uuid.UUID, channelIDs []uuid.UUID) ([]R
 			COALESCE(SUM(CASE WHEN messages.id > COALESCE(read_states.last_read_message_id, 0) THEN 1 ELSE 0 END), 0) AS unread_count
 		`).
 		Joins("LEFT JOIN read_states AS read_states ON read_states.user_id = ? AND read_states.channel_id = channels.id", userID).
-		Joins("LEFT JOIN messages AS messages ON messages.channel_id = channels.id").
+		Joins("LEFT JOIN messages AS messages ON messages.channel_id = channels.id AND messages.visible_to = '[]'::jsonb").
 		Where("channels.id IN ?", channelIDs).
 		Group("channels.id, read_states.last_read_message_id, read_states.mention_count").
 		Order("channels.id").

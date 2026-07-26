@@ -42,10 +42,13 @@ type SearchIndex interface {
 type SearchQuery struct {
 	Text       string
 	ChannelIDs []uuid.UUID // 调用方已按可见性计算好的频道集合（强制 ACL）
-	AuthorID   *uuid.UUID
-	BeforeID   *int64 // 雪花消息 ID 游标
-	AfterID    *int64
-	Limit      int
+	// ViewerID 检索发起者：ephemeral 消息仅作者与可见名单内用户可命中
+	//（零值 UUID 表示不过滤，仅限内部/测试路径）。
+	ViewerID uuid.UUID
+	AuthorID *uuid.UUID
+	BeforeID *int64 // 雪花消息 ID 游标
+	AfterID  *int64
+	Limit    int
 }
 
 type indexOp struct {
@@ -190,6 +193,9 @@ func (p *pgSearchIndex) Search(query SearchQuery) ([]model.Message, int64, error
 		Where("channel_id IN ?", query.ChannelIDs).
 		Where("(content_tsv @@ plainto_tsquery('simple', ?) OR content_bigrams @@ plainto_tsquery('simple', ?) OR content ILIKE ?)",
 			query.Text, bigramTokens(query.Text), "%"+escapeLike(query.Text)+"%")
+	if query.ViewerID != uuid.Nil {
+		tx = tx.Scopes(visibleToScope(query.ViewerID))
+	}
 	if query.AuthorID != nil {
 		tx = tx.Where("author_id = ?", *query.AuthorID)
 	}
@@ -252,7 +258,7 @@ func (s *service) searchMessages(c *gin.Context) {
 		}
 		limit = parsed
 	}
-	query := SearchQuery{Text: text, Limit: limit}
+	query := SearchQuery{Text: text, Limit: limit, ViewerID: user.ID}
 	if raw := c.Query("author_id"); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil {

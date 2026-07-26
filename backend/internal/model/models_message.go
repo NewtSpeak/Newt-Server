@@ -105,10 +105,17 @@ type Message struct {
 	// StickerItems 贴图消息载荷（docs 17）：jsonb 数组，type=STICKER 时长度必须为 1。
 	// 形如 [{"item_id":"...","pack_id":"...","mark":"...","animated":false}]。
 	// 指针避免 GORM 把空字符串写进 jsonb 列；普通消息为 nil。
-	StickerItems *string    `gorm:"type:jsonb" json:"-"`
-	CreatedAt    time.Time  `gorm:"index:idx_message_created" json:"created_at"`
-	DeletedAt    *time.Time `gorm:"index:idx_message_deleted" json:"deleted_at,omitempty"`
+	StickerItems *string `gorm:"type:jsonb" json:"-"`
+	// VisibleTo ephemeral 定向可见名单（bot 专项）：空数组 = 公开消息；
+	// 非空 = 仅名单内用户 + 作者可见（持久化，历史拉取按 viewer 过滤，上限 20）。
+	// 不建索引：读路径先经频道游标索引收敛，残余 jsonb 过滤开销可忽略。
+	VisibleTo UUIDList   `gorm:"type:jsonb;not null;default:'[]'" json:"visible_to,omitempty"`
+	CreatedAt time.Time  `gorm:"index:idx_message_created" json:"created_at"`
+	DeletedAt *time.Time `gorm:"index:idx_message_deleted" json:"deleted_at,omitempty"`
 }
+
+// IsEphemeral 是否为定向可见（ephemeral）消息。
+func (m Message) IsEphemeral() bool { return len(m.VisibleTo) > 0 }
 
 // MessageEdit 编辑历史（AQ.4）：每次编辑保存编辑前正文的全文快照，version 从 1 递增，
 // 与 messages.edit_count 保持一致（AQ.5）。

@@ -64,7 +64,18 @@ export type Role = {
 
 export type RegistrationStatus = { registration_open: boolean }
 
-type ApiError = { error?: { code?: string; message?: string } }
+type ApiErrorBody = { error?: { code?: string; message?: string } }
+
+/** 带 HTTP 状态码的 API 错误：交互按钮点击等场景需按状态码映射提示文案 */
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+  }
+}
 
 const baseURL = "/api/v1"
 
@@ -88,7 +99,10 @@ export function saveSession(session: TokenResponse | null) {
 
 export function hasUsableSession() {
   const session = getSession()
-  return Boolean(session?.refresh_token && new Date(session.refresh_expires_at).getTime() > Date.now())
+  return Boolean(
+    session?.refresh_token &&
+    new Date(session.refresh_expires_at).getTime() > Date.now()
+  )
 }
 
 async function refreshSession(session: TokenResponse) {
@@ -118,9 +132,17 @@ export async function logout() {
   saveSession(null)
 }
 
-export async function api<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+export async function api<T>(
+  path: string,
+  init: RequestInit = {},
+  retry = true
+): Promise<T> {
   let session = getSession()
-  if (session && new Date(session.access_expires_at).getTime() <= Date.now() && retry) {
+  if (
+    session &&
+    new Date(session.access_expires_at).getTime() <= Date.now() &&
+    retry
+  ) {
     session = await refreshSession(session)
   }
   const headers = new Headers(init.headers)
@@ -132,8 +154,11 @@ export async function api<T>(path: string, init: RequestInit = {}, retry = true)
     if (refreshed) return api<T>(path, init, false)
   }
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError
-    throw new Error(body.error?.message ?? `请求失败（${response.status}）`)
+    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
+    throw new ApiError(
+      body.error?.message ?? `请求失败（${response.status}）`,
+      response.status
+    )
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
@@ -143,10 +168,13 @@ export async function api<T>(path: string, init: RequestInit = {}, retry = true)
 // 通用工具
 // ---------------------------------------------------------------------------
 
-function qs(params: Record<string, string | number | boolean | undefined | null>) {
+function qs(
+  params: Record<string, string | number | boolean | undefined | null>
+) {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") search.set(key, String(value))
+    if (value !== undefined && value !== null && value !== "")
+      search.set(key, String(value))
   }
   const text = search.toString()
   return text ? `?${text}` : ""
@@ -194,33 +222,75 @@ export function memberName(member: GuildMember) {
 }
 
 export const listGuilds = () => api<Guild[]>("/guilds")
-export const createGuild = (name: string) => api<Guild>("/guilds", { method: "POST", body: JSON.stringify({ name }) })
+export const createGuild = (name: string) =>
+  api<Guild>("/guilds", { method: "POST", body: JSON.stringify({ name }) })
 /** 服务器详情 + 成员总数（docs 02 §8-1） */
-export const getGuildDetail = (gid: string) => api<{ guild: Guild; member_count: number }>(`/guilds/${gid}`)
-export const listChannels = (gid: string) => api<Channel[]>(`/guilds/${gid}/channels`)
+export const getGuildDetail = (gid: string) =>
+  api<{ guild: Guild; member_count: number }>(`/guilds/${gid}`)
+export const listChannels = (gid: string) =>
+  api<Channel[]>(`/guilds/${gid}/channels`)
 export const createChannel = (
   gid: string,
-  body: { name: string; type: ChannelType; parent_id?: string; user_limit?: number; rate_limit_per_user?: number; rate_limit_exempt_role_ids?: string[] }
-) => api<Channel>(`/guilds/${gid}/channels`, { method: "POST", body: JSON.stringify(body) })
-export const listMembers = (gid: string) => api<GuildMember[]>(`/guilds/${gid}/members`)
+  body: {
+    name: string
+    type: ChannelType
+    parent_id?: string
+    user_limit?: number
+    rate_limit_per_user?: number
+    rate_limit_exempt_role_ids?: string[]
+  }
+) =>
+  api<Channel>(`/guilds/${gid}/channels`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+export const listMembers = (gid: string) =>
+  api<GuildMember[]>(`/guilds/${gid}/members`)
 export const listRoles = (gid: string) => api<Role[]>(`/guilds/${gid}/roles`)
 export const createRole = (
   gid: string,
-  body: { name: string; position: number; permissions: number; color?: string; hoist?: boolean; mentionable?: boolean }
-) => api<Role>(`/guilds/${gid}/roles`, { method: "POST", body: JSON.stringify(body) })
+  body: {
+    name: string
+    position: number
+    permissions: number
+    color?: string
+    hoist?: boolean
+    mentionable?: boolean
+  }
+) =>
+  api<Role>(`/guilds/${gid}/roles`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 export const updateRole = (
   gid: string,
   rid: string,
-  body: Partial<Pick<Role, "name" | "position" | "permissions" | "color" | "hoist" | "mentionable">>
-) => api<Role>(`/guilds/${gid}/roles/${rid}`, { method: "PATCH", body: JSON.stringify(body) })
+  body: Partial<
+    Pick<
+      Role,
+      "name" | "position" | "permissions" | "color" | "hoist" | "mentionable"
+    >
+  >
+) =>
+  api<Role>(`/guilds/${gid}/roles/${rid}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 /** 角色批量排序（docs 04 §8：拖拽调整层级，@everyone 不参与） */
-export const reorderRoles = (gid: string, entries: { id: string; position: number }[]) =>
-  api<void>(`/guilds/${gid}/roles`, { method: "PATCH", body: JSON.stringify(entries) })
+export const reorderRoles = (
+  gid: string,
+  entries: { id: string; position: number }[]
+) =>
+  api<void>(`/guilds/${gid}/roles`, {
+    method: "PATCH",
+    body: JSON.stringify(entries),
+  })
 export const addMemberRole = (gid: string, mid: string, rid: string) =>
   api<void>(`/guilds/${gid}/members/${mid}/roles/${rid}`, { method: "PUT" })
 export const removeMemberRole = (gid: string, mid: string, rid: string) =>
   api<void>(`/guilds/${gid}/members/${mid}/roles/${rid}`, { method: "DELETE" })
-export const getMyPermissions = (gid: string) => api<{ permissions: number | string }>(`/guilds/${gid}/permissions/@me`)
+export const getMyPermissions = (gid: string) =>
+  api<{ permissions: number | string }>(`/guilds/${gid}/permissions/@me`)
 
 export type OverwriteType = "ROLE" | "MEMBER"
 
@@ -229,13 +299,23 @@ export const putChannelOverwrite = (
   cid: string,
   targetID: string,
   body: { type: OverwriteType; allow: number; deny: number }
-) => api<void>(`/guilds/${gid}/channels/${cid}/overwrites/${targetID}`, { method: "PUT", body: JSON.stringify(body) })
+) =>
+  api<void>(`/guilds/${gid}/channels/${cid}/overwrites/${targetID}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
 
 // ---------------------------------------------------------------------------
 // SFU 节点与节点池（后端并行开发中；集成期若命名有差异，仅需调整本区路径）
 // ---------------------------------------------------------------------------
 
-export type SfuNodeStatus = "PENDING_ENROLLMENT" | "ENROLLED" | "ONLINE" | "DRAINING" | "DISABLED" | "REVOKED"
+export type SfuNodeStatus =
+  | "PENDING_ENROLLMENT"
+  | "ENROLLED"
+  | "ONLINE"
+  | "DRAINING"
+  | "DISABLED"
+  | "REVOKED"
 
 export type SfuNode = {
   node_id: string
@@ -262,7 +342,8 @@ export type SfuNode = {
 }
 
 export type SfuNodeCreated = { node_id: string; enrollment_token: string }
-export type SfuNodeAction = "enable" | "disable" | "drain" | "undrain" | "revoke"
+export type SfuNodeAction =
+  "enable" | "disable" | "drain" | "undrain" | "revoke"
 
 // 后端存在两种节点视图（capacity 嵌套的摘要版 / 平铺字段版 / {nodes:[]} 包裹），此处统一归一化
 type RawSfuNode = {
@@ -320,11 +401,14 @@ function normalizeSfuNode(raw: RawSfuNode): SfuNode {
 }
 
 export const listSfuNodes = () =>
-  api<RawSfuNode[] | { nodes: RawSfuNode[] }>("/admin/sfu/nodes").then(raw => {
-    const rows = Array.isArray(raw) ? raw : (raw.nodes ?? [])
-    return rows.map(normalizeSfuNode)
-  })
-export const getSfuNode = (id: string) => api<RawSfuNode>(`/admin/sfu/nodes/${id}`).then(normalizeSfuNode)
+  api<RawSfuNode[] | { nodes: RawSfuNode[] }>("/admin/sfu/nodes").then(
+    (raw) => {
+      const rows = Array.isArray(raw) ? raw : (raw.nodes ?? [])
+      return rows.map(normalizeSfuNode)
+    }
+  )
+export const getSfuNode = (id: string) =>
+  api<RawSfuNode>(`/admin/sfu/nodes/${id}`).then(normalizeSfuNode)
 
 /** 级联拓扑（管理台可视化）：节点 + 边累计字节/路径类型；前端差分得 bps */
 export type SfuTopologyPathType = "lan" | "wan" | "unknown" | string
@@ -397,32 +481,34 @@ type RawSfuTopology = {
 }
 
 export const getSfuTopology = () =>
-  api<RawSfuTopology>("/admin/sfu/topology").then(
-    (raw): SfuTopology => ({
-      generated_at: raw.generated_at,
-      server: raw.server ?? {
-        id: "owl-server",
-        display_name: "Owl-Server",
-        role: "control_plane",
-        online: true,
-        connected_sfu_count: 0,
-      },
-      nodes: (raw.nodes ?? []).map(normalizeSfuNode),
-      control_links: raw.control_links ?? [],
-      edges: raw.edges ?? [],
-      aggregated_edges: raw.aggregated_edges ?? [],
-    }),
-  )
-export const createSfuNode = (body: { display_name: string; labels?: Record<string, string> }) =>
-  api<{ node?: RawSfuNode; node_id?: string; enrollment_token: string }>("/admin/sfu/nodes", {
-    method: "POST",
-    body: JSON.stringify(body),
-  }).then(
-    (raw): SfuNodeCreated => ({
-      node_id: raw.node?.id ?? raw.node?.node_id ?? raw.node_id ?? "",
-      enrollment_token: raw.enrollment_token,
-    }),
-  )
+  api<RawSfuTopology>("/admin/sfu/topology").then((raw): SfuTopology => ({
+    generated_at: raw.generated_at,
+    server: raw.server ?? {
+      id: "owl-server",
+      display_name: "Owl-Server",
+      role: "control_plane",
+      online: true,
+      connected_sfu_count: 0,
+    },
+    nodes: (raw.nodes ?? []).map(normalizeSfuNode),
+    control_links: raw.control_links ?? [],
+    edges: raw.edges ?? [],
+    aggregated_edges: raw.aggregated_edges ?? [],
+  }))
+export const createSfuNode = (body: {
+  display_name: string
+  labels?: Record<string, string>
+}) =>
+  api<{ node?: RawSfuNode; node_id?: string; enrollment_token: string }>(
+    "/admin/sfu/nodes",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  ).then((raw): SfuNodeCreated => ({
+    node_id: raw.node?.id ?? raw.node?.node_id ?? raw.node_id ?? "",
+    enrollment_token: raw.enrollment_token,
+  }))
 /** 更新名称/地域标签/调度开关/平台默认池（不改变生命周期状态） */
 export const updateSfuNode = (
   id: string,
@@ -431,14 +517,16 @@ export const updateSfuNode = (
     labels?: Record<string, string>
     enabled_for_scheduling?: boolean
     platform_default?: boolean
-  },
+  }
 ) =>
   api<RawSfuNode>(`/admin/sfu/nodes/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   }).then(normalizeSfuNode)
 export const sfuNodeAction = (id: string, action: SfuNodeAction) =>
-  api<RawSfuNode>(`/admin/sfu/nodes/${id}/${action}`, { method: "POST" }).then(normalizeSfuNode)
+  api<RawSfuNode>(`/admin/sfu/nodes/${id}/${action}`, { method: "POST" }).then(
+    normalizeSfuNode
+  )
 
 export type SfuRelease = {
   filename: string
@@ -494,22 +582,186 @@ export const updateSfuBinary = (id: string, body: UpdateSfuBinaryBody) =>
     body: JSON.stringify(body),
   })
 
+// ---- SFU 节点一键自动部署（后端 internal/sfudeploy）----
+
+/** 目标机 TLS 方案：caddy=自动签证书（需域名）；custom=用已有证书；none=明文 ws（仅内网/测试） */
+export type SfuDeployTLSMode = "caddy" | "custom" | "none"
+
+/** 已保存的部署目标服务器；凭据加密存于后端，接口永不返回 */
+export type SfuDeployServer = {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  auth_method: "password" | "private_key"
+  host_key_fingerprint: string
+  created_at: string
+}
+
+export type SfuDeployConnection = {
+  host: string
+  port?: number
+  username: string
+  auth_method: "password" | "private_key"
+  password?: string
+  private_key?: string
+  passphrase?: string
+  /** 非 root 且需要密码 sudo 时填写；留空复用登录密码 */
+  sudo_password?: string
+  /** 非空则把这台服务器与凭据加密保存以便复用 */
+  save_as?: string
+}
+
+export type SfuDeployNodeSpec = {
+  display_name: string
+  labels?: Record<string, string>
+  tls_mode: SfuDeployTLSMode
+  domain?: string
+  tls_cert_file?: string
+  tls_key_file?: string
+  public_ip?: string
+  media_udp_port?: number
+  max_users?: number
+  enable_cascade?: boolean
+  /** 发布工件文件名；留空自动选发布目录中最新的 linux 工件 */
+  release?: string
+  enable_scheduling?: boolean
+}
+
+export type SfuDeployOptions = {
+  configure_ufw?: boolean
+  force_reinstall?: boolean
+  /** 主机指纹与记录不符时显式信任新指纹 */
+  trust_new_hostkey?: boolean
+}
+
+export type SfuDeploymentStatus =
+  "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED"
+
+/** 部署步骤，与后端 model.SfuDeployStep* 常量一致 */
+export type SfuDeploymentStep =
+  | "CONNECTING"
+  | "PRECHECK"
+  | "INSTALL_DEPS"
+  | "CREATE_NODE"
+  | "CONFIGURE"
+  | "WAIT_ONLINE"
+  | "ENABLE_SCHEDULING"
+  | "DONE"
+
+export type SfuDeployment = {
+  id: string
+  server_id?: string
+  node_id?: string
+  host: string
+  port: number
+  username: string
+  status: SfuDeploymentStatus
+  step: SfuDeploymentStep
+  error?: string
+  params: Record<string, unknown>
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+/** Gateway 事件 SFU_DEPLOYMENT_UPDATE 的载荷 */
+export type SfuDeploymentEvent = {
+  deployment_id: string
+  status: SfuDeploymentStatus
+  step: SfuDeploymentStep
+  log_offset: number
+  node_id?: string
+  error?: string
+}
+
+/** 部署前的服务端环境体检（下载地址 / 节点回连地址 / 发布工件） */
+export type SfuDeployPreflightCheck = {
+  key: string
+  label: string
+  status: "ok" | "warn" | "error"
+  detail: string
+  hint?: string
+}
+
+export type SfuDeployPreflight = {
+  ok: boolean
+  checks: SfuDeployPreflightCheck[]
+}
+
+export const getSfuDeployPreflight = () =>
+  api<SfuDeployPreflight>("/admin/sfu/deploy-preflight")
+
+export const listSfuDeployServers = () =>
+  api<SfuDeployServer[]>("/admin/sfu/deploy-servers")
+
+export const createSfuDeployServer = (body: SfuDeployConnection) =>
+  api<SfuDeployServer>("/admin/sfu/deploy-servers", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+
+export const deleteSfuDeployServer = (id: string) =>
+  api<void>(`/admin/sfu/deploy-servers/${id}`, { method: "DELETE" })
+
+export const createSfuDeployment = (body: {
+  server_id?: string
+  connection?: SfuDeployConnection
+  node: SfuDeployNodeSpec
+  options?: SfuDeployOptions
+}) =>
+  api<{ deployment_id: string }>("/admin/sfu/deployments", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+
+export const listSfuDeployments = (limit = 20) =>
+  api<SfuDeployment[]>(`/admin/sfu/deployments?limit=${limit}`)
+
+/** 拉取部署详情与全量日志（事件丢帧时用 log_offset 判断是否需要补齐） */
+export const getSfuDeployment = (id: string) =>
+  api<{ deployment: SfuDeployment; log: string; log_offset: number }>(
+    `/admin/sfu/deployments/${id}`
+  )
+
+export const cancelSfuDeployment = (id: string) =>
+  api<void>(`/admin/sfu/deployments/${id}/cancel`, { method: "POST" })
+
 export type NodePool = { node_ids?: string[] }
 
 // 后端返回 { candidates, selected, fallback_to_default }；页面只关心已勾选集合
-type RawNodePool = { candidates?: { id: string }[]; selected?: { id: string }[]; fallback_to_default?: boolean }
+type RawNodePool = {
+  candidates?: { id: string }[]
+  selected?: { id: string }[]
+  fallback_to_default?: boolean
+}
 
-const normalizePool = (raw: RawNodePool): NodePool => ({ node_ids: (raw.selected ?? []).map(node => node.id) })
+const normalizePool = (raw: RawNodePool): NodePool => ({
+  node_ids: (raw.selected ?? []).map((node) => node.id),
+})
 
-export const getGuildNodePool = (gid: string) => api<RawNodePool>(`/guilds/${gid}/node-pool`).then(normalizePool)
-export const putGuildNodePool = (gid: string, nodeIDs: string[], asSystemAdmin: boolean) =>
-  api<RawNodePool>(asSystemAdmin ? `/admin/guilds/${gid}/node-pool` : `/guilds/${gid}/node-pool`, {
-    method: "PUT",
-    // 系统管路径同时授权候选集与勾选集；服管路径仅勾选（docs 07 专项 2.1）
-    body: JSON.stringify(
-      asSystemAdmin ? { candidate_node_ids: nodeIDs, selected_node_ids: nodeIDs } : { node_ids: nodeIDs },
-    ),
-  }).then(normalizePool)
+export const getGuildNodePool = (gid: string) =>
+  api<RawNodePool>(`/guilds/${gid}/node-pool`).then(normalizePool)
+export const putGuildNodePool = (
+  gid: string,
+  nodeIDs: string[],
+  asSystemAdmin: boolean
+) =>
+  api<RawNodePool>(
+    asSystemAdmin
+      ? `/admin/guilds/${gid}/node-pool`
+      : `/guilds/${gid}/node-pool`,
+    {
+      method: "PUT",
+      // 系统管路径同时授权候选集与勾选集；服管路径仅勾选（docs 07 专项 2.1）
+      body: JSON.stringify(
+        asSystemAdmin
+          ? { candidate_node_ids: nodeIDs, selected_node_ids: nodeIDs }
+          : { node_ids: nodeIDs }
+      ),
+    }
+  ).then(normalizePool)
 
 // ---------------------------------------------------------------------------
 // 语音状态与迁移
@@ -535,10 +787,15 @@ export type VoiceState = {
 
 // 后端响应为 { voice_states: [...] }（docs 05 §2.2 模型字段），此处解包为数组
 export const listVoiceStates = (gid: string, cid: string) =>
-  api<{ voice_states?: VoiceState[] }>(`/guilds/${gid}/channels/${cid}/voice-states`).then(raw => raw.voice_states ?? [])
+  api<{ voice_states?: VoiceState[] }>(
+    `/guilds/${gid}/channels/${cid}/voice-states`
+  ).then((raw) => raw.voice_states ?? [])
 // 管理员断开（docs 05 §8.1）：POST /guilds/{gid}/voice/disconnect
 export const disconnectVoiceUser = (gid: string, _cid: string, uid: string) =>
-  api<void>(`/guilds/${gid}/voice/disconnect`, { method: "POST", body: JSON.stringify({ user_id: uid }) })
+  api<void>(`/guilds/${gid}/voice/disconnect`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: uid }),
+  })
 /** 管理员移动成员到另一语音频道（docs 09 FR-29：MOVE_MEMBERS + 层级） */
 export const moveVoiceUser = (gid: string, userID: string, channelID: string) =>
   api<{ moved: boolean; to_channel_id?: string }>(`/guilds/${gid}/voice/move`, {
@@ -546,8 +803,15 @@ export const moveVoiceUser = (gid: string, userID: string, channelID: string) =>
     body: JSON.stringify({ user_id: userID, channel_id: channelID }),
   })
 // 手动热迁移（docs 09 §3.6）：以「用户语音会话」为粒度
-export const createVoiceMigration = (body: { guild_id: string; user_id: string; to_node_id?: string }) =>
-  api<{ migration_id?: string }>("/admin/voice/migrations", { method: "POST", body: JSON.stringify(body) })
+export const createVoiceMigration = (body: {
+  guild_id: string
+  user_id: string
+  to_node_id?: string
+}) =>
+  api<{ migration_id?: string }>("/admin/voice/migrations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 
 // ---------------------------------------------------------------------------
 // 舞台（文档 11 §8）
@@ -574,25 +838,42 @@ export type StageQueueEntry = {
 // 全员简表 + 管理者扩展字段合并为页面使用的条目结构（docs 11 AE.1）
 type RawStageQueue = {
   queue?: { position: number; user_id: string; name?: string }[]
-  queue_extended?: { user_id: string; source?: StageQueueEntry["source"]; requested_at?: string }[]
+  queue_extended?: {
+    user_id: string
+    source?: StageQueueEntry["source"]
+    requested_at?: string
+  }[]
 }
 
 export const patchVoiceStage = (cid: string, body: Partial<StageConfig>) =>
-  api<StageConfig>(`/channels/${cid}/voice-stage`, { method: "PATCH", body: JSON.stringify(body) })
-export const getStageQueue = (cid: string) =>
-  api<RawStageQueue>(`/channels/${cid}/stage/queue`).then((raw): StageQueueEntry[] => {
-    const extended = new Map((raw.queue_extended ?? []).map(item => [item.user_id, item]))
-    return (raw.queue ?? []).map(item => ({
-      user_id: item.user_id,
-      username: item.name || undefined,
-      requested_at: extended.get(item.user_id)?.requested_at,
-      source: extended.get(item.user_id)?.source,
-    }))
+  api<StageConfig>(`/channels/${cid}/voice-stage`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
   })
+export const getStageQueue = (cid: string) =>
+  api<RawStageQueue>(`/channels/${cid}/stage/queue`).then(
+    (raw): StageQueueEntry[] => {
+      const extended = new Map(
+        (raw.queue_extended ?? []).map((item) => [item.user_id, item])
+      )
+      return (raw.queue ?? []).map((item) => ({
+        user_id: item.user_id,
+        username: item.name || undefined,
+        requested_at: extended.get(item.user_id)?.requested_at,
+        source: extended.get(item.user_id)?.source,
+      }))
+    }
+  )
 export const stageBringUp = (cid: string, userID: string) =>
-  api<void>(`/channels/${cid}/stage/bring-up`, { method: "POST", body: JSON.stringify({ user_id: userID }) })
+  api<void>(`/channels/${cid}/stage/bring-up`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userID }),
+  })
 export const stageBringDown = (cid: string, userID: string) =>
-  api<void>(`/channels/${cid}/stage/bring-down`, { method: "POST", body: JSON.stringify({ user_id: userID }) })
+  api<void>(`/channels/${cid}/stage/bring-down`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userID }),
+  })
 /** 管理员将他人移出麦序队列（docs 10 FR-15，需 STAGE_MANAGE_QUEUE / STAGE_BRING_UP） */
 export const stageRemoveFromQueue = (cid: string, userID: string) =>
   api<void>(`/channels/${cid}/stage/queue/${userID}`, { method: "DELETE" })
@@ -601,7 +882,8 @@ export const stageRemoveFromQueue = (cid: string, userID: string) =>
 // Restriction（文档 12 §4）
 // ---------------------------------------------------------------------------
 
-export type RestrictionScope = "TEXT_CHANNEL" | "VOICE_CHANNEL" | "GUILD_ALL_TEXT" | "GUILD_ALL_VOICE"
+export type RestrictionScope =
+  "TEXT_CHANNEL" | "VOICE_CHANNEL" | "GUILD_ALL_TEXT" | "GUILD_ALL_VOICE"
 export type RestrictionKind = "SANCTION" | "CHANNEL_BAN"
 
 export type RestrictionDeny = {
@@ -631,7 +913,12 @@ export type Restriction = {
 
 export const listRestrictions = (
   gid: string,
-  filters: { user_id?: string; channel_id?: string; active?: boolean; scope?: RestrictionScope } = {}
+  filters: {
+    user_id?: string
+    channel_id?: string
+    active?: boolean
+    scope?: RestrictionScope
+  } = {}
 ) => api<Restriction[]>(`/guilds/${gid}/restrictions${qs(filters)}`)
 export const createRestriction = (
   gid: string,
@@ -644,10 +931,22 @@ export const createRestriction = (
     reason: string
     expires_at?: string | null
   }
-) => api<Restriction>(`/guilds/${gid}/restrictions`, { method: "POST", body: JSON.stringify(body) })
-export const patchRestriction = (gid: string, id: string, body: { expires_at?: string | null; reason?: string }) =>
-  api<Restriction>(`/guilds/${gid}/restrictions/${id}`, { method: "PATCH", body: JSON.stringify(body) })
-export const liftRestriction = (gid: string, id: string) => api<void>(`/guilds/${gid}/restrictions/${id}`, { method: "DELETE" })
+) =>
+  api<Restriction>(`/guilds/${gid}/restrictions`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+export const patchRestriction = (
+  gid: string,
+  id: string,
+  body: { expires_at?: string | null; reason?: string }
+) =>
+  api<Restriction>(`/guilds/${gid}/restrictions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+export const liftRestriction = (gid: string, id: string) =>
+  api<void>(`/guilds/${gid}/restrictions/${id}`, { method: "DELETE" })
 
 // ---------------------------------------------------------------------------
 // 成员治理：邀请 / 踢出 / 封禁
@@ -661,14 +960,29 @@ export type Invite = {
   max_uses?: number
   uses?: number
 }
-export type Ban = { user_id: string; username?: string; reason?: string; created_at?: string; created_by?: string }
+export type Ban = {
+  user_id: string
+  username?: string
+  reason?: string
+  created_at?: string
+  created_by?: string
+}
 
-export const createInvite = (gid: string) => api<Invite>(`/guilds/${gid}/invites`, { method: "POST", body: JSON.stringify({}) })
-export const kickMember = (gid: string, memberID: string) => api<void>(`/guilds/${gid}/members/${memberID}`, { method: "DELETE" })
+export const createInvite = (gid: string) =>
+  api<Invite>(`/guilds/${gid}/invites`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+export const kickMember = (gid: string, memberID: string) =>
+  api<void>(`/guilds/${gid}/members/${memberID}`, { method: "DELETE" })
 export const listBans = (gid: string) => api<Ban[]>(`/guilds/${gid}/bans`)
 export const banUser = (gid: string, userID: string, reason?: string) =>
-  api<void>(`/guilds/${gid}/bans/${userID}`, { method: "PUT", body: JSON.stringify({ reason }) })
-export const unbanUser = (gid: string, userID: string) => api<void>(`/guilds/${gid}/bans/${userID}`, { method: "DELETE" })
+  api<void>(`/guilds/${gid}/bans/${userID}`, {
+    method: "PUT",
+    body: JSON.stringify({ reason }),
+  })
+export const unbanUser = (gid: string, userID: string) =>
+  api<void>(`/guilds/${gid}/bans/${userID}`, { method: "DELETE" })
 
 // ---------------------------------------------------------------------------
 // 消息与搜索（文档 13）
@@ -703,6 +1017,14 @@ export type Message = {
   edited_at?: string | null
   created_at: string
   deleted_at?: string | null
+  /** 作者是否机器人（消息流 BOT 徽标） */
+  author_is_bot?: boolean
+  /** bot 流式输出状态（如 STREAMING/DONE；控制台仅透传） */
+  stream_status?: string
+  /** bot 消息卡片 JSON（lib/bot-card.ts 宽容解析后渲染） */
+  card?: unknown
+  /** ephemeral 可见名单（UUID；非空 = 仅名单+作者可见，服务端已按查看者裁剪剥除） */
+  visible_to?: string[]
 }
 
 export type MessageEdit = {
@@ -714,8 +1036,13 @@ export type MessageEdit = {
 }
 
 // 后端列表响应为 { messages: [...] }，此处解包为数组
-export const listMessages = (cid: string, params: { before?: string; limit?: number } = {}) =>
-  api<{ messages?: Message[] }>(`/channels/${cid}/messages${qs(params)}`).then(raw => raw.messages ?? [])
+export const listMessages = (
+  cid: string,
+  params: { before?: string; limit?: number } = {}
+) =>
+  api<{ messages?: Message[] }>(`/channels/${cid}/messages${qs(params)}`).then(
+    (raw) => raw.messages ?? []
+  )
 export const sendMessage = (cid: string, content: string) =>
   api<Message>(`/channels/${cid}/messages`, {
     method: "POST",
@@ -723,7 +1050,22 @@ export const sendMessage = (cid: string, content: string) =>
   })
 // 后端响应分别为 { edits, edit_count } 与 { messages }，此处解包为数组
 export const listMessageEdits = (cid: string, mid: string) =>
-  api<{ edits?: MessageEdit[] }>(`/channels/${cid}/messages/${mid}/edits`).then(raw => raw.edits ?? [])
+  api<{ edits?: MessageEdit[] }>(`/channels/${cid}/messages/${mid}/edits`).then(
+    (raw) => raw.edits ?? []
+  )
+// bot 卡片按钮点击（设计文档 2026-07-26）：202 受理后由 Gateway INTERACTION_ACK 定向推进终态
+export type InteractionCreateResult = { interaction_id: string; status: string }
+
+/** 点击 bot 卡片交互按钮（每用户 2 QPS；400/404/429/403 由调用方按 ApiError.status 映射提示） */
+export const createInteraction = (cid: string, mid: string, customId: string) =>
+  api<InteractionCreateResult>(
+    `/channels/${cid}/messages/${mid}/interactions`,
+    {
+      method: "POST",
+      body: JSON.stringify({ custom_id: customId }),
+    }
+  )
+
 export type SearchResult = { messages: Message[]; total: number }
 
 export const searchMessages = (params: {
@@ -733,9 +1075,12 @@ export const searchMessages = (params: {
   author_id?: string
   limit?: number
 }) =>
-  api<{ messages?: Message[]; total?: number }>(`/search/messages${qs(params)}`).then(
-    (raw): SearchResult => ({ messages: raw.messages ?? [], total: raw.total ?? raw.messages?.length ?? 0 }),
-  )
+  api<{ messages?: Message[]; total?: number }>(
+    `/search/messages${qs(params)}`
+  ).then((raw): SearchResult => ({
+    messages: raw.messages ?? [],
+    total: raw.total ?? raw.messages?.length ?? 0,
+  }))
 
 // ---------------------------------------------------------------------------
 // 机器人（bot 专项）：档案 / 令牌 / 安装到服；权限赋予复用成员角色端点
@@ -784,56 +1129,98 @@ export type GuildBot = {
 }
 
 export const listBots = () => api<Bot[]>("/bots")
-export const createBot = (body: { name: string; username: string; description?: string; avatar_url?: string }) =>
-  api<Bot>("/bots", { method: "POST", body: JSON.stringify(body) })
-export const updateBot = (id: string, body: { name?: string; description?: string; avatar_url?: string }) =>
-  api<Bot>(`/bots/${id}`, { method: "PATCH", body: JSON.stringify(body) })
-export const deleteBot = (id: string) => api<void>(`/bots/${id}`, { method: "DELETE" })
+export const createBot = (body: {
+  name: string
+  username: string
+  description?: string
+  avatar_url?: string
+}) => api<Bot>("/bots", { method: "POST", body: JSON.stringify(body) })
+export const updateBot = (
+  id: string,
+  body: { name?: string; description?: string; avatar_url?: string }
+) => api<Bot>(`/bots/${id}`, { method: "PATCH", body: JSON.stringify(body) })
+export const deleteBot = (id: string) =>
+  api<void>(`/bots/${id}`, { method: "DELETE" })
 
 export const listBotTokens = (botID: string) =>
-  api<{ tokens?: BotToken[] }>(`/bots/${botID}/tokens`).then(raw => raw.tokens ?? [])
-export const createBotToken = (botID: string, body: { name?: string; expires_at?: string | null } = {}) =>
-  api<{ token: BotToken; plain: string }>(`/bots/${botID}/tokens`, { method: "POST", body: JSON.stringify(body) })
+  api<{ tokens?: BotToken[] }>(`/bots/${botID}/tokens`).then(
+    (raw) => raw.tokens ?? []
+  )
+export const createBotToken = (
+  botID: string,
+  body: { name?: string; expires_at?: string | null } = {}
+) =>
+  api<{ token: BotToken; plain: string }>(`/bots/${botID}/tokens`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 export const revokeBotToken = (botID: string, tokenID: string) =>
   api<void>(`/bots/${botID}/tokens/${tokenID}`, { method: "DELETE" })
 
-export const listGuildBots = (gid: string) => api<GuildBot[]>(`/guilds/${gid}/bots`)
+export const listGuildBots = (gid: string) =>
+  api<GuildBot[]>(`/guilds/${gid}/bots`)
 /** 在本服创建独属机器人（自动安装） */
 export const createGuildBot = (
   gid: string,
-  body: { name: string; username: string; description?: string; avatar_url?: string },
-) => api<GuildBot>(`/guilds/${gid}/bots`, { method: "POST", body: JSON.stringify(body) })
+  body: {
+    name: string
+    username: string
+    description?: string
+    avatar_url?: string
+  }
+) =>
+  api<GuildBot>(`/guilds/${gid}/bots`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 export const updateGuildBot = (
   gid: string,
   botID: string,
-  body: { name?: string; description?: string; avatar_url?: string },
-) => api<GuildBot>(`/guilds/${gid}/bots/${botID}`, { method: "PATCH", body: JSON.stringify(body) })
+  body: { name?: string; description?: string; avatar_url?: string }
+) =>
+  api<GuildBot>(`/guilds/${gid}/bots/${botID}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 export const installBot = (gid: string, botID: string) =>
   api<{ member_id: string }>(`/guilds/${gid}/bots/${botID}`, { method: "PUT" })
 /** 服级 bot 整档删除；平台 bot 仅卸载 */
 export const uninstallBot = (gid: string, botID: string) =>
   api<void>(`/guilds/${gid}/bots/${botID}`, { method: "DELETE" })
 export const listGuildBotTokens = (gid: string, botID: string) =>
-  api<{ tokens?: BotToken[] }>(`/guilds/${gid}/bots/${botID}/tokens`).then(raw => raw.tokens ?? [])
+  api<{ tokens?: BotToken[] }>(`/guilds/${gid}/bots/${botID}/tokens`).then(
+    (raw) => raw.tokens ?? []
+  )
 export const createGuildBotToken = (
   gid: string,
   botID: string,
-  body: { name?: string; expires_at?: string | null } = {},
+  body: { name?: string; expires_at?: string | null } = {}
 ) =>
-  api<{ token: BotToken; plain: string }>(`/guilds/${gid}/bots/${botID}/tokens`, {
-    method: "POST",
-    body: JSON.stringify(body),
+  api<{ token: BotToken; plain: string }>(
+    `/guilds/${gid}/bots/${botID}/tokens`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  )
+export const revokeGuildBotToken = (
+  gid: string,
+  botID: string,
+  tokenID: string
+) =>
+  api<void>(`/guilds/${gid}/bots/${botID}/tokens/${tokenID}`, {
+    method: "DELETE",
   })
-export const revokeGuildBotToken = (gid: string, botID: string, tokenID: string) =>
-  api<void>(`/guilds/${gid}/bots/${botID}/tokens/${tokenID}`, { method: "DELETE" })
 
 // ---------------------------------------------------------------------------
 // 审计日志（治理）
 // ---------------------------------------------------------------------------
 
-export type AuditActorType = "user" | "system_admin" | "guild_admin" | "auto" | "node"
+export type AuditActorType =
+  "user" | "system_admin" | "guild_admin" | "auto" | "node"
 
-export type AuditUndoStatus = "none" | "available" | "undone" | "blocked" | "irreversible"
+export type AuditUndoStatus =
+  "none" | "available" | "undone" | "blocked" | "irreversible"
 
 export type AuditLogEntry = {
   id: string
@@ -886,14 +1273,18 @@ export type UndoAuditLogResult = {
 export const listAdminAuditLogs = (filters: AuditLogFilters = {}) =>
   api<AuditLogPage>(`/admin/audit-logs${qs(filters)}`)
 /** 单服审计流水（需 VIEW_AUDIT_LOG 权限位或服管） */
-export const listGuildAuditLogs = (gid: string, filters: Omit<AuditLogFilters, "guild_id"> = {}) =>
-  api<AuditLogPage>(`/guilds/${gid}/audit-logs${qs(filters)}`)
+export const listGuildAuditLogs = (
+  gid: string,
+  filters: Omit<AuditLogFilters, "guild_id"> = {}
+) => api<AuditLogPage>(`/guilds/${gid}/audit-logs${qs(filters)}`)
 /** 系统管理员全量入口撤销 */
 export const undoAdminAuditLog = (logId: string) =>
   api<UndoAuditLogResult>(`/admin/audit-logs/${logId}/undo`, { method: "POST" })
 /** 本服撤销 */
 export const undoGuildAuditLog = (gid: string, logId: string) =>
-  api<UndoAuditLogResult>(`/guilds/${gid}/audit-logs/${logId}/undo`, { method: "POST" })
+  api<UndoAuditLogResult>(`/guilds/${gid}/audit-logs/${logId}/undo`, {
+    method: "POST",
+  })
 
 // ---------------------------------------------------------------------------
 // 屏幕共享配额（文档 14 §7.2）
@@ -972,9 +1363,12 @@ export type RoleStyle = RoleSurfaceStyle &
     badge?: RoleBadgeStyle
   }
 
-function parseSurface(raw: RoleSurfaceStyle | undefined | null): RoleSurfaceStyle | undefined {
+function parseSurface(
+  raw: RoleSurfaceStyle | undefined | null
+): RoleSurfaceStyle | undefined {
   if (!raw?.type) return undefined
-  if (raw.type !== "solid" && raw.type !== "linear" && raw.type !== "radial") return undefined
+  if (raw.type !== "solid" && raw.type !== "linear" && raw.type !== "radial")
+    return undefined
   return {
     type: raw.type,
     colors: raw.colors,
@@ -1000,7 +1394,9 @@ export function parseRoleStyle(raw: string | undefined | null): RoleStyle {
     const parsed = JSON.parse(raw) as RoleStyle
     if (!parsed) return { type: "" }
     const type =
-      parsed.type === "solid" || parsed.type === "linear" || parsed.type === "radial"
+      parsed.type === "solid" ||
+      parsed.type === "linear" ||
+      parsed.type === "radial"
         ? parsed.type
         : ("" as const)
     const textDecor = parseTextDecor(parsed)
@@ -1028,7 +1424,10 @@ export function parseRoleStyle(raw: string | undefined | null): RoleStyle {
         badge.underline ||
         badge.strikethrough)
     const hasTextDecor =
-      textDecor.bold || textDecor.italic || textDecor.underline || textDecor.strikethrough
+      textDecor.bold ||
+      textDecor.italic ||
+      textDecor.underline ||
+      textDecor.strikethrough
     if (!type && !hasBadge && !hasTextDecor) return { type: "" }
     return {
       type,
@@ -1051,7 +1450,7 @@ async function uploadRoleBadgeAsset(
   gid: string,
   rid: string,
   path: "badge-icon" | "badge-background",
-  file: File,
+  file: File
 ) {
   let session = getSession()
   if (session && new Date(session.access_expires_at).getTime() <= Date.now()) {
@@ -1060,13 +1459,16 @@ async function uploadRoleBadgeAsset(
   const headers = new Headers()
   headers.set("Content-Type", file.type || "application/octet-stream")
   if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
-  const response = await fetch(`${baseURL}/guilds/${gid}/roles/${rid}/${path}`, {
-    method: "PUT",
-    headers,
-    body: file,
-  })
+  const response = await fetch(
+    `${baseURL}/guilds/${gid}/roles/${rid}/${path}`,
+    {
+      method: "PUT",
+      headers,
+      body: file,
+    }
+  )
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError
+    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
     throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
   }
   return response.json() as Promise<{
@@ -1077,7 +1479,11 @@ async function uploadRoleBadgeAsset(
 }
 
 /** 角色徽章 icon 上传（原始字节，勿走 JSON Content-Type） */
-export async function uploadRoleBadgeIcon(gid: string, rid: string, file: File) {
+export async function uploadRoleBadgeIcon(
+  gid: string,
+  rid: string,
+  file: File
+) {
   return uploadRoleBadgeAsset(gid, rid, "badge-icon", file)
 }
 
@@ -1085,15 +1491,23 @@ export const deleteRoleBadgeIcon = (gid: string, rid: string) =>
   api<Role>(`/guilds/${gid}/roles/${rid}/badge-icon`, { method: "DELETE" })
 
 /** 角色徽章背景图上传 */
-export async function uploadRoleBadgeBackground(gid: string, rid: string, file: File) {
+export async function uploadRoleBadgeBackground(
+  gid: string,
+  rid: string,
+  file: File
+) {
   return uploadRoleBadgeAsset(gid, rid, "badge-background", file)
 }
 
 export const deleteRoleBadgeBackground = (gid: string, rid: string) =>
-  api<Role>(`/guilds/${gid}/roles/${rid}/badge-background`, { method: "DELETE" })
+  api<Role>(`/guilds/${gid}/roles/${rid}/badge-background`, {
+    method: "DELETE",
+  })
 
 /** 解析出 icon 实际应用的表面样式（sync 用文字；独立用 icon；无则 null） */
-export function resolveRoleIconStyle(style: RoleStyle | null | undefined): RoleSurfaceStyle | null {
+export function resolveRoleIconStyle(
+  style: RoleStyle | null | undefined
+): RoleSurfaceStyle | null {
   if (!style?.type) return null
   if (style.icon_sync) {
     return {
@@ -1114,7 +1528,10 @@ export function resolveRoleIconStyle(style: RoleStyle | null | undefined): RoleS
 }
 
 export const updateRoleStyle = (gid: string, rid: string, style: RoleStyle) =>
-  api<Role>(`/guilds/${gid}/roles/${rid}/style`, { method: "PUT", body: JSON.stringify(style) })
+  api<Role>(`/guilds/${gid}/roles/${rid}/style`, {
+    method: "PUT",
+    body: JSON.stringify(style),
+  })
 
 export type RoleFeatureBits = {
   manage_bots: boolean
@@ -1124,8 +1541,15 @@ export type RoleFeatureBits = {
 
 export const getRoleFeatureBits = (gid: string, rid: string) =>
   api<RoleFeatureBits>(`/guilds/${gid}/roles/${rid}/feature-bits`)
-export const patchRoleFeatureBits = (gid: string, rid: string, body: Partial<RoleFeatureBits>) =>
-  api<RoleFeatureBits>(`/guilds/${gid}/roles/${rid}/feature-bits`, { method: "PATCH", body: JSON.stringify(body) })
+export const patchRoleFeatureBits = (
+  gid: string,
+  rid: string,
+  body: Partial<RoleFeatureBits>
+) =>
+  api<RoleFeatureBits>(`/guilds/${gid}/roles/${rid}/feature-bits`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 
 export type GuildBadge = {
   id: string
@@ -1148,18 +1572,44 @@ export type BadgeGrant = {
   expires_at?: string | null
 }
 
-export const listBadges = (gid: string) => api<GuildBadge[]>(`/guilds/${gid}/badges`)
-export const createBadge = (gid: string, body: Omit<GuildBadge, "id" | "guild_id" | "created_at">) =>
-  api<GuildBadge>(`/guilds/${gid}/badges`, { method: "POST", body: JSON.stringify(body) })
-export const updateBadge = (gid: string, bid: string, body: Omit<GuildBadge, "id" | "guild_id" | "created_at">) =>
-  api<GuildBadge>(`/guilds/${gid}/badges/${bid}`, { method: "PATCH", body: JSON.stringify(body) })
-export const deleteBadge = (gid: string, bid: string) => api<void>(`/guilds/${gid}/badges/${bid}`, { method: "DELETE" })
-export const listBadgeGrants = (gid: string, bid: string) => api<BadgeGrant[]>(`/guilds/${gid}/badges/${bid}/grants`)
+export const listBadges = (gid: string) =>
+  api<GuildBadge[]>(`/guilds/${gid}/badges`)
+export const createBadge = (
+  gid: string,
+  body: Omit<GuildBadge, "id" | "guild_id" | "created_at">
+) =>
+  api<GuildBadge>(`/guilds/${gid}/badges`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+export const updateBadge = (
+  gid: string,
+  bid: string,
+  body: Omit<GuildBadge, "id" | "guild_id" | "created_at">
+) =>
+  api<GuildBadge>(`/guilds/${gid}/badges/${bid}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+export const deleteBadge = (gid: string, bid: string) =>
+  api<void>(`/guilds/${gid}/badges/${bid}`, { method: "DELETE" })
+export const listBadgeGrants = (gid: string, bid: string) =>
+  api<BadgeGrant[]>(`/guilds/${gid}/badges/${bid}/grants`)
 /** 授予徽章：body 缺省为永久；days 有效天数；until 截止时间（RFC3339） */
-export const grantBadge = (gid: string, bid: string, userID: string, body: { days?: number; until?: string } = {}) =>
-  api<BadgeGrant>(`/guilds/${gid}/badges/${bid}/members/${userID}`, { method: "PUT", body: JSON.stringify(body) })
+export const grantBadge = (
+  gid: string,
+  bid: string,
+  userID: string,
+  body: { days?: number; until?: string } = {}
+) =>
+  api<BadgeGrant>(`/guilds/${gid}/badges/${bid}/members/${userID}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
 export const revokeBadge = (gid: string, bid: string, userID: string) =>
-  api<void>(`/guilds/${gid}/badges/${bid}/members/${userID}`, { method: "DELETE" })
+  api<void>(`/guilds/${gid}/badges/${bid}/members/${userID}`, {
+    method: "DELETE",
+  })
 
 export type MemberBadgeView = {
   badge_id: string
@@ -1190,13 +1640,24 @@ export type MemberDisplay = {
   badges: MemberBadgeView[]
 }
 
-export const listMembersDisplay = (gid: string) => api<MemberDisplay[]>(`/guilds/${gid}/members/display`)
+export const listMembersDisplay = (gid: string) =>
+  api<MemberDisplay[]>(`/guilds/${gid}/members/display`)
 
-export const patchMyProfile = (body: { accent_color?: string; clear_avatar?: boolean; clear_banner?: boolean }) =>
-  api<User>("/users/@me/profile", { method: "PATCH", body: JSON.stringify(body) })
+export const patchMyProfile = (body: {
+  accent_color?: string
+  clear_avatar?: boolean
+  clear_banner?: boolean
+}) =>
+  api<User>("/users/@me/profile", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 
 /** 上传本人头像/横幅（原始字节 PUT，Content-Type 声明格式；GIF 视为动态头像） */
-export async function uploadMyProfileImage(kind: "avatar" | "banner", file: File): Promise<User> {
+export async function uploadMyProfileImage(
+  kind: "avatar" | "banner",
+  file: File
+): Promise<User> {
   const session = getSession()
   const response = await fetch(`${baseURL}/users/@me/${kind}`, {
     method: "PUT",
@@ -1207,7 +1668,7 @@ export async function uploadMyProfileImage(kind: "avatar" | "banner", file: File
     body: file,
   })
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError
+    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
     throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
   }
   return response.json() as Promise<User>
@@ -1255,23 +1716,57 @@ export type SharedInvite = Invite & {
 }
 
 export const getInviteLanding = (gid: string) =>
-  api<{ config: InviteLandingConfig; notices: InviteNotice[] }>(`/guilds/${gid}/invite-landing`)
-export const putInviteLanding = (gid: string, body: Partial<InviteLandingConfig>) =>
-  api<InviteLandingConfig>(`/guilds/${gid}/invite-landing`, { method: "PUT", body: JSON.stringify(body) })
+  api<{ config: InviteLandingConfig; notices: InviteNotice[] }>(
+    `/guilds/${gid}/invite-landing`
+  )
+export const putInviteLanding = (
+  gid: string,
+  body: Partial<InviteLandingConfig>
+) =>
+  api<InviteLandingConfig>(`/guilds/${gid}/invite-landing`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
 export const createInviteNotice = (
   gid: string,
-  body: { kind: InviteNoticeKind; title: string; body: string; position?: number; enabled?: boolean }
-) => api<InviteNotice>(`/guilds/${gid}/invite-notices`, { method: "POST", body: JSON.stringify(body) })
+  body: {
+    kind: InviteNoticeKind
+    title: string
+    body: string
+    position?: number
+    enabled?: boolean
+  }
+) =>
+  api<InviteNotice>(`/guilds/${gid}/invite-notices`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 export const updateInviteNotice = (
   gid: string,
   nid: string,
-  body: { kind: InviteNoticeKind; title: string; body: string; position?: number; enabled?: boolean }
-) => api<InviteNotice>(`/guilds/${gid}/invite-notices/${nid}`, { method: "PATCH", body: JSON.stringify(body) })
+  body: {
+    kind: InviteNoticeKind
+    title: string
+    body: string
+    position?: number
+    enabled?: boolean
+  }
+) =>
+  api<InviteNotice>(`/guilds/${gid}/invite-notices/${nid}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 export const deleteInviteNotice = (gid: string, nid: string) =>
   api<void>(`/guilds/${gid}/invite-notices/${nid}`, { method: "DELETE" })
-export const listInvites = (gid: string) => api<SharedInvite[]>(`/guilds/${gid}/invites`)
-export const revokeInvite = (gid: string, code: string) => api<void>(`/guilds/${gid}/invites/${code}`, { method: "DELETE" })
-export const createInviteWithTTL = (gid: string, ttlSeconds?: number, maxUses?: number) =>
+export const listInvites = (gid: string) =>
+  api<SharedInvite[]>(`/guilds/${gid}/invites`)
+export const revokeInvite = (gid: string, code: string) =>
+  api<void>(`/guilds/${gid}/invites/${code}`, { method: "DELETE" })
+export const createInviteWithTTL = (
+  gid: string,
+  ttlSeconds?: number,
+  maxUses?: number
+) =>
   api<Invite>(`/guilds/${gid}/invites`, {
     method: "POST",
     body: JSON.stringify({
@@ -1279,9 +1774,13 @@ export const createInviteWithTTL = (gid: string, ttlSeconds?: number, maxUses?: 
       ...(maxUses ? { max_uses: maxUses } : {}),
     }),
   })
-export const getInvitePortal = () => api<InvitePortalConfig>("/admin/invite-portal")
+export const getInvitePortal = () =>
+  api<InvitePortalConfig>("/admin/invite-portal")
 export const putInvitePortal = (body: Partial<InvitePortalConfig>) =>
-  api<InvitePortalConfig>("/admin/invite-portal", { method: "PUT", body: JSON.stringify(body) })
+  api<InvitePortalConfig>("/admin/invite-portal", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
 
 // ---------------------------------------------------------------------------
 // 系统管理员临场 / 音频审计（adminpresence）
@@ -1319,26 +1818,49 @@ export type AuditRecord = {
   created_at: string
 }
 
-export const getPlatformAudit = () => api<PlatformAuditConfig>("/admin/audit-config")
+export const getPlatformAudit = () =>
+  api<PlatformAuditConfig>("/admin/audit-config")
 export const putPlatformAudit = (body: Partial<PlatformAuditConfig>) =>
-  api<PlatformAuditConfig>("/admin/audit-config", { method: "PUT", body: JSON.stringify(body) })
-export const getChannelAudit = (cid: string) => api<ChannelAuditConfig>(`/admin/channels/${cid}/audit-config`)
-export const putChannelAudit = (cid: string, body: { inherit?: boolean; record?: boolean; notify?: boolean }) =>
-  api<ChannelAuditConfig>(`/admin/channels/${cid}/audit-config`, { method: "PUT", body: JSON.stringify(body) })
+  api<PlatformAuditConfig>("/admin/audit-config", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+export const getChannelAudit = (cid: string) =>
+  api<ChannelAuditConfig>(`/admin/channels/${cid}/audit-config`)
+export const putChannelAudit = (
+  cid: string,
+  body: { inherit?: boolean; record?: boolean; notify?: boolean }
+) =>
+  api<ChannelAuditConfig>(`/admin/channels/${cid}/audit-config`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
 export const postPresenceMessage = (cid: string, content: string) =>
-  api<{ id: string; channel_id: string; author_id: string; content: string; created_at: string }>(
-    `/admin/channels/${cid}/presence/message`,
-    { method: "POST", body: JSON.stringify({ content }) }
-  )
+  api<{
+    id: string
+    channel_id: string
+    author_id: string
+    content: string
+    created_at: string
+  }>(`/admin/channels/${cid}/presence/message`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  })
 export const getVoiceStealth = (gid: string) =>
-  api<{ guild_id: string; hidden: boolean }>(`/admin/voice/stealth?guild_id=${gid}`)
+  api<{ guild_id: string; hidden: boolean }>(
+    `/admin/voice/stealth?guild_id=${gid}`
+  )
 export const putVoiceStealth = (gid: string, hidden: boolean) =>
   api<{ guild_id: string; hidden: boolean }>("/admin/voice/stealth", {
     method: "PUT",
     body: JSON.stringify({ guild_id: gid, hidden }),
   })
-export const listAuditRecords = (filters: { guild_id?: string; channel_id?: string; user_id?: string } = {}) =>
-  api<{ records: AuditRecord[] }>(`/admin/audit-records${qs(filters)}`).then(raw => raw.records ?? [])
+export const listAuditRecords = (
+  filters: { guild_id?: string; channel_id?: string; user_id?: string } = {}
+) =>
+  api<{ records: AuditRecord[] }>(`/admin/audit-records${qs(filters)}`).then(
+    (raw) => raw.records ?? []
+  )
 
 // downloadAuditRecord 带鉴权头拉取录音并触发浏览器下载（端点需系统管理员，故不能用裸链接）。
 export async function downloadAuditRecord(id: string) {
@@ -1361,13 +1883,19 @@ export async function downloadAuditRecord(id: string) {
   URL.revokeObjectURL(url)
 }
 
-export const getScreenQuota = (gid: string) => api<RawScreenQuota>(`/guilds/${gid}/screen-quota`).then(normalizeQuota)
+export const getScreenQuota = (gid: string) =>
+  api<RawScreenQuota>(`/guilds/${gid}/screen-quota`).then(normalizeQuota)
 // 服基准与平台动态开关分属两个后端端点（docs 14 §7.2），此处聚合为一次保存
-export const patchScreenQuota = async (gid: string, body: { base_limit?: number; dynamic_enabled?: boolean }) => {
+export const patchScreenQuota = async (
+  gid: string,
+  body: { base_limit?: number; dynamic_enabled?: boolean }
+) => {
   if (body.dynamic_enabled !== undefined) {
     await api("/admin/screen-quota/settings", {
       method: "PATCH",
-      body: JSON.stringify({ dynamic_screen_quota_enabled: body.dynamic_enabled }),
+      body: JSON.stringify({
+        dynamic_screen_quota_enabled: body.dynamic_enabled,
+      }),
     })
   }
   if (body.base_limit !== undefined) {
@@ -1385,11 +1913,21 @@ export const patchScreenQuota = async (gid: string, body: { base_limit?: number;
 
 export const updateGuild = (
   gid: string,
-  body: { name?: string; description?: string; restriction_badge_visible?: boolean; restriction_reason_required?: boolean }
-) => api<Guild>(`/guilds/${gid}`, { method: "PATCH", body: JSON.stringify(body) })
+  body: {
+    name?: string
+    description?: string
+    restriction_badge_visible?: boolean
+    restriction_reason_required?: boolean
+  }
+) =>
+  api<Guild>(`/guilds/${gid}`, { method: "PATCH", body: JSON.stringify(body) })
 
 /** 上传服务器图标 / 横幅（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF/MP4；需 MANAGE_GUILD） */
-export async function uploadGuildImage(gid: string, kind: "icon" | "banner", file: File) {
+export async function uploadGuildImage(
+  gid: string,
+  kind: "icon" | "banner",
+  file: File
+) {
   const session = getSession()
   const form = new FormData()
   form.append("file", file)
@@ -1399,7 +1937,7 @@ export async function uploadGuildImage(gid: string, kind: "icon" | "banner", fil
     body: form,
   })
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError
+    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
     throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
   }
   return response.json() as Promise<{ url: string; guild: Guild }>
@@ -1412,7 +1950,9 @@ export const deleteGuildImage = (gid: string, kind: "icon" | "banner") =>
 // ---------------------------------------------------------------------------
 
 export const listGuildBanners = (gid: string) =>
-  api<{ guild_id: string; banners: GuildBanner[]; limit: number }>(`/guilds/${gid}/banners`)
+  api<{ guild_id: string; banners: GuildBanner[]; limit: number }>(
+    `/guilds/${gid}/banners`
+  )
 
 /** 新增 banner（multipart 字段 file，≤8MB，PNG/JPEG/WebP/GIF/MP4；需 MANAGE_GUILD），追加到末尾 */
 export async function addGuildBanner(gid: string, file: File) {
@@ -1425,10 +1965,13 @@ export async function addGuildBanner(gid: string, file: File) {
     body: form,
   })
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError
+    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
     throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
   }
-  return response.json() as Promise<{ banner: GuildBanner; banners: GuildBanner[] }>
+  return response.json() as Promise<{
+    banner: GuildBanner
+    banners: GuildBanner[]
+  }>
 }
 
 /** 重排序：banner_ids 为全量有序数组（必须恰好覆盖全部 banner，服务端按下标重排） */
@@ -1439,26 +1982,50 @@ export const reorderGuildBanners = (gid: string, bannerIDs: string[]) =>
   })
 
 export const deleteGuildBanner = (gid: string, bannerID: string) =>
-  api<{ banners: GuildBanner[] }>(`/guilds/${gid}/banners/${bannerID}`, { method: "DELETE" })
+  api<{ banners: GuildBanner[] }>(`/guilds/${gid}/banners/${bannerID}`, {
+    method: "DELETE",
+  })
 /** 删除服务器：confirm_name 必须与服务器名完全一致（防误删） */
 export const deleteGuild = (gid: string, confirmName: string) =>
-  api<void>(`/guilds/${gid}`, { method: "DELETE", body: JSON.stringify({ confirm_name: confirmName }) })
+  api<void>(`/guilds/${gid}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm_name: confirmName }),
+  })
 export const transferGuildOwnership = (gid: string, newOwnerUserID: string) =>
   api<Guild>(`/guilds/${gid}/transfer-ownership`, {
     method: "POST",
     body: JSON.stringify({ new_owner_user_id: newOwnerUserID }),
   })
 
-export const deleteRole = (gid: string, rid: string) => api<void>(`/guilds/${gid}/roles/${rid}`, { method: "DELETE" })
+export const deleteRole = (gid: string, rid: string) =>
+  api<void>(`/guilds/${gid}/roles/${rid}`, { method: "DELETE" })
 
 export const updateChannel = (
   cid: string,
-  body: { name?: string; topic?: string; parent_id?: string | null; user_limit?: number; rate_limit_per_user?: number; rate_limit_exempt_role_ids?: string[] }
-) => api<Channel>(`/channels/${cid}`, { method: "PATCH", body: JSON.stringify(body) })
-export const deleteChannel = (cid: string) => api<void>(`/channels/${cid}`, { method: "DELETE" })
+  body: {
+    name?: string
+    topic?: string
+    parent_id?: string | null
+    user_limit?: number
+    rate_limit_per_user?: number
+    rate_limit_exempt_role_ids?: string[]
+  }
+) =>
+  api<Channel>(`/channels/${cid}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+export const deleteChannel = (cid: string) =>
+  api<void>(`/channels/${cid}`, { method: "DELETE" })
 /** 批量保存频道排序（拖拽后整体提交） */
-export const reorderChannels = (gid: string, entries: { id: string; position: number }[]) =>
-  api<void>(`/guilds/${gid}/channels`, { method: "PATCH", body: JSON.stringify(entries) })
+export const reorderChannels = (
+  gid: string,
+  entries: { id: string; position: number }[]
+) =>
+  api<void>(`/guilds/${gid}/channels`, {
+    method: "PATCH",
+    body: JSON.stringify(entries),
+  })
 
 /** 频道既有权限覆盖读回（编辑器回显） */
 export type ChannelOverwriteView = {
@@ -1475,11 +2042,23 @@ export type ChannelOverwriteView = {
 
 export const listChannelOverwrites = (gid: string, cid: string) =>
   api<ChannelOverwriteView[]>(`/guilds/${gid}/channels/${cid}/overwrites`)
-export const deleteChannelOverwrite = (gid: string, cid: string, targetID: string, type: OverwriteType) =>
-  api<void>(`/guilds/${gid}/channels/${cid}/overwrites/${targetID}?type=${type}`, { method: "DELETE" })
+export const deleteChannelOverwrite = (
+  gid: string,
+  cid: string,
+  targetID: string,
+  type: OverwriteType
+) =>
+  api<void>(
+    `/guilds/${gid}/channels/${cid}/overwrites/${targetID}?type=${type}`,
+    { method: "DELETE" }
+  )
 
 /** 修改成员昵称（本人 CHANGE_NICKNAME / 他人 MANAGE_NICKNAMES）；空字符串清除 */
-export const updateMemberNickname = (gid: string, memberID: string, nickname: string) =>
+export const updateMemberNickname = (
+  gid: string,
+  memberID: string,
+  nickname: string
+) =>
   api<{ id: string; nickname: string }>(`/guilds/${gid}/members/${memberID}`, {
     method: "PATCH",
     body: JSON.stringify({ nickname }),
@@ -1497,7 +2076,8 @@ export type UploadLimit = {
   default_bytes?: number
 }
 
-export const getUploadLimit = (gid: string) => api<UploadLimit>(`/admin/guilds/${gid}/upload-limit`)
+export const getUploadLimit = (gid: string) =>
+  api<UploadLimit>(`/admin/guilds/${gid}/upload-limit`)
 export const patchUploadLimit = (gid: string, bytes: number) =>
   api<UploadLimit>(`/admin/guilds/${gid}/upload-limit`, {
     method: "PATCH",
@@ -1505,12 +2085,17 @@ export const patchUploadLimit = (gid: string, bytes: number) =>
   })
 
 export const getMessageRetention = (gid: string) =>
-  api<{ guild_id: string; retention_days: number }>(`/guilds/${gid}/message-retention`)
+  api<{ guild_id: string; retention_days: number }>(
+    `/guilds/${gid}/message-retention`
+  )
 export const patchMessageRetention = (gid: string, days: number) =>
-  api<{ guild_id: string; retention_days: number }>(`/guilds/${gid}/message-retention`, {
-    method: "PATCH",
-    body: JSON.stringify({ retention_days: days }),
-  })
+  api<{ guild_id: string; retention_days: number }>(
+    `/guilds/${gid}/message-retention`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ retention_days: days }),
+    }
+  )
 
 export type VoicePackConfig = {
   guild_id: string
@@ -1520,18 +2105,36 @@ export type VoicePackConfig = {
   trigger: string
 }
 
-export const getGuildVoicePack = (gid: string) => api<VoicePackConfig>(`/guilds/${gid}/voice-pack`)
+export const getGuildVoicePack = (gid: string) =>
+  api<VoicePackConfig>(`/guilds/${gid}/voice-pack`)
 export const patchGuildVoicePack = (
   gid: string,
-  body: { enabled?: boolean; audio_url?: string; scope?: string; trigger?: string }
-) => api<VoicePackConfig>(`/guilds/${gid}/voice-pack`, { method: "PATCH", body: JSON.stringify(body) })
+  body: {
+    enabled?: boolean
+    audio_url?: string
+    scope?: string
+    trigger?: string
+  }
+) =>
+  api<VoicePackConfig>(`/guilds/${gid}/voice-pack`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 
 /** 频道级语音包开关：无记录时默认允许播放 */
-export type ChannelVoicePack = { channel_id: string; guild_id: string; allowed: boolean }
+export type ChannelVoicePack = {
+  channel_id: string
+  guild_id: string
+  allowed: boolean
+}
 
 export const getChannelVoicePack = (gid: string, cid: string) =>
   api<ChannelVoicePack>(`/guilds/${gid}/channels/${cid}/voice-pack`)
-export const putChannelVoicePack = (gid: string, cid: string, allowed: boolean) =>
+export const putChannelVoicePack = (
+  gid: string,
+  cid: string,
+  allowed: boolean
+) =>
   api<ChannelVoicePack>(`/guilds/${gid}/channels/${cid}/voice-pack`, {
     method: "PUT",
     body: JSON.stringify({ allowed }),
@@ -1548,11 +2151,16 @@ export type VoiceStageConfig = {
   max_concurrent_screens: number
 }
 
-export const getVoiceStageConfig = (cid: string) => api<VoiceStageConfig>(`/channels/${cid}/voice-stage`)
+export const getVoiceStageConfig = (cid: string) =>
+  api<VoiceStageConfig>(`/channels/${cid}/voice-stage`)
 export const patchVoiceStageConfig = (
   cid: string,
   body: Partial<Omit<VoiceStageConfig, "channel_id">>
-) => api<VoiceStageConfig>(`/channels/${cid}/voice-stage`, { method: "PATCH", body: JSON.stringify(body) })
+) =>
+  api<VoiceStageConfig>(`/channels/${cid}/voice-stage`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 
 // ---------------------------------------------------------------------------
 // 平台用户治理（platformadmin，系统管理员）
@@ -1565,33 +2173,59 @@ export type PlatformUser = User & {
   created_at?: string
 }
 
-export type PlatformUserPage = { users: PlatformUser[]; total: number; limit: number; offset: number }
+export type PlatformUserPage = {
+  users: PlatformUser[]
+  total: number
+  limit: number
+  offset: number
+}
 export type PlatformUserFilter = "" | "disabled" | "admin" | "bot"
 
-export const listPlatformUsers = (params: { q?: string; limit?: number; offset?: number; filter?: PlatformUserFilter } = {}) =>
-  api<PlatformUserPage>(`/admin/users${qs(params)}`)
+export const listPlatformUsers = (
+  params: {
+    q?: string
+    limit?: number
+    offset?: number
+    filter?: PlatformUserFilter
+  } = {}
+) => api<PlatformUserPage>(`/admin/users${qs(params)}`)
 export const disablePlatformUser = (uid: string) =>
   api<PlatformUser>(`/admin/users/${uid}/disable`, { method: "POST" })
-export const enablePlatformUser = (uid: string) => api<PlatformUser>(`/admin/users/${uid}/enable`, { method: "POST" })
+export const enablePlatformUser = (uid: string) =>
+  api<PlatformUser>(`/admin/users/${uid}/enable`, { method: "POST" })
 export const resetPlatformUserPassword = (uid: string, password: string) =>
-  api<{ user_id: string; sessions_revoked: boolean }>(`/admin/users/${uid}/reset-password`, {
-    method: "POST",
-    body: JSON.stringify({ password }),
-  })
-export const patchPlatformUserSystemAdmin = (uid: string, systemAdmin: boolean) =>
+  api<{ user_id: string; sessions_revoked: boolean }>(
+    `/admin/users/${uid}/reset-password`,
+    {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }
+  )
+export const patchPlatformUserSystemAdmin = (
+  uid: string,
+  systemAdmin: boolean
+) =>
   api<PlatformUser>(`/admin/users/${uid}/system-admin`, {
     method: "PATCH",
     body: JSON.stringify({ system_admin: systemAdmin }),
   })
 
-export type RegistrationSetting = { signup_enabled: boolean; source: "db" | "default" }
+export type RegistrationSetting = {
+  signup_enabled: boolean
+  source: "db" | "default"
+}
 
-export const getRegistrationSetting = () => api<RegistrationSetting>("/admin/registration")
+export const getRegistrationSetting = () =>
+  api<RegistrationSetting>("/admin/registration")
 export const putRegistrationSetting = (enabled: boolean) =>
-  api<RegistrationSetting>("/admin/registration", { method: "PUT", body: JSON.stringify({ signup_enabled: enabled }) })
+  api<RegistrationSetting>("/admin/registration", {
+    method: "PUT",
+    body: JSON.stringify({ signup_enabled: enabled }),
+  })
 
 /** 注册邀请链接（凭码注册可绕过注册开关，仅系统管理员） */
-export type RegistrationInviteStatus = "active" | "expired" | "exhausted" | "revoked"
+export type RegistrationInviteStatus =
+  "active" | "expired" | "exhausted" | "revoked"
 
 export type RegistrationInvite = {
   id: string
@@ -1607,11 +2241,18 @@ export type RegistrationInvite = {
   status: RegistrationInviteStatus
 }
 
-export const listRegistrationInvites = () => api<RegistrationInvite[]>("/admin/registration-invites")
-export const createRegistrationInvite = (ttlSeconds?: number, maxUses?: number) =>
+export const listRegistrationInvites = () =>
+  api<RegistrationInvite[]>("/admin/registration-invites")
+export const createRegistrationInvite = (
+  ttlSeconds?: number,
+  maxUses?: number
+) =>
   api<RegistrationInvite>("/admin/registration-invites", {
     method: "POST",
-    body: JSON.stringify({ ttl_seconds: ttlSeconds || undefined, max_uses: maxUses || undefined }),
+    body: JSON.stringify({
+      ttl_seconds: ttlSeconds || undefined,
+      max_uses: maxUses || undefined,
+    }),
   })
 export const revokeRegistrationInvite = (id: string) =>
   api<void>(`/admin/registration-invites/${id}`, { method: "DELETE" })
@@ -1633,19 +2274,29 @@ export type LoginSession = {
   ip_address?: string
 }
 
-export const changeMyPassword = (currentPassword: string, newPassword: string) =>
+export const changeMyPassword = (
+  currentPassword: string,
+  newPassword: string
+) =>
   api<void>("/users/@me/password", {
     method: "PATCH",
-    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
   })
 export const listMySessions = () =>
-  api<{ sessions?: LoginSession[] }>("/users/@me/sessions").then(raw => raw.sessions ?? [])
-export const revokeMySession = (sessionID: string) => api<void>(`/users/@me/sessions/${sessionID}`, { method: "DELETE" })
+  api<{ sessions?: LoginSession[] }>("/users/@me/sessions").then(
+    (raw) => raw.sessions ?? []
+  )
+export const revokeMySession = (sessionID: string) =>
+  api<void>(`/users/@me/sessions/${sessionID}`, { method: "DELETE" })
 /** 登出所有其他设备（保留当前会话，docs 01 FR-27） */
 export const revokeOtherSessions = () =>
   api<{ revoked: number }>("/users/@me/sessions", { method: "DELETE" })
 /** 服务器时间（docs 08 §8-9：客户端校准时钟偏差） */
-export const getServerTime = () => api<{ server_time: string; unix_ms: number }>("/time")
+export const getServerTime = () =>
+  api<{ server_time: string; unix_ms: number }>("/time")
 
 // ---------------------------------------------------------------------------
 // 装扮商店运营（/admin/cosmetics，系统管理员）
@@ -1749,7 +2400,9 @@ export type CosmeticBundle = {
 // ----- 品类（无 DELETE，用 enabled=false 停用） -----
 
 export const listCosmeticCategories = () =>
-  api<{ categories: CosmeticCategory[]; version: string }>("/admin/cosmetics/categories")
+  api<{ categories: CosmeticCategory[]; version: string }>(
+    "/admin/cosmetics/categories"
+  )
 
 export type CosmeticCategoryUpsert = {
   key?: string
@@ -1762,32 +2415,55 @@ export type CosmeticCategoryUpsert = {
 }
 
 export const createCosmeticCategory = (body: CosmeticCategoryUpsert) =>
-  api<CosmeticCategory>("/admin/cosmetics/categories", { method: "POST", body: JSON.stringify(body) })
-export const patchCosmeticCategory = (key: string, body: CosmeticCategoryUpsert) =>
-  api<CosmeticCategory>(`/admin/cosmetics/categories/${encodeURIComponent(key)}`, {
-    method: "PATCH",
+  api<CosmeticCategory>("/admin/cosmetics/categories", {
+    method: "POST",
     body: JSON.stringify(body),
   })
+export const patchCosmeticCategory = (
+  key: string,
+  body: CosmeticCategoryUpsert
+) =>
+  api<CosmeticCategory>(
+    `/admin/cosmetics/categories/${encodeURIComponent(key)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }
+  )
 
 // ----- 标签 -----
 
-export const listCosmeticTags = () => api<{ tags: CosmeticTag[] }>("/admin/cosmetics/tags")
+export const listCosmeticTags = () =>
+  api<{ tags: CosmeticTag[] }>("/admin/cosmetics/tags")
 
-export type CosmeticTagUpsert = { key?: string; name?: string; color?: string; sort_order?: number }
+export type CosmeticTagUpsert = {
+  key?: string
+  name?: string
+  color?: string
+  sort_order?: number
+}
 
 export const createCosmeticTag = (body: CosmeticTagUpsert) =>
-  api<CosmeticTag>("/admin/cosmetics/tags", { method: "POST", body: JSON.stringify(body) })
+  api<CosmeticTag>("/admin/cosmetics/tags", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 export const patchCosmeticTag = (tagID: string, body: CosmeticTagUpsert) =>
-  api<CosmeticTag>(`/admin/cosmetics/tags/${tagID}`, { method: "PATCH", body: JSON.stringify(body) })
+  api<CosmeticTag>(`/admin/cosmetics/tags/${tagID}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 export const deleteCosmeticTag = (tagID: string) =>
   api<void>(`/admin/cosmetics/tags/${tagID}`, { method: "DELETE" })
 
 // ----- 单品 -----
 
 /** 服务端仅支持 category/status 筛选（最多 500 条）；tag/关键词在前端过滤 */
-export const listCosmeticItems = (params: { category?: string; status?: string } = {}) =>
-  api<{ items: CosmeticItem[] }>(`/admin/cosmetics/items${qs(params)}`)
-export const getCosmeticItem = (itemID: string) => api<CosmeticItem>(`/admin/cosmetics/items/${itemID}`)
+export const listCosmeticItems = (
+  params: { category?: string; status?: string } = {}
+) => api<{ items: CosmeticItem[] }>(`/admin/cosmetics/items${qs(params)}`)
+export const getCosmeticItem = (itemID: string) =>
+  api<CosmeticItem>(`/admin/cosmetics/items/${itemID}`)
 
 export type CosmeticItemWrite = {
   category_key?: string
@@ -1804,12 +2480,22 @@ export type CosmeticItemWrite = {
 }
 
 export const createCosmeticItem = (body: CosmeticItemWrite) =>
-  api<CosmeticItem>("/admin/cosmetics/items", { method: "POST", body: JSON.stringify(body) })
+  api<CosmeticItem>("/admin/cosmetics/items", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
 export const patchCosmeticItem = (itemID: string, body: CosmeticItemWrite) =>
-  api<CosmeticItem>(`/admin/cosmetics/items/${itemID}`, { method: "PATCH", body: JSON.stringify(body) })
+  api<CosmeticItem>(`/admin/cosmetics/items/${itemID}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 
 /** 资产槽上传：raw body PUT（非 multipart）；响应即最新 itemView，直接回填 state */
-export async function uploadCosmeticItemAsset(itemID: string, slot: string, file: File) {
+export async function uploadCosmeticItemAsset(
+  itemID: string,
+  slot: string,
+  file: File
+) {
   let session = getSession()
   if (session && new Date(session.access_expires_at).getTime() <= Date.now()) {
     session = await refreshSession(session)
@@ -1817,13 +2503,16 @@ export async function uploadCosmeticItemAsset(itemID: string, slot: string, file
   const headers = new Headers()
   headers.set("Content-Type", file.type || "application/octet-stream")
   if (session) headers.set("Authorization", `Bearer ${session.access_token}`)
-  const response = await fetch(`${baseURL}/admin/cosmetics/items/${itemID}/assets/${encodeURIComponent(slot)}`, {
-    method: "PUT",
-    headers,
-    body: file,
-  })
+  const response = await fetch(
+    `${baseURL}/admin/cosmetics/items/${itemID}/assets/${encodeURIComponent(slot)}`,
+    {
+      method: "PUT",
+      headers,
+      body: file,
+    }
+  )
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError
+    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
     throw new Error(body.error?.message ?? `上传失败（${response.status}）`)
   }
   return response.json() as Promise<CosmeticItem>
@@ -1831,7 +2520,8 @@ export async function uploadCosmeticItemAsset(itemID: string, slot: string, file
 
 // ----- 捆绑包 -----
 
-export const listCosmeticBundles = () => api<{ bundles: CosmeticBundle[] }>("/admin/cosmetics/bundles")
+export const listCosmeticBundles = () =>
+  api<{ bundles: CosmeticBundle[] }>("/admin/cosmetics/bundles")
 /** 详情含 items 展开 */
 export const getCosmeticBundle = (bundleID: string) =>
   api<CosmeticBundle>(`/admin/cosmetics/bundles/${bundleID}`)
@@ -1850,22 +2540,114 @@ export type CosmeticBundleWrite = {
 }
 
 export const createCosmeticBundle = (body: CosmeticBundleWrite) =>
-  api<CosmeticBundle>("/admin/cosmetics/bundles", { method: "POST", body: JSON.stringify(body) })
-export const patchCosmeticBundle = (bundleID: string, body: CosmeticBundleWrite) =>
-  api<CosmeticBundle>(`/admin/cosmetics/bundles/${bundleID}`, { method: "PATCH", body: JSON.stringify(body) })
+  api<CosmeticBundle>("/admin/cosmetics/bundles", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+export const patchCosmeticBundle = (
+  bundleID: string,
+  body: CosmeticBundleWrite
+) =>
+  api<CosmeticBundle>(`/admin/cosmetics/bundles/${bundleID}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 
 // ----- 发放工具 -----
 
 /** 发放装扮（幂等）：created=false 表示该用户已拥有 */
-export const grantCosmeticItem = (body: { user_id: string; item_id: string; expires_at?: string }) =>
-  api<{ ok: boolean; created: boolean; item_id: string }>("/admin/cosmetics/grant", {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
+export const grantCosmeticItem = (body: {
+  user_id: string
+  item_id: string
+  expires_at?: string
+}) =>
+  api<{ ok: boolean; created: boolean; item_id: string }>(
+    "/admin/cosmetics/grant",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    }
+  )
 
 /** 发放/扣减积分（amount 可负；扣减至负数后端返回 INSUFFICIENT_POINTS） */
-export const grantCosmeticPoints = (body: { user_id: string; amount: number; reason?: string }) =>
+export const grantCosmeticPoints = (body: {
+  user_id: string
+  amount: number
+  reason?: string
+}) =>
   api<{ balance: number; user_id: string }>("/admin/cosmetics/points/grant", {
     method: "POST",
     body: JSON.stringify(body),
   })
+
+// ---------------------------------------------------------------------------
+// 活跃度运营（/admin/activity，系统管理员）
+// ---------------------------------------------------------------------------
+
+/** 活跃度配置：权重/日上限/积分换算/等级门槛（PUT 时不含 updated_at） */
+export type ActivityConfig = {
+  enabled: boolean
+  /** 业务日相对 UTC 的偏移分钟数（480 = 北京时间 UTC+8） */
+  day_offset_minutes: number
+  weight_message: number
+  cap_message: number
+  weight_voice_minute: number
+  cap_voice_minutes: number
+  weight_reaction: number
+  cap_reactions: number
+  /** 登录维度日上限固定为 1，只有权重 */
+  weight_login: number
+  /** 活跃分 → 积分换算率 */
+  points_rate: number
+  bonus_per_level_pct: number
+  max_bonus_pct: number
+  /** 第 i 项 = 达到 Lv i+1 所需累计总分；必须严格递增 */
+  level_thresholds: number[]
+  updated_at: string
+}
+
+export type ActivityConfigWrite = Omit<ActivityConfig, "updated_at">
+
+export type ActivityStats = {
+  day: string
+  active_users: number
+  total_score: number
+  granted_users: number
+  granted_points: number
+}
+
+export type ActivityUserDay = {
+  day: string
+  msg_count: number
+  voice_minutes: number
+  reaction_count: number
+  login_count: number
+  score: number
+  granted: boolean
+  granted_points: number
+  granted_at?: string
+}
+
+export type ActivityUserDetail = {
+  user_id: string
+  total_score: number
+  level: number
+  days: ActivityUserDay[]
+}
+
+export const getActivityConfig = () =>
+  api<ActivityConfig>("/admin/activity/config")
+/** 非法配置（门槛非严格递增、数值为负）后端返回 400 INVALID_CONFIG */
+export const putActivityConfig = (body: ActivityConfigWrite) =>
+  api<ActivityConfig>("/admin/activity/config", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+/** day 格式 YYYY-MM-DD；缺省 = 今日业务日 */
+export const getActivityStats = (day?: string) =>
+  api<ActivityStats>(`/admin/activity/stats${qs({ day })}`)
+export const getActivityUserDetail = (userID: string, days = 30) =>
+  api<ActivityUserDetail>(`/admin/activity/users/${userID}${qs({ days })}`)
+/** 手动触发一轮结算，返回本轮结算行数 */
+export const triggerActivitySettle = () =>
+  api<{ settled: number }>("/admin/activity/settle", { method: "POST" })

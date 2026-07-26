@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/activity"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
@@ -72,6 +73,11 @@ func (s *service) putReaction(c *gin.Context) {
 		notFound(c)
 		return
 	}
+	// ephemeral 消息禁止反应（反应事件为频道广播，无法按可见名单裁剪）。
+	if message.IsEphemeral() {
+		notFound(c)
+		return
+	}
 	user := s.currentUser(c)
 	reaction := model.MessageReaction{
 		ID:        uuid.New(),
@@ -88,6 +94,8 @@ func (s *service) putReaction(c *gin.Context) {
 	}
 	if result.RowsAffected > 0 {
 		s.publishReactionEvent(eventbus.EventMessageReactionAdd, message, user.ID, emoji)
+		// 活跃度累计：仅首次添加计入（重复 PUT 幂等分支不进这里）。
+		activity.TrackReaction(user)
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -116,6 +124,10 @@ func (s *service) deleteReaction(c *gin.Context) {
 	}
 	message, err := s.loadLiveMessage(channel.ID, messageID)
 	if err != nil {
+		notFound(c)
+		return
+	}
+	if message.IsEphemeral() {
 		notFound(c)
 		return
 	}
@@ -160,7 +172,7 @@ func (s *service) listReactionUsers(c *gin.Context) {
 	if _, isCustom, key := sticker.ParseReactionKey(emoji); isCustom {
 		emoji = key
 	}
-	message, err := s.loadLiveMessage(channel.ID, messageID)
+	message, err := s.loadVisibleMessage(channel.ID, messageID, s.currentUser(c).ID)
 	if err != nil {
 		notFound(c)
 		return

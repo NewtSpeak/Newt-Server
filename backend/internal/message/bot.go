@@ -27,5 +27,7 @@ func RegisterBot(root *gin.RouterGroup, deps appdeps.Deps) error {
 	authed.POST("/channels/:channelID/typing", svc.postTyping)
 	// 流式消息三段协议（bot 专属）。
 	svc.mountStream(authed)
+	// 交互回调（bot 专属，设计文档 2026-07-26）：ack / reply / update_message。
+	authed.POST("/interactions/:interactionID/callback", svc.interactionCallback)
 	return nil
 }

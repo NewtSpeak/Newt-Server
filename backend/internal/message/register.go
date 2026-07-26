@@ -32,15 +32,16 @@ func newService(deps appdeps.Deps, urlPrefix string) (*service, error) {
 		return nil, err
 	}
 	return &service{
-		db:          deps.DB,
-		bus:         deps.Bus,
-		cfg:         deps.Cfg,
-		storage:     storage,
-		index:       index,
-		searchLimit: newUserLimiter(1, 5), // AU.8：每用户 1 QPS、突发 5
-		ids:         sharedIDs,
-		currentUser: deps.CurrentUser,
-		urlPrefix:   urlPrefix,
+		db:            deps.DB,
+		bus:           deps.Bus,
+		cfg:           deps.Cfg,
+		storage:       storage,
+		index:         index,
+		searchLimit:   newUserLimiter(1, 5), // AU.8：每用户 1 QPS、突发 5
+		interactLimit: newUserLimiter(2, 5), // 按钮交互：每用户 2 QPS、突发 5
+		ids:           sharedIDs,
+		currentUser:   deps.CurrentUser,
+		urlPrefix:     urlPrefix,
 	}, nil
 }
 
@@ -58,6 +59,8 @@ func (s *service) mountUserRoutes(public, authed *gin.RouterGroup) {
 	authed.PATCH("/channels/:channelID/messages/:messageID", s.editMessage)
 	authed.DELETE("/channels/:channelID/messages/:messageID", s.deleteMessage)
 	authed.GET("/channels/:channelID/messages/:messageID/edits", s.listEdits)
+	// 交互按钮点击（设计文档 2026-07-26）：需 USE_APPLICATION_COMMANDS。
+	authed.POST("/channels/:channelID/messages/:messageID/interactions", s.createInteraction)
 	// 未读同步（docs 15 §7-1）：已读 ack 推进（路径版 / 体内版）+ 全服已读 + REST 兜底。
 	authed.POST("/channels/:channelID/messages/:messageID/ack", s.ackMessage)
 	authed.POST("/channels/:channelID/ack", s.ackChannel)

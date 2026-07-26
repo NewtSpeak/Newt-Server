@@ -77,10 +77,23 @@ const (
 	// 客户端据此重拉 GET /guilds/{gid}/voice/nodes 候选列表刷新 RTT 探测目标。
 	EventVoiceNodePoolUpdate = "VOICE_NODE_POOL_UPDATE"
 
+	// SFU_DEPLOYMENT_UPDATE SFU 节点一键部署进度（internal/sfudeploy）：
+	// 定向推给发起部署的管理员（UserIDs），载荷
+	// {deployment_id, status, step, log_offset, node_id?, error?}。
+	// 日志正文按 log_offset 增量由 GET /admin/sfu/deployments/:id 拉取。
+	EventSfuDeploymentUpdate = "SFU_DEPLOYMENT_UPDATE"
+
 	// 机器人与消息流式/卡片（bot 专项）。
 	EventMessageStreamStart = "MESSAGE_STREAM_START" // 流式消息开始（占位消息已创建）
 	EventMessageStreamDelta = "MESSAGE_STREAM_DELTA" // 流式增量分片
 	EventMessageStreamEnd   = "MESSAGE_STREAM_END"   // 流式结束（最终态）
+
+	// 消息交互（bot 交互按钮，设计文档 2026-07-26）。均为 UserIDs 定向、不带
+	// GuildID/ChannelID（payload 不含消息正文，无需频道可见性/解锁过滤）：
+	//   - INTERACTION_CREATE 定向 bot 用户：有人点击了按钮（含一次性回应 token）；
+	//   - INTERACTION_ACK 定向点击者：状态推进 ACKED/RESPONDED/EXPIRED（客户端据此收敛按钮 pending 态）。
+	EventInteractionCreate = "INTERACTION_CREATE"
+	EventInteractionAck    = "INTERACTION_ACK"
 
 	// 用户资料 / 自定义 / 徽章（customization 专项）。
 	EventUserUpdate        = "USER_UPDATE"         // 头像/横幅/强调色变更
@@ -124,7 +137,11 @@ const (
 	EventCosmeticCatalogUpdate   = "COSMETIC_CATALOG_UPDATE"   // 品类/商品/标签变更
 	EventCosmeticInventoryUpdate = "COSMETIC_INVENTORY_UPDATE" // 库存获得（本人）
 	EventCosmeticLoadoutUpdate   = "COSMETIC_LOADOUT_UPDATE"   // 装备变更（本人+共享服）
-	EventCosmeticPointsUpdate    = "COSMETIC_POINTS_UPDATE"    // 积分变动（本人）
+	EventCosmeticPointsUpdate    = "COSMETIC_POINTS_UPDATE"    // 积分变动（本人；载荷可带 delta/reason）
+
+	// 平台活跃度（Activity）：均定向本人全部端。
+	EventActivityUpdate  = "ACTIVITY_UPDATE"   // flush 后今日计数/预估分/总分/等级
+	EventActivityLevelUp = "ACTIVITY_LEVEL_UP" // 结算导致等级提升
 )
 
 // 内部事件（仅服务内部流转，Gateway 必须过滤，不下发客户端）。
