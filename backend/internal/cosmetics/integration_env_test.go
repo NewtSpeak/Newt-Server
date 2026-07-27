@@ -177,14 +177,22 @@ func (env *testEnv) signup(t *testing.T) tokenPair {
 	return decode[tokenPair](t, recorder)
 }
 
-// signupAdmin 注册并直接落库提升为 system_admin（auth 中间件每请求从 DB 加载用户，即时生效）。
+// signupAdmin 注册普通用户后提升为 system_admin，再经后台 /api/v1/auth/login
+// 换取 aud=admin 的 token（用户端 gapi 签发的 aud=client 不能打后台 API）。
 func (env *testEnv) signupAdmin(t *testing.T) tokenPair {
 	t.Helper()
 	pair := env.signup(t)
 	if err := env.db.Model(&model.User{}).Where("id = ?", pair.User.ID).Update("system_admin", true).Error; err != nil {
 		t.Fatalf("提升管理员失败: %v", err)
 	}
-	return pair
+	recorder := env.request(t, http.MethodPost, "/api/v1/auth/login", "", map[string]string{
+		"identifier": pair.User.Username,
+		"password":   "password-123",
+	})
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("管理员后台登录失败: %d %s", recorder.Code, recorder.Body.String())
+	}
+	return decode[tokenPair](t, recorder)
 }
 
 // joinGuild 直接落库建 guild 与成员关系。

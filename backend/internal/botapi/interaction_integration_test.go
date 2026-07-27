@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,8 +26,11 @@ import (
 )
 
 // setupMemberUser 落库创建普通用户并加入服，返回其后台平面 Bearer 认证头。
+// 普通用户不能走 /api/v1/auth/login（仅 system_admin）；测试直接签发 aud=admin
+// token——后台消息平面鉴权只校验受众，不强制 system_admin。
 func setupMemberUser(t *testing.T, router *gin.Engine, db *gorm.DB, guildID uuid.UUID, name string) (model.User, string) {
 	t.Helper()
+	_ = router
 	suffix := fmt.Sprintf("%08x", rand.Uint32())
 	hash, err := security.HashPassword("password123")
 	if err != nil {
@@ -42,13 +46,13 @@ func setupMemberUser(t *testing.T, router *gin.Engine, db *gorm.DB, guildID uuid
 	if err := db.Create(&model.Member{ID: uuid.New(), GuildID: guildID, UserID: user.ID}).Error; err != nil {
 		t.Fatalf("加入服失败: %v", err)
 	}
-	rec, body := doBotReq(t, router, http.MethodPost, "/api/v1/auth/login", "", map[string]string{
-		"identifier": user.Username, "password": "password123",
-	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("用户登录返回 %d: %s", rec.Code, rec.Body.String())
+	// 与 newBotRouter 中 JWTSecret / AccessTokenTTL 保持一致。
+	tokens := security.NewTokenManager("integration-secret-integration-32", time.Minute)
+	access, _, err := tokens.AccessTokenWithAudience(user.ID, security.AudienceAdmin)
+	if err != nil {
+		t.Fatalf("签发成员 access token 失败: %v", err)
 	}
-	return user, "Bearer " + body["access_token"].(string)
+	return user, "Bearer " + access
 }
 
 func buttonsOf(t *testing.T, msg map[string]any) []any {
