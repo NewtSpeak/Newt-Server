@@ -293,7 +293,8 @@ func (h *api) getItem(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, h.buildItemView(item, "", !admin))
+	// includeStatus：管理端需要看到 draft/published；用户端隐藏状态字段。
+	c.JSON(http.StatusOK, h.buildItemView(item, "", admin))
 }
 
 // adminListItems GET /admin/cosmetics/items

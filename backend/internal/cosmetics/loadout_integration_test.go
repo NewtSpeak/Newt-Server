@@ -216,8 +216,9 @@ func TestAdminGrantIdempotentAndExpiry(t *testing.T) {
 	if second := grant(nil); second.Created {
 		t.Fatal("重复发放 created 应为 false")
 	}
-	// 非 admin 调用 → 403
-	if r := env.request(t, http.MethodPost, "/api/v1/admin/cosmetics/grant", user.AccessToken,
+	// 非 admin 调用 → 403（须 aud=admin 才能过 Auth，再由 requireSystemAdmin 拒绝）
+	userAdminToken := env.adminAudienceToken(t, user.User.ID)
+	if r := env.request(t, http.MethodPost, "/api/v1/admin/cosmetics/grant", userAdminToken,
 		map[string]any{"user_id": user.User.ID.String(), "item_id": item.ID}); r.Code != http.StatusForbidden {
 		t.Fatalf("非管理员 grant 应 403，实际 %d", r.Code)
 	}

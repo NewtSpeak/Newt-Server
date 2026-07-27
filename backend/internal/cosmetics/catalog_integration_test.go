@@ -15,10 +15,12 @@ func TestCategoryCreateAndSchemaValidation(t *testing.T) {
 	env := newEnv(t)
 	admin := env.signupAdmin(t)
 	user := env.signup(t)
+	// 后台平面鉴权要求 aud=admin；非 system_admin 的 admin 受众 token 才走到 403。
+	userAdminToken := env.adminAudienceToken(t, user.User.ID)
 
 	key := newUniqueKey("cat")
 	// 非 admin 建品类 → 403
-	if r := env.request(t, http.MethodPost, "/api/v1/admin/cosmetics/categories", user.AccessToken,
+	if r := env.request(t, http.MethodPost, "/api/v1/admin/cosmetics/categories", userAdminToken,
 		map[string]any{"key": key, "name": "x"}); r.Code != http.StatusForbidden {
 		t.Fatalf("非管理员建品类应 403，实际 %d", r.Code)
 	}

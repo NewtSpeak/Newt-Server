@@ -195,6 +195,18 @@ func (env *testEnv) signupAdmin(t *testing.T) tokenPair {
 	return decode[tokenPair](t, recorder)
 }
 
+// adminAudienceToken 为已有用户签发 aud=admin 的 access token（不提升 system_admin）。
+// 用于断言「已认证但非管理员」路径返回 403（client token 打后台会先 401）。
+func (env *testEnv) adminAudienceToken(t *testing.T, userID uuid.UUID) string {
+	t.Helper()
+	tokens := security.NewTokenManager(testSecret, time.Minute)
+	access, _, err := tokens.AccessTokenWithAudience(userID, security.AudienceAdmin)
+	if err != nil {
+		t.Fatalf("签发 admin 受众 token 失败: %v", err)
+	}
+	return access
+}
+
 // joinGuild 直接落库建 guild 与成员关系。
 func (env *testEnv) joinGuild(t *testing.T, guildID uuid.UUID, userIDs ...uuid.UUID) {
 	t.Helper()

@@ -32,6 +32,7 @@ import (
 	"github.com/owlspeak/owl-server/backend/internal/config"
 	"github.com/owlspeak/owl-server/backend/internal/eventbus"
 	"github.com/owlspeak/owl-server/backend/internal/httpapi"
+	"github.com/owlspeak/owl-server/backend/internal/message"
 	"github.com/owlspeak/owl-server/backend/internal/model"
 	"github.com/owlspeak/owl-server/backend/internal/rbac"
 	"github.com/owlspeak/owl-server/backend/internal/security"
@@ -66,9 +67,14 @@ func newBotRouter(t *testing.T) (*gin.Engine, *gorm.DB, *eventbus.Bus) {
 	v1 := router.Group("/api/v1")
 	api.RegisterRoutes(v1)
 	bus := eventbus.New()
+	api.AttachEventBus(bus)
 	deps := appdeps.Deps{DB: db, Bus: bus, Cfg: cfg, Auth: api.AuthMiddleware(), CurrentUser: httpapi.CurrentUser}
 	if err := botapi.Register(v1, deps); err != nil {
 		t.Fatalf("挂载后台 bot 管理 API 失败: %v", err)
+	}
+	// 交互测试走 /api/v1/channels/.../messages（用户平面消息路由），需与生产一致挂载。
+	if err := message.Register(v1, deps); err != nil {
+		t.Fatalf("挂载后台消息 API 失败: %v", err)
 	}
 	if err := botapi.RegisterBotAPI(router.Group("/bot-api"), deps); err != nil {
 		t.Fatalf("挂载 bot 开放 API 失败: %v", err)
