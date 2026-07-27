@@ -42,7 +42,7 @@ func TestAttachmentSignature(t *testing.T) {
 func TestBuildDownloadURL(t *testing.T) {
 	id := uuid.New()
 	now := time.Now().UTC()
-	url := buildDownloadURL("/api/v1", testSecret, id, now)
+	url := buildDownloadURL("/api/v1", testSecret, id, now, false)
 	prefix := "/api/v1/attachments/" + id.String() + "?exp="
 	if !strings.HasPrefix(url, prefix) {
 		t.Fatalf("下载 URL 前缀不符：%s", url)
@@ -58,6 +58,16 @@ func TestBuildDownloadURL(t *testing.T) {
 	if exp != now.Add(downloadURLTTL).Unix() {
 		t.Errorf("过期时间不符：%d", exp)
 	}
+	// 限定可见消息附件使用更短 TTL
+	restrictedURL := buildDownloadURL("/api/v1", testSecret, id, now, true)
+	var rexp int64
+	var rsig string
+	if _, err := fmt.Sscanf(strings.TrimPrefix(restrictedURL, prefix), "%d&sig=%s", &rexp, &rsig); err != nil {
+		t.Fatalf("解析限定下载 URL 失败：%v", err)
+	}
+	if rexp != now.Add(restrictedDownloadURLTTL).Unix() {
+		t.Errorf("限定可见附件 TTL 不符：%d", rexp)
+	}
 }
 
 // TestClientURLPrefixIsolation 用户端（/gapi/v1）上下文中生成的上传/下载 URL
@@ -67,7 +77,7 @@ func TestClientURLPrefixIsolation(t *testing.T) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	urls := []string{
-		buildDownloadURL("/gapi/v1", testSecret, id, now),
+		buildDownloadURL("/gapi/v1", testSecret, id, now, false),
 		buildUploadURL("/gapi/v1", id, "token-placeholder"),
 	}
 	for _, url := range urls {

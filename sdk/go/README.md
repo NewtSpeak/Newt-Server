@@ -96,4 +96,29 @@ defer bot.LeaveVoice(guildID)
 媒体层完整示例可直接参考 Owl-SFU 仓库的 `cmd/loadbot/main.go`（pion 建 PC、
 发 Opus RTP、订阅下行轨），把 `--token` 换成 `JoinVoice` 返回的 Media Token 即可。
 
+## 反应角色（验证门）
+
+```go
+const rulesMessageID = "..."
+const verifiedRoleID = "..."
+
+gw.On("MESSAGE_REACTION_ADD", func(payload json.RawMessage) {
+	var ev struct {
+		MessageID string `json:"message_id"`
+		GuildID   string `json:"guild_id"`
+		UserID    string `json:"user_id"`
+		Emoji     string `json:"emoji"`
+	}
+	_ = json.Unmarshal(payload, &ev)
+	if ev.MessageID != rulesMessageID || ev.Emoji != "✅" {
+		return
+	}
+	// user_id 可直接作为路径（服务端同时接受 member_id / user_id）
+	_, _ = bot.AddMemberRole(ev.GuildID, ev.UserID, verifiedRoleID)
+})
+```
+
+相关 API：`Roles` / `CreateRole` / `AddMemberRole` / `RemoveMemberRole` / `Member` /
+`SetOverwrite` / `ListReactionUsers`。安装后需给 bot 绑定带 `MANAGE_ROLES` 的角色。
+
 完整协议文档见 [`../README.md`](../README.md)。

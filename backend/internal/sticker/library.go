@@ -237,7 +237,7 @@ func (h *api) copyItem(c *gin.Context) {
 			Animated:     source.Animated,
 			SourceItemID: &srcItemID,
 			SourcePackID: &srcPackID,
-			SortOrder:    0,
+			SortOrder:    nextItemSortOrder(tx, target.ID),
 			Status:       model.StickerItemActive,
 			CreatedAt:    now,
 			UpdatedAt:    now,

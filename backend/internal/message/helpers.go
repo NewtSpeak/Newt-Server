@@ -191,7 +191,7 @@ type messageView struct {
 	Reactions      []reactionSummary `json:"reactions"`
 }
 
-func (s *service) attachmentViews(attachments []model.Attachment, now time.Time) []attachmentView {
+func (s *service) attachmentViews(attachments []model.Attachment, now time.Time, restricted bool) []attachmentView {
 	views := make([]attachmentView, 0, len(attachments))
 	for _, attachment := range attachments {
 		views = append(views, attachmentView{
@@ -202,7 +202,7 @@ func (s *service) attachmentViews(attachments []model.Attachment, now time.Time)
 			Width:       attachment.Width,
 			Height:      attachment.Height,
 			Preview:     previewKind(attachment.MIME),
-			DownloadURL: buildDownloadURL(s.urlPrefix, s.cfg.JWTSecret, attachment.ID, now),
+			DownloadURL: buildDownloadURL(s.urlPrefix, s.cfg.JWTSecret, attachment.ID, now, restricted),
 		})
 	}
 	return views
@@ -315,7 +315,7 @@ func (s *service) messageViews(messages []model.Message, viewer ...uuid.UUID) ([
 			AuthorIsBot:    botFlags[message.AuthorID],
 			Card:           card,
 			StickerItems:   stickerItems,
-			Attachments:    s.attachmentViews(grouped[message.ID], now),
+			Attachments:    s.attachmentViews(grouped[message.ID], now, isMessageRestricted(message)),
 			Reactions:      reactions,
 		})
 	}

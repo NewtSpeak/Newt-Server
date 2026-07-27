@@ -87,7 +87,7 @@ func TestConnectPublishesOnline(t *testing.T) {
 	me, other := uuid.New(), uuid.New()
 	m, events := newTestManager(t, other)
 
-	m.Connect(me, "s1")
+	m.Connect(me, "s1", "")
 	toOther := events.wait(t, "他人收到 online", func(e eventbus.Event) bool {
 		return e.Type == eventbus.EventPresenceUpdate && targets(e, other)
 	})
@@ -107,8 +107,8 @@ func TestMultiDeviceMergePriority(t *testing.T) {
 	me, other := uuid.New(), uuid.New()
 	m, _ := newTestManager(t, other)
 
-	m.Connect(me, "s1")
-	m.Connect(me, "s2")
+	m.Connect(me, "s1", "")
+	m.Connect(me, "s2", "")
 	if !m.SetStatus(me, "s1", StatusIdle, "") || !m.SetStatus(me, "s2", StatusInvisible, "") {
 		t.Fatal("SetStatus 失败")
 	}
@@ -134,7 +134,7 @@ func TestInvisibleNeverLeaksToOthers(t *testing.T) {
 	me, other := uuid.New(), uuid.New()
 	m, events := newTestManager(t, other)
 
-	m.Connect(me, "s1")
+	m.Connect(me, "s1", "")
 	events.wait(t, "上线广播", func(e eventbus.Event) bool {
 		return e.Type == eventbus.EventPresenceUpdate && targets(e, other)
 	})
@@ -184,8 +184,8 @@ func TestAllSessionsGoneBroadcastsOffline(t *testing.T) {
 	me, other := uuid.New(), uuid.New()
 	m, events := newTestManager(t, other)
 
-	m.Connect(me, "s1")
-	m.Connect(me, "s2")
+	m.Connect(me, "s1", "")
+	m.Connect(me, "s2", "")
 	m.Disconnect(me, "s1")
 	events.assertNever(t, "仍有连接时广播 offline", func(e eventbus.Event) bool {
 		p, ok := e.Payload.(eventbus.PresenceUpdatePayload)
@@ -209,11 +209,52 @@ func TestConnectIdempotentKeepsStatus(t *testing.T) {
 	me, other := uuid.New(), uuid.New()
 	m, _ := newTestManager(t, other)
 
-	m.Connect(me, "s1")
+	m.Connect(me, "s1", "")
 	m.SetStatus(me, "s1", StatusDnd, "")
-	m.Connect(me, "s1")
+	m.Connect(me, "s1", StatusOnline) // 幂等：不因再次 Connect 覆盖既有 dnd
 	if got := m.Displayed(other, []uuid.UUID{me})[me].Status; got != StatusDnd {
 		t.Fatalf("Connect 幂等后状态 = %s，期待 dnd", got)
+	}
+}
+
+// TestConnectWithInitialInvisible 初始状态直接为 invisible：
+// mask 前后均为 offline → 不对他人广播（无 online 闪现）；本人见 invisible；
+// 快照与事件对他人绝无 invisible。
+func TestConnectWithInitialInvisible(t *testing.T) {
+	me, other := uuid.New(), uuid.New()
+	m, events := newTestManager(t, other)
+
+	m.Connect(me, "s1", StatusInvisible)
+
+	toSelf := events.wait(t, "本人收到 invisible", func(e eventbus.Event) bool {
+		return e.Type == eventbus.EventPresenceUpdate && targets(e, me) && len(e.UserIDs) == 1
+	})
+	if p := payloadOf(t, toSelf); p.Status != StatusInvisible {
+		t.Fatalf("本人载荷 = %s，期待 invisible", p.Status)
+	}
+	// 他人视角：不广播任何 presence（offline→offline 无变化），快照也不含隐身用户。
+	events.assertNever(t, "他人收到任何 presence（含 online 闪现 / invisible 泄露）", func(e eventbus.Event) bool {
+		return e.Type == eventbus.EventPresenceUpdate && targets(e, other)
+	})
+	if _, ok := m.Displayed(other, []uuid.UUID{me})[me]; ok {
+		t.Fatal("他人视角快照不应包含隐身用户")
+	}
+	if got := m.Displayed(me, []uuid.UUID{me})[me].Status; got != StatusInvisible {
+		t.Fatalf("本人视角快照 = %s，期待 invisible", got)
+	}
+}
+
+// TestConnectWithInitialDnd 初始 dnd 直接对外可见，无需二次 PRESENCE_UPDATE。
+func TestConnectWithInitialDnd(t *testing.T) {
+	me, other := uuid.New(), uuid.New()
+	m, events := newTestManager(t, other)
+
+	m.Connect(me, "s1", StatusDnd)
+	toOther := events.wait(t, "他人收到 dnd", func(e eventbus.Event) bool {
+		return e.Type == eventbus.EventPresenceUpdate && targets(e, other)
+	})
+	if p := payloadOf(t, toOther); p.Status != StatusDnd {
+		t.Fatalf("他人载荷 = %s，期待 dnd", p.Status)
 	}
 }
 
@@ -222,11 +263,161 @@ func TestInvalidStatusRejected(t *testing.T) {
 	me, other := uuid.New(), uuid.New()
 	m, _ := newTestManager(t, other)
 
-	m.Connect(me, "s1")
+	m.Connect(me, "s1", "")
 	if m.SetStatus(me, "s1", "offline", "") || m.SetStatus(me, "s1", "busy", "") {
 		t.Fatal("非法状态应被拒绝")
 	}
 	if got := m.Displayed(other, []uuid.UUID{me})[me].Status; got != StatusOnline {
 		t.Fatalf("状态被非法值污染: %s", got)
+	}
+}
+
+// TestActivitiesMergeAndOmit 活动：写入、省略不改、清空、多端合并。
+func TestActivitiesMergeAndOmit(t *testing.T) {
+	me, other := uuid.New(), uuid.New()
+	m, events := newTestManager(t, other)
+	// 测试默认 activityAudience=nil → everyone 可见
+	m.Connect(me, "s1", "")
+	events.wait(t, "上线", func(e eventbus.Event) bool {
+		return e.Type == eventbus.EventPresenceUpdate && targets(e, other)
+	})
+
+	acts := []Activity{{Type: ActivityPlaying, Name: "原神", Source: ActivitySourceManual}}
+	if !m.SetStatusFull(me, "s1", StatusOnline, CustomStatus{}, &acts) {
+		t.Fatal("SetStatusFull 失败")
+	}
+	toOther := events.wait(t, "他人收到活动", func(e eventbus.Event) bool {
+		if e.Type != eventbus.EventPresenceUpdate || !targets(e, other) {
+			return false
+		}
+		p, ok := e.Payload.(eventbus.PresenceUpdatePayload)
+		return ok && len(p.Activities) == 1 && p.Activities[0].Name == "原神"
+	})
+	if p := payloadOf(t, toOther); p.Activities[0].Type != ActivityPlaying {
+		t.Fatalf("活动 type 异常: %+v", p.Activities)
+	}
+	if got := m.Displayed(other, []uuid.UUID{me})[me]; len(got.Activities) != 1 {
+		t.Fatalf("快照活动数 = %d", len(got.Activities))
+	}
+
+	// 省略 activities：只改 status，活动保留
+	if !m.SetStatusFull(me, "s1", StatusIdle, CustomStatus{}, nil) {
+		t.Fatal("省略 activities 失败")
+	}
+	if got := m.Displayed(other, []uuid.UUID{me})[me]; got.Status != StatusIdle || len(got.Activities) != 1 {
+		t.Fatalf("省略后应保留活动: status=%s acts=%d", got.Status, len(got.Activities))
+	}
+
+	// 清空
+	empty := []Activity{}
+	if !m.SetStatusFull(me, "s1", StatusIdle, CustomStatus{}, &empty) {
+		t.Fatal("清空失败")
+	}
+	events.wait(t, "他人收到清空活动", func(e eventbus.Event) bool {
+		if e.Type != eventbus.EventPresenceUpdate || !targets(e, other) {
+			return false
+		}
+		p, ok := e.Payload.(eventbus.PresenceUpdatePayload)
+		return ok && len(p.Activities) == 0 && p.Status == StatusIdle
+	})
+
+	// 多端：两端不同游戏，合并
+	m.Connect(me, "s2", "")
+	a1 := []Activity{{Type: ActivityListening, Name: "Spotify", Source: ActivitySourceMedia}}
+	a2 := []Activity{{Type: ActivityPlaying, Name: "Valorant", Source: ActivitySourceDetected}}
+	m.SetStatusFull(me, "s1", StatusOnline, CustomStatus{}, &a1)
+	m.SetStatusFull(me, "s2", StatusOnline, CustomStatus{}, &a2)
+	got := m.Displayed(other, []uuid.UUID{me})[me]
+	if len(got.Activities) != 2 {
+		t.Fatalf("合并活动数 = %d，期待 2", len(got.Activities))
+	}
+	// playing 优先于 listening
+	if got.Activities[0].Type != ActivityPlaying {
+		t.Fatalf("主活动应为 playing，得 %s", got.Activities[0].Type)
+	}
+}
+
+// TestActivitiesHiddenWhenInvisible 隐身时他人看不到 activities。
+func TestActivitiesHiddenWhenInvisible(t *testing.T) {
+	me, other := uuid.New(), uuid.New()
+	m, events := newTestManager(t, other)
+	m.Connect(me, "s1", "")
+	acts := []Activity{{Type: ActivityPlaying, Name: "原神", Source: ActivitySourceManual}}
+	m.SetStatusFull(me, "s1", StatusOnline, CustomStatus{Text: "嗨"}, &acts)
+	events.wait(t, "有活动上线", func(e eventbus.Event) bool {
+		p, ok := e.Payload.(eventbus.PresenceUpdatePayload)
+		return ok && targets(e, other) && len(p.Activities) == 1
+	})
+	m.SetStatusFull(me, "s1", StatusInvisible, CustomStatus{Text: "嗨"}, &acts)
+	toOther := events.wait(t, "他人 offline", func(e eventbus.Event) bool {
+		p, ok := e.Payload.(eventbus.PresenceUpdatePayload)
+		return ok && targets(e, other) && p.Status == StatusOffline
+	})
+	if p := payloadOf(t, toOther); len(p.Activities) != 0 || p.CustomText != "" {
+		t.Fatalf("隐身掩码后不应有 custom/activities: %+v", p)
+	}
+	if _, ok := m.Displayed(other, []uuid.UUID{me})[me]; ok {
+		t.Fatal("隐身用户不应出现在他人快照")
+	}
+	self := m.Displayed(me, []uuid.UUID{me})[me]
+	if self.Status != StatusInvisible || len(self.Activities) != 1 {
+		t.Fatalf("本人应见 invisible+活动: %+v", self)
+	}
+}
+
+// TestActivityCoverAssets 封面 assets 随活动广播；非法 URL 被剥离。
+func TestActivityCoverAssets(t *testing.T) {
+	me, other := uuid.New(), uuid.New()
+	m, events := newTestManager(t, other)
+	m.Connect(me, "s1", "")
+	cover := "https://cdn.cloudflare.steamstatic.com/steam/apps/1443500/header.jpg"
+	acts := []Activity{{
+		Type: ActivityPlaying, Name: "原神", Source: ActivitySourceManual,
+		Assets: &ActivityAssets{LargeImage: cover, LargeText: "原神"},
+	}}
+	m.SetStatusFull(me, "s1", StatusOnline, CustomStatus{}, &acts)
+	toOther := events.wait(t, "他人收到带封面活动", func(e eventbus.Event) bool {
+		p, ok := e.Payload.(eventbus.PresenceUpdatePayload)
+		return ok && targets(e, other) && len(p.Activities) == 1 &&
+			p.Activities[0].Assets != nil && p.Activities[0].Assets.LargeImage == cover
+	})
+	if p := payloadOf(t, toOther); p.Activities[0].Assets.LargeText != "原神" {
+		t.Fatalf("封面文案丢失: %+v", p.Activities[0].Assets)
+	}
+	// data: URL 应被剥离
+	bad := []Activity{{
+		Type: ActivityPlaying, Name: "原神", Source: ActivitySourceManual,
+		Assets: &ActivityAssets{LargeImage: "data:image/png;base64,AAAA"},
+	}}
+	m.SetStatusFull(me, "s1", StatusOnline, CustomStatus{}, &bad)
+	got := m.Displayed(other, []uuid.UUID{me})[me]
+	if len(got.Activities) != 1 {
+		t.Fatalf("活动应保留: %+v", got)
+	}
+	if got.Activities[0].Assets != nil && got.Activities[0].Assets.LargeImage != "" {
+		t.Fatalf("非法封面应被剥离: %+v", got.Activities[0].Assets)
+	}
+}
+
+// TestActivityPrivacyFriends 仅好友可见 activities。
+func TestActivityPrivacyFriends(t *testing.T) {
+	me, friend, stranger := uuid.New(), uuid.New(), uuid.New()
+	m, _ := newTestManager(t, friend, stranger)
+	m.SetActivityAudience(func(uuid.UUID) (string, map[uuid.UUID]struct{}) {
+		return ShowActivityFriends, map[uuid.UUID]struct{}{friend: {}}
+	})
+	m.Connect(me, "s1", "")
+	acts := []Activity{{Type: ActivityPlaying, Name: "原神", Source: ActivitySourceManual}}
+	m.SetStatusFull(me, "s1", StatusOnline, CustomStatus{}, &acts)
+
+	if got := m.Displayed(friend, []uuid.UUID{me})[me]; len(got.Activities) != 1 {
+		t.Fatalf("好友应看到活动: %+v", got)
+	}
+	if got := m.Displayed(stranger, []uuid.UUID{me})[me]; len(got.Activities) != 0 {
+		t.Fatalf("非好友不应看到活动: %+v", got)
+	}
+	// status 仍可见
+	if got := m.Displayed(stranger, []uuid.UUID{me})[me]; got.Status != StatusOnline {
+		t.Fatalf("非好友仍应看到 online 状态点")
 	}
 }

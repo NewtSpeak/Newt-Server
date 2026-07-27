@@ -79,6 +79,11 @@ func (s *service) putReaction(c *gin.Context) {
 		return
 	}
 	user := s.currentUser(c)
+	// 限定可见：不可见消息一律 404（与 get 一致）。
+	if isMessageRestricted(message) && !s.userCanViewMessage(user.ID, message) {
+		notFound(c)
+		return
+	}
 	reaction := model.MessageReaction{
 		ID:        uuid.New(),
 		MessageID: message.ID,
@@ -132,6 +137,10 @@ func (s *service) deleteReaction(c *gin.Context) {
 		return
 	}
 	user := s.currentUser(c)
+	if isMessageRestricted(message) && !s.userCanViewMessage(user.ID, message) {
+		notFound(c)
+		return
+	}
 	result := s.db.Where("message_id = ? AND user_id = ? AND emoji = ?", message.ID, user.ID, emoji).
 		Delete(&model.MessageReaction{})
 	if result.Error != nil && result.Error != gorm.ErrRecordNotFound {
@@ -177,6 +186,10 @@ func (s *service) listReactionUsers(c *gin.Context) {
 		notFound(c)
 		return
 	}
+	if isMessageRestricted(message) && !s.userCanViewMessage(s.currentUser(c).ID, message) {
+		notFound(c)
+		return
+	}
 	limit := 100
 	if raw := c.Query("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
@@ -211,7 +224,8 @@ func (s *service) listReactionUsers(c *gin.Context) {
 }
 
 func (s *service) publishReactionEvent(eventType string, message model.Message, userID uuid.UUID, emoji string) {
-	s.publishChannelScopedEvent(eventType, message.GuildID, message.ChannelID, gin.H{
+	// 限定可见消息的反应事件也必须定向，避免无关成员感知消息存在。
+	s.publishMessageScopedEvent(eventType, message, gin.H{
 		"message_id": strconv.FormatInt(message.ID, 10),
 		"channel_id": message.ChannelID,
 		"guild_id":   message.GuildID,

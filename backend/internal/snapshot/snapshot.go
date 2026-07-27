@@ -43,15 +43,31 @@ type Member struct {
 	RoleIDs []uuid.UUID `json:"role_ids"`
 }
 
+// PresenceActivity 快照中的活动条目（与 eventbus.PresenceActivity 同形，Server-18）。
+type PresenceActivity struct {
+	Type          string `json:"type"`
+	Name          string `json:"name"`
+	Details       string `json:"details,omitempty"`
+	State         string `json:"state,omitempty"`
+	ApplicationID string `json:"application_id,omitempty"`
+	URL           string `json:"url,omitempty"`
+	Source        string `json:"source"`
+	// Assets / Timestamps 用 map/嵌套保持简单；客户端按可选字段解析。
+	Assets     map[string]string `json:"assets,omitempty"`
+	Timestamps map[string]int64  `json:"timestamps,omitempty"`
+}
+
 // Presence 成员在线状态条目（READY guilds[].presences 数组元素）。
 // Status 已按接收者视角处理：他人 invisible 掩码为 offline 且省略（列表只含非 offline 成员）；
 // 本人条目为真实合并状态（可为 invisible）。
+// Activities 已按 show_activity_to 与隐身掩码过滤（Server-18）。
 type Presence struct {
-	UserID          uuid.UUID  `json:"user_id"`
-	Status          string     `json:"status"`
-	CustomText      string     `json:"custom_text,omitempty"`
-	CustomEmoji     string     `json:"custom_emoji,omitempty"`
-	CustomExpiresAt *time.Time `json:"custom_expires_at,omitempty"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Status          string             `json:"status"`
+	CustomText      string             `json:"custom_text,omitempty"`
+	CustomEmoji     string             `json:"custom_emoji,omitempty"`
+	CustomExpiresAt *time.Time         `json:"custom_expires_at,omitempty"`
+	Activities      []PresenceActivity `json:"activities,omitempty"`
 }
 
 // Guild 单个服务器的全量快照（READY guilds 数组元素 / GUILD_CREATE 载荷主体）。

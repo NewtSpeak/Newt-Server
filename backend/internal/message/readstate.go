@@ -381,7 +381,7 @@ func (s *service) mentionRecipients(message model.Message) ([]uuid.UUID, error) 
 		if err != nil {
 			return nil, err
 		}
-		return excludeUser(viewers, message.AuthorID), nil
+		return s.filterUsersWhoCanView(excludeUser(viewers, message.AuthorID), message), nil
 	}
 	candidates := make(map[uuid.UUID]struct{}, len(message.Mentions))
 	for _, userID := range message.Mentions {
@@ -421,7 +421,8 @@ func (s *service) mentionRecipients(message model.Message) ([]uuid.UUID, error) 
 			visible = append(visible, user.ID)
 		}
 	}
-	return visible, nil
+	// 限定可见消息：提及计数仅给真正能看到正文的用户。
+	return s.filterUsersWhoCanView(visible, message), nil
 }
 
 func excludeUser(ids []uuid.UUID, exclude uuid.UUID) []uuid.UUID {

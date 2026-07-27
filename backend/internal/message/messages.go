@@ -41,6 +41,9 @@ type createMessageRequest struct {
 	// VisibleToUserIDs ephemeral 定向可见名单（bot 专项，设计文档 2026-07-26）：
 	// 非空即 ephemeral——仅名单用户 + 作者可见；≤20 人、仅 bot 可用、禁止携带附件。
 	VisibleToUserIDs []string `json:"visible_to_user_ids"`
+	// VisibleRoleIDs 限定可见身份组；省略 = 跟随频道默认；显式 [] = 公开；非空 = 限定。
+	// 用指针区分「未携带」与「携带空数组」。与 ephemeral 互斥语义上独立（bot ephemeral 优先）。
+	VisibleRoleIDs *[]string `json:"visible_role_ids"`
 }
 
 // maxEphemeralTargets ephemeral 可见名单人数上限。
@@ -124,6 +127,17 @@ func (s *service) createMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// 限定可见身份组：频道策略 + 客户端请求合成（仅服内 TEXT；私信忽略）。
+	// ephemeral 消息不套用角色可见（名单已足够窄）。
+	var visibleRoleIDs model.UUIDList
+	if len(visibleTo) == 0 {
+		clientSpecified := input.VisibleRoleIDs != nil
+		var visErr error
+		visibleRoleIDs, visErr = s.parseAndValidateVisibleRoles(c, channel, input.VisibleRoleIDs, clientSpecified)
+		if visErr != nil {
+			return
+		}
+	}
 
 	// nonce 幂等（AR.6）：短窗口内同 channel+author+nonce 直接返回原消息，不重复落库。
 	if input.Nonce != "" {
@@ -141,7 +155,7 @@ func (s *service) createMessage(c *gin.Context) {
 		}
 	}
 
-	// 单层回复（AP.6）：只校验被回复消息存在于同频道，不限制其本身是否为回复；
+	// 单层回复（AP.6）：只校验被回复消息存在于同频道，且发送者可见；
 	// ephemeral 消息禁止被回复（公开引用他人不可见消息会破坏语义，对齐 Discord）。
 	var replyToID *int64
 	if input.ReplyToID != "" {
@@ -157,6 +171,12 @@ func (s *service) createMessage(c *gin.Context) {
 		}
 		if replied.IsEphemeral() {
 			fail(c, http.StatusBadRequest, "INVALID_REPLY", "不能回复定向可见消息")
+			return
+		}
+		viewerRoles := roleIDsFromCtx(ctx)
+		ownerOrAdmin := ctx != nil && (ctx.Owner || ctx.SystemAdmin)
+		if !canViewMessage(s.currentUser(c).ID, bits, viewerRoles, ownerOrAdmin, replied) {
+			fail(c, http.StatusBadRequest, "INVALID_REPLY", "被回复的消息不存在")
 			return
 		}
 		replyToID = &parsed
@@ -245,6 +265,7 @@ func (s *service) createMessage(c *gin.Context) {
 		MentionEveryone: mentions.Everyone,
 		StickerItems:    stickerItemsJSON,
 		VisibleTo:       visibleTo,
+		VisibleRoleIDs:  visibleRoleIDs,
 		CreatedAt:       now,
 	}
 	if card != "" {
@@ -389,12 +410,13 @@ func parseAttachmentIDs(c *gin.Context, raw []string) ([]uuid.UUID, bool) {
 // listMessages GET /channels/{id}/messages?before=&after=&limit=（AR.2/AR.3/AR.4）。
 // 拉历史需 READ_MESSAGE_HISTORY；无该权限按文档语义返回 404（只收进频后实时推送）。
 // 游标为雪花消息 ID，结果恒按 ID 降序（新→旧）。
+// ephemeral 走 SQL 过滤；限定可见身份组在服务端二次过滤，不足 limit 时沿游标补足。
 func (s *service) listMessages(c *gin.Context) {
 	channelID, ok := parseUUIDParam(c, "channelID")
 	if !ok {
 		return
 	}
-	_, channel, bits, ok := s.channelAccess(c, channelID)
+	ctx, channel, bits, ok := s.channelAccess(c, channelID)
 	if !ok {
 		return
 	}
@@ -414,33 +436,97 @@ func (s *service) listMessages(c *gin.Context) {
 		}
 		limit = parsed
 	}
-	// ephemeral 历史过滤：公开消息 OR 本人为作者 OR 本人在可见名单内。
-	query := s.db.Scopes(visibleToScope(s.currentUser(c).ID)).
-		Where("channel_id = ? AND deleted_at IS NULL", channel.ID)
+	var beforeID, afterID *int64
 	for _, cursor := range []struct {
-		name string
-		op   string
-	}{{"before", "id < ?"}, {"after", "id > ?"}} {
+		name   string
+		target **int64
+	}{{"before", &beforeID}, {"after", &afterID}} {
 		if raw := c.Query(cursor.name); raw != "" {
 			parsed, err := strconv.ParseInt(raw, 10, 64)
 			if err != nil {
 				fail(c, http.StatusBadRequest, "INVALID_CURSOR", cursor.name+" 需为消息 ID")
 				return
 			}
-			query = query.Where(cursor.op, parsed)
+			*cursor.target = &parsed
 		}
 	}
-	var messages []model.Message
-	if err := query.Order("id DESC").Limit(limit).Find(&messages).Error; err != nil {
-		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
-		return
+	user := s.currentUser(c)
+	viewerRoles := roleIDsFromCtx(ctx)
+	ownerOrAdmin := ctx != nil && (ctx.Owner || ctx.SystemAdmin)
+
+	// 多批补足：ephemeral SQL 过滤后再按角色可见性过滤，可能不足 limit。
+	collected := make([]model.Message, 0, limit)
+	cursorBefore := beforeID
+	for len(collected) < limit {
+		batchSize := (limit - len(collected)) * 3
+		if batchSize < 20 {
+			batchSize = 20
+		}
+		if batchSize > maxPageLimit {
+			batchSize = maxPageLimit
+		}
+		query := s.db.Scopes(visibleToScope(user.ID)).
+			Where("channel_id = ? AND deleted_at IS NULL", channel.ID)
+		if cursorBefore != nil {
+			query = query.Where("id < ?", *cursorBefore)
+		}
+		if afterID != nil {
+			query = query.Where("id > ?", *afterID)
+		}
+		var batch []model.Message
+		if err := query.Order("id DESC").Limit(batchSize).Find(&batch).Error; err != nil {
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
+			return
+		}
+		if len(batch) == 0 {
+			break
+		}
+		visible := filterVisibleMessages(user.ID, bits, viewerRoles, ownerOrAdmin, batch)
+		for _, msg := range visible {
+			collected = append(collected, msg)
+			if len(collected) >= limit {
+				break
+			}
+		}
+		last := batch[len(batch)-1].ID
+		cursorBefore = &last
+		if len(batch) < batchSize {
+			break
+		}
 	}
-	views, err := s.messageViews(messages, s.currentUser(c).ID)
+	views, err := s.messageViews(collected, user.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取附件失败")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"messages": views})
+}
+
+// parseAndValidateVisibleRoles 解析请求中的 visible_role_ids 并套用频道策略；失败时已写响应。
+func (s *service) parseAndValidateVisibleRoles(c *gin.Context, channel model.Channel, raw *[]string, clientSpecified bool) (model.UUIDList, error) {
+	var ids []uuid.UUID
+	if raw != nil {
+		ids = make([]uuid.UUID, 0, len(*raw))
+		for _, item := range *raw {
+			id, err := uuid.Parse(item)
+			if err != nil {
+				fail(c, http.StatusBadRequest, "INVALID_VISIBLE_ROLES", "visible_role_ids 含非法 ID")
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+	}
+	list, err := s.resolveEffectiveVisibleRoles(channel, ids, clientSpecified)
+	if err != nil {
+		switch err {
+		case errVisibleRolesTextOnly, errVisibleRoleInvalid, errVisibleRolesDisabled:
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_ROLES", err.Error())
+		default:
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "校验可见角色失败")
+		}
+		return nil, err
+	}
+	return list, nil
 }
 
 // getMessage GET /channels/{id}/messages/{mid}；读取单条同样属于历史读取，需 READ_MESSAGE_HISTORY。
@@ -454,7 +540,7 @@ func (s *service) getMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	_, channel, bits, ok := s.channelAccess(c, channelID)
+	ctx, channel, bits, ok := s.channelAccess(c, channelID)
 	if !ok {
 		return
 	}
@@ -467,7 +553,13 @@ func (s *service) getMessage(c *gin.Context) {
 		notFound(c)
 		return
 	}
-	view, err := s.messageViewOne(message, s.currentUser(c).ID)
+	user := s.currentUser(c)
+	ownerOrAdmin := ctx != nil && (ctx.Owner || ctx.SystemAdmin)
+	if !canViewMessage(user.ID, bits, roleIDsFromCtx(ctx), ownerOrAdmin, message) {
+		notFound(c)
+		return
+	}
+	view, err := s.messageViewOne(message, user.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
 		return
@@ -476,12 +568,17 @@ func (s *service) getMessage(c *gin.Context) {
 }
 
 type editMessageRequest struct {
-	Content string `json:"content"`
+	// Content 正文；与 VisibleRoleIDs 至少提供一项（兼容仅改可见范围）。
+	Content *string `json:"content"`
+	// VisibleRoleIDs 修改可见范围（仅作者）；指针区分未携带 / 公开 / 限定。
+	// 频道 ForceDefaultVisibility 时禁止修改。
+	VisibleRoleIDs *[]string `json:"visible_role_ids"`
 }
 
 // editMessage PATCH /channels/{id}/messages/{mid}（AS.1–AS.5）。
-// 仅作者可编辑正文，无时间窗；MANAGE_MESSAGES 也不能改他人（AS.2）。
+// 仅作者可编辑正文与可见范围，无时间窗；MANAGE_MESSAGES 也不能改他人（AS.2）。
 // 流程：先写 message_edits 旧正文全文快照（version 递增）→ 更新本体 → 广播 → 异步重建索引。
+// 可见范围变更时：交集发 UPDATE，失去可见者发 DELETE，新增可见者发 CREATE。
 func (s *service) editMessage(c *gin.Context) {
 	channelID, ok := parseUUIDParam(c, "channelID")
 	if !ok {
@@ -501,82 +598,259 @@ func (s *service) editMessage(c *gin.Context) {
 		notFound(c)
 		return
 	}
-	if message.AuthorID != user.ID {
-		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "仅作者可编辑消息正文")
+	ownerOrAdmin := ctx != nil && (ctx.Owner || ctx.SystemAdmin)
+	if !canViewMessage(user.ID, bits, roleIDsFromCtx(ctx), ownerOrAdmin, message) {
+		notFound(c)
 		return
+	}
+	if message.AuthorID != user.ID {
+		fail(c, http.StatusForbidden, "MISSING_PERMISSION", "仅作者可编辑消息")
+		return
+	}
+	if message.IsEphemeral() {
+		// ephemeral 不允许改可见名单（创建时一次定死）；正文仍可改。
 	}
 	var input editMessageRequest
 	if !bind(c, &input) {
 		return
 	}
-	var attachmentCount int64
-	if err := s.db.Model(&model.Attachment{}).Where("message_id = ?", message.ID).Count(&attachmentCount).Error; err != nil {
-		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取附件失败")
+	if input.Content == nil && input.VisibleRoleIDs == nil {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "content 与 visible_role_ids 至少提供一项")
 		return
 	}
-	if err := validateContent(input.Content, int(attachmentCount), message.Card != nil); err != nil {
-		fail(c, http.StatusBadRequest, "INVALID_MESSAGE", err.Error())
-		return
-	}
-	// 编辑后重新解析提及并更新落库字段（docs 15 FR-05：客户端按 MESSAGE_UPDATE
-	// 的最新 mentions 自行校正本地计数，服务端不追溯调整 mention_count）。
+
+	oldAudience := s.resolveAudienceUserIDs(message) // 公开时 nil
+	oldRestricted := isMessageRestricted(message)
+	contentChanged := false
+	visibilityChanged := false
+	newContent := message.Content
+	newVisible := message.VisibleRoleIDs
 	var mentions resolvedMentions
-	if channel.Type.IsPrivate() {
-		mentions, err = s.resolveMentionsDM(channel.ID, input.Content)
-	} else {
-		mentions, err = s.resolveMentions(ctx.Guild.ID, input.Content, bits)
+	mentions.Users = message.Mentions
+	mentions.Roles = message.MentionRoles
+	mentions.Everyone = message.MentionEveryone
+
+	if input.VisibleRoleIDs != nil {
+		if message.IsEphemeral() {
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_ROLES", "定向可见消息不可修改角色可见范围")
+			return
+		}
+		if channel.ForceDefaultVisibility {
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_ROLES", "本频道强制默认可见范围，不可单独修改")
+			return
+		}
+		list, visErr := s.parseAndValidateVisibleRoles(c, channel, input.VisibleRoleIDs, true)
+		if visErr != nil {
+			return
+		}
+		if !uuidListEqual(message.VisibleRoleIDs, list) {
+			visibilityChanged = true
+			newVisible = list
+		}
 	}
-	if err != nil {
-		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解析提及失败")
+
+	if input.Content != nil {
+		newContent = *input.Content
+		var attachmentCount int64
+		if err := s.db.Model(&model.Attachment{}).Where("message_id = ?", message.ID).Count(&attachmentCount).Error; err != nil {
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取附件失败")
+			return
+		}
+		if err := validateContent(newContent, int(attachmentCount), message.Card != nil); err != nil {
+			fail(c, http.StatusBadRequest, "INVALID_MESSAGE", err.Error())
+			return
+		}
+		if channel.Type.IsPrivate() {
+			mentions, err = s.resolveMentionsDM(channel.ID, newContent)
+		} else {
+			mentions, err = s.resolveMentions(ctx.Guild.ID, newContent, bits)
+		}
+		if err != nil {
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "解析提及失败")
+			return
+		}
+		if newContent != message.Content {
+			contentChanged = true
+		}
+	}
+
+	if !contentChanged && !visibilityChanged {
+		view, viewErr := s.messageViewOne(message, user.ID)
+		if viewErr != nil {
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
+			return
+		}
+		c.JSON(http.StatusOK, view)
 		return
 	}
+
 	now := time.Now().UTC()
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		// 全文快照存「编辑前」正文：version=1 即原始正文，当前正文始终在 messages.content。
-		snapshot := model.MessageEdit{
-			ID:        uuid.New(),
-			MessageID: message.ID,
-			Version:   message.EditCount + 1,
-			Content:   message.Content,
-			EditorID:  user.ID,
-			EditedAt:  now,
+		updates := map[string]any{}
+		if contentChanged {
+			snapshot := model.MessageEdit{
+				ID:        uuid.New(),
+				MessageID: message.ID,
+				Version:   message.EditCount + 1,
+				Content:   message.Content,
+				EditorID:  user.ID,
+				EditedAt:  now,
+			}
+			if err := tx.Create(&snapshot).Error; err != nil {
+				return err
+			}
+			updates["content"] = newContent
+			updates["edit_count"] = gorm.Expr("edit_count + 1")
+			updates["edited_at"] = now
+			updates["mentions"] = mentions.Users
+			updates["mention_roles"] = mentions.Roles
+			updates["mention_everyone"] = mentions.Everyone
 		}
-		if err := tx.Create(&snapshot).Error; err != nil {
-			return err
+		if visibilityChanged {
+			updates["visible_role_ids"] = newVisible
 		}
-		return tx.Model(&model.Message{}).Where("id = ?", message.ID).Updates(map[string]any{
-			"content":          input.Content,
-			"edit_count":       gorm.Expr("edit_count + 1"),
-			"edited_at":        now,
-			"mentions":         mentions.Users,
-			"mention_roles":    mentions.Roles,
-			"mention_everyone": mentions.Everyone,
-		}).Error
+		return tx.Model(&model.Message{}).Where("id = ?", message.ID).Updates(updates).Error
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "编辑消息失败")
 		return
 	}
-	message.Content = input.Content
-	message.EditCount++
-	message.EditedAt = &now
-	message.Mentions = mentions.Users
-	message.MentionRoles = mentions.Roles
-	message.MentionEveryone = mentions.Everyone
-	view, err := s.messageViewOne(message)
+	if contentChanged {
+		message.Content = newContent
+		message.EditCount++
+		message.EditedAt = &now
+		message.Mentions = mentions.Users
+		message.MentionRoles = mentions.Roles
+		message.MentionEveryone = mentions.Everyone
+	}
+	if visibilityChanged {
+		message.VisibleRoleIDs = newVisible
+	}
+	view, err := s.messageViewOne(message, user.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取消息失败")
 		return
 	}
-	s.publishMessageEvent(eventbus.EventMessageUpdate, message, view)
-	s.index.IndexMessage(message.ID)
-	// 含差异化按钮时，REST 响应对作者重建全量视图（编辑仅作者可达）。
+	if visibilityChanged {
+		s.publishVisibilityChange(message, view, oldAudience, oldRestricted)
+	} else {
+		s.publishMessageEvent(eventbus.EventMessageUpdate, message, view)
+	}
+	if contentChanged {
+		s.index.IndexMessage(message.ID)
+	}
 	if cardNeedsTrim(message.Card) {
 		if authorView, viewErr := s.messageViewOne(message, user.ID); viewErr == nil {
 			view = authorView
 		}
 	}
 	c.JSON(http.StatusOK, view)
+}
+
+// uuidListEqual 比较两个角色 ID 列表（忽略顺序）。
+func uuidListEqual(a, b model.UUIDList) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[uuid.UUID]struct{}, len(a))
+	for _, id := range a {
+		set[id] = struct{}{}
+	}
+	for _, id := range b {
+		if _, ok := set[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// publishVisibilityChange 可见范围变更后的差集事件：
+// 失去可见 → MESSAGE_DELETE；新增可见 → MESSAGE_CREATE；仍可见 → MESSAGE_UPDATE。
+func (s *service) publishVisibilityChange(message model.Message, view messageView, oldAudience []uuid.UUID, oldRestricted bool) {
+	newRestricted := isMessageRestricted(message)
+	newAudience := s.resolveAudienceUserIDs(message)
+
+	if !oldRestricted && !newRestricted {
+		s.publishMessageEvent(eventbus.EventMessageUpdate, message, view)
+		return
+	}
+
+	oldSet := make(map[uuid.UUID]struct{})
+	if oldRestricted {
+		for _, id := range oldAudience {
+			oldSet[id] = struct{}{}
+		}
+	}
+	newSet := make(map[uuid.UUID]struct{})
+	if newRestricted {
+		for _, id := range newAudience {
+			newSet[id] = struct{}{}
+		}
+	}
+
+	var lost []uuid.UUID
+	if oldRestricted {
+		for id := range oldSet {
+			if _, ok := newSet[id]; !ok {
+				if newRestricted {
+					lost = append(lost, id)
+				}
+			}
+		}
+	}
+
+	if len(lost) > 0 {
+		deletePayload := gin.H{
+			"id":         strconv.FormatInt(message.ID, 10),
+			"channel_id": message.ChannelID,
+			"guild_id":   message.GuildID,
+		}
+		s.bus.Publish(eventbus.Event{
+			Type:      eventbus.EventMessageDelete,
+			GuildID:   &message.GuildID,
+			ChannelID: &message.ChannelID,
+			UserIDs:   lost,
+			Payload:   deletePayload,
+		})
+	}
+
+	if !newRestricted {
+		s.publishChannelScopedEvent(eventbus.EventMessageUpdate, message.GuildID, message.ChannelID, view)
+		s.publishChannelScopedEvent(eventbus.EventMessageCreate, message.GuildID, message.ChannelID, view)
+		return
+	}
+
+	var keep, gained []uuid.UUID
+	for id := range newSet {
+		if oldRestricted {
+			if _, ok := oldSet[id]; ok {
+				keep = append(keep, id)
+			} else {
+				gained = append(gained, id)
+			}
+		} else {
+			keep = append(keep, id)
+		}
+	}
+	if len(keep) > 0 {
+		s.bus.Publish(eventbus.Event{
+			Type:      eventbus.EventMessageUpdate,
+			GuildID:   &message.GuildID,
+			ChannelID: &message.ChannelID,
+			UserIDs:   keep,
+			Payload:   view,
+		})
+	}
+	if len(gained) > 0 {
+		s.bus.Publish(eventbus.Event{
+			Type:      eventbus.EventMessageCreate,
+			GuildID:   &message.GuildID,
+			ChannelID: &message.ChannelID,
+			UserIDs:   gained,
+			Payload:   view,
+		})
+	}
+	_ = oldRestricted
 }
 
 // deleteMessage DELETE /channels/{id}/messages/{mid}（AS.6）：作者或 MANAGE_MESSAGES；软删。
@@ -596,6 +870,11 @@ func (s *service) deleteMessage(c *gin.Context) {
 	user := s.currentUser(c)
 	message, err := s.loadVisibleMessage(channel.ID, messageID, user.ID)
 	if err != nil {
+		notFound(c)
+		return
+	}
+	ownerOrAdmin := ctx != nil && (ctx.Owner || ctx.SystemAdmin)
+	if !canViewMessage(user.ID, bits, roleIDsFromCtx(ctx), ownerOrAdmin, message) {
 		notFound(c)
 		return
 	}
@@ -625,8 +904,9 @@ func (s *service) deleteMessage(c *gin.Context) {
 		"guild_id":   message.GuildID,
 	}
 	if message.IsEphemeral() {
-		// ephemeral 删除事件仅定向可见名单（其他人本就不知道这条消息的存在）。
 		s.publishEphemeralScopedEvent(eventbus.EventMessageDelete, message, deletePayload)
+	} else if isMessageRestricted(message) {
+		s.publishMessageScopedEvent(eventbus.EventMessageDelete, message, deletePayload)
 	} else {
 		s.publishChannelScopedEvent(eventbus.EventMessageDelete, message.GuildID, message.ChannelID, deletePayload)
 	}
@@ -655,6 +935,11 @@ func (s *service) listEdits(c *gin.Context) {
 		notFound(c)
 		return
 	}
+	ownerOrAdmin := ctx != nil && (ctx.Owner || ctx.SystemAdmin)
+	if !canViewMessage(user.ID, bits, roleIDsFromCtx(ctx), ownerOrAdmin, message) {
+		notFound(c)
+		return
+	}
 	isSysAdmin := ctx != nil && ctx.SystemAdmin
 	if message.AuthorID != user.ID && !rbac.Has(bits, rbac.ManageMessages) && !isSysAdmin {
 		notFound(c)
@@ -668,20 +953,59 @@ func (s *service) listEdits(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"edits": edits, "edit_count": message.EditCount})
 }
 
-// publishMessageEvent 消息事件分发三分支（设计文档 2026-07-26）：
-//  1. ephemeral → 仅定向可见名单 ∪ 作者（按接收者裁剪差异化按钮）；
-//  2. 含差异化按钮（card.buttons 有 visible_to）→ 按「按钮可见位图」分组，
-//     每组裁剪一次 card、定向推送一次（绕开 hub 单次序列化限制）；
-//  3. 其余 → 原 guild+channel 广播 / DM recipients 定向（零额外成本）。
+// publishMessageEvent 消息事件分发四分支：
+//  1. ephemeral → 仅定向可见名单 ∪ 作者；
+//  2. 角色限定可见 → 按受众 UserIDs 定向；
+//  3. 含差异化按钮 → 按按钮可见位图分组定向；
+//  4. 其余 → guild+channel 广播 / DM recipients 定向。
 func (s *service) publishMessageEvent(eventType string, message model.Message, view messageView) {
 	switch {
 	case message.IsEphemeral():
 		s.publishEphemeralMessageEvent(eventType, message, view)
+	case isMessageRestricted(message):
+		s.publishMessageScopedEvent(eventType, message, view)
 	case cardNeedsTrim(message.Card):
 		s.publishGroupedMessageEvent(eventType, message, view)
 	default:
 		s.publishChannelScopedEvent(eventType, message.GuildID, message.ChannelID, view)
 	}
+}
+
+// publishMessageScopedEvent 按消息可见范围选择广播或定向（角色限定 / 私信）。
+func (s *service) publishMessageScopedEvent(eventType string, message model.Message, payload any) {
+	if message.GuildID == uuid.Nil {
+		userIDs := s.loadDMRecipientIDs(message.ChannelID)
+		if len(userIDs) == 0 {
+			return
+		}
+		s.bus.Publish(eventbus.Event{
+			Type:      eventType,
+			ChannelID: &message.ChannelID,
+			UserIDs:   userIDs,
+			Payload:   payload,
+		})
+		return
+	}
+	if isMessageRestricted(message) {
+		userIDs := s.resolveAudienceUserIDs(message)
+		if len(userIDs) == 0 {
+			return
+		}
+		s.bus.Publish(eventbus.Event{
+			Type:      eventType,
+			GuildID:   &message.GuildID,
+			ChannelID: &message.ChannelID,
+			UserIDs:   userIDs,
+			Payload:   payload,
+		})
+		return
+	}
+	s.bus.Publish(eventbus.Event{
+		Type:      eventType,
+		GuildID:   &message.GuildID,
+		ChannelID: &message.ChannelID,
+		Payload:   payload,
+	})
 }
 
 // publishChannelScopedEvent 服频道走 Guild+Channel 广播；私信走 recipients 定向。

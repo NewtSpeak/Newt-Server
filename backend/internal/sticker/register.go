@@ -27,6 +27,15 @@ func RegisterPublic(pub *gin.RouterGroup, deps appdeps.Deps) error {
 	return nil
 }
 
+// RegisterBot 挂载机器人开放平面贴图能力（对齐 Discord Guild Emoji/Sticker 管理子集）。
+// bot 作为 IsBot 用户可：自建/管理包、贴图库、可用集合查询、服 ban（需 MANAGE_EXPRESSIONS 等）。
+// 不挂系统管 purge / 全局 ban 端点。
+func RegisterBot(group *gin.RouterGroup, deps appdeps.Deps) error {
+	h := newAPI(deps)
+	mountUser(group, h, deps.Auth)
+	return nil
+}
+
 func mountUser(group *gin.RouterGroup, h *api, auth gin.HandlerFunc) {
 	me := group.Group("/users/@me", auth)
 

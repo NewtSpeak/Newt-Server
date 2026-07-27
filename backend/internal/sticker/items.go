@@ -2,6 +2,7 @@ package sticker
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,7 +44,7 @@ func (h *api) uploadItem(c *gin.Context) {
 		return
 	}
 
-	data, mime, name, sortOrder, ok := h.readUpload(c)
+	data, mime, name, sortOrder, sortOrderSet, ok := h.readUpload(c)
 	if !ok {
 		return
 	}
@@ -60,6 +61,10 @@ func (h *api) uploadItem(c *gin.Context) {
 			// 未命名时默认用 mark，保证选择器始终有展示名
 			displayName = mark
 		}
+		order := sortOrder
+		if !sortOrderSet {
+			order = nextItemSortOrder(tx, pack.ID)
+		}
 		now := time.Now().UTC()
 		item = model.StickerItem{
 			ID:          h.ids.Next(),
@@ -72,7 +77,7 @@ func (h *api) uploadItem(c *gin.Context) {
 			Width:       asset.Width,
 			Height:      asset.Height,
 			Animated:    asset.Animated,
-			SortOrder:   sortOrder,
+			SortOrder:   order,
 			Status:      model.StickerItemActive,
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -88,6 +93,7 @@ func (h *api) uploadItem(c *gin.Context) {
 		case errIs(err, errInvalidImage):
 			fail(c, http.StatusBadRequest, "INVALID_IMAGE", err.Error())
 		default:
+			log.Printf("sticker uploadItem pack=%d: %v", pack.ID, err)
 			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "上传条目失败")
 		}
 		return
@@ -113,18 +119,25 @@ func (h *api) uploadItem(c *gin.Context) {
 	c.JSON(http.StatusCreated, view)
 }
 
-func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOrder int, ok bool) {
+func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOrder int, sortOrderSet, ok bool) {
 	name = normalizeItemName(c.Query("name"))
 	if name == "" {
 		name = normalizeItemName(c.PostForm("name"))
 	}
 	if utf8.RuneCountInString(name) > maxItemNameRunes {
 		fail(c, http.StatusBadRequest, "INVALID_NAME", "展示名不超过 100 字符")
-		return nil, "", "", 0, false
+		return nil, "", "", 0, false, false
 	}
 	if raw := c.PostForm("sort_order"); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil {
 			sortOrder = n
+			sortOrderSet = true
+		}
+	}
+	if raw := c.Query("sort_order"); raw != "" && !sortOrderSet {
+		if n, err := strconv.Atoi(raw); err == nil {
+			sortOrder = n
+			sortOrderSet = true
 		}
 	}
 
@@ -135,16 +148,16 @@ func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOr
 		file, err := c.FormFile("file")
 		if err != nil {
 			fail(c, http.StatusBadRequest, "MISSING_FILE", "需要 multipart 字段 file")
-			return nil, "", "", 0, false
+			return nil, "", "", 0, false, false
 		}
 		if file.Size > 0 && h.fileExceedsLimit(file.Size) {
 			fail(c, http.StatusBadRequest, "FILE_TOO_LARGE", errFileTooLarge.Error())
-			return nil, "", "", 0, false
+			return nil, "", "", 0, false, false
 		}
 		f, err := file.Open()
 		if err != nil {
 			fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "读取上传文件失败")
-			return nil, "", "", 0, false
+			return nil, "", "", 0, false, false
 		}
 		defer f.Close()
 		data, err = readBodyLimited(f, maxBytes)
@@ -154,18 +167,18 @@ func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOr
 			} else {
 				fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "读取上传文件失败")
 			}
-			return nil, "", "", 0, false
+			return nil, "", "", 0, false, false
 		}
 		if len(data) == 0 {
 			fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空")
-			return nil, "", "", 0, false
+			return nil, "", "", 0, false, false
 		}
 		mime = normalizeMIME(file.Header.Get("Content-Type"))
 		mime = sniffMediaMIME(data, mime)
 		if name == "" {
 			name = normalizeItemName(file.Filename)
 		}
-		return data, mime, name, sortOrder, true
+		return data, mime, name, sortOrder, sortOrderSet, true
 	}
 
 	// 原始 body
@@ -176,14 +189,27 @@ func (h *api) readUpload(c *gin.Context) (data []byte, mime, name string, sortOr
 		} else {
 			fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空或读取失败")
 		}
-		return nil, "", "", 0, false
+		return nil, "", "", 0, false, false
 	}
 	if len(raw) == 0 {
 		fail(c, http.StatusBadRequest, "UPLOAD_FAILED", "上传内容为空")
-		return nil, "", "", 0, false
+		return nil, "", "", 0, false, false
 	}
 	mime = sniffMediaMIME(raw, ct)
-	return raw, mime, name, sortOrder, true
+	return raw, mime, name, sortOrder, sortOrderSet, true
+}
+
+// nextItemSortOrder 取包内当前最大 sort_order + 1（空包返回 0）。
+func nextItemSortOrder(tx *gorm.DB, packID int64) int {
+	// COALESCE：空包 MAX 为 NULL → -1，再 +1 得到 0。
+	var max int
+	if err := tx.Raw(
+		`SELECT COALESCE(MAX(sort_order), -1) FROM sticker_items WHERE pack_id = ?`,
+		packID,
+	).Scan(&max).Error; err != nil {
+		return 0
+	}
+	return max + 1
 }
 
 // readBodyLimited 读取全部内容；maxBytes≤0 不限制，>0 时超限返回 errFileTooLarge。

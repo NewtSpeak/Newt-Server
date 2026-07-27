@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
+	"github.com/owlspeak/owl-server/backend/internal/presence"
 	"github.com/owlspeak/owl-server/backend/internal/snapshot"
 )
 
@@ -77,8 +78,17 @@ type helloData struct {
 }
 
 // identifyData IDENTIFY 载荷。
+// Status 可选：本端初始期望在线状态（online/idle/dnd/invisible）。
+// 在 Connect 时直接生效，避免先广播 online 再改状态造成隐身闪现（docs 01 FR-20）。
+// 省略或非法值按 online 处理；他人视角仍经 mask，API/事件绝不会出现 invisible。
+// Activities 指针：nil=省略不改活动；非 nil（含空切片）=写入（Server-18 G.2/G.3）。
 type identifyData struct {
-	Token string `json:"token"`
+	Token           string               `json:"token"`
+	Status          string               `json:"status,omitempty"`
+	CustomText      string               `json:"custom_text,omitempty"`
+	CustomEmoji     string               `json:"custom_emoji,omitempty"`
+	CustomExpiresAt *time.Time           `json:"custom_expires_at,omitempty"`
+	Activities      *[]presence.Activity `json:"activities"`
 }
 
 // resumeData RESUME 载荷：token 重新认证（防 session_id 被冒用）+ 最后收到的序列号。
@@ -89,12 +99,14 @@ type resumeData struct {
 }
 
 // presenceUpdateData 上行 PRESENCE_UPDATE 载荷：本端期望状态
-// （online/idle/dnd/invisible）+ 可选自定义状态（文本/emoji/过期时间，docs 01 FR-23）。
+// （online/idle/dnd/invisible）+ 可选自定义状态（docs 01 FR-23）
+// + 可选 activities（Server-18：nil=不改，[]=清空）。
 type presenceUpdateData struct {
-	Status          string     `json:"status"`
-	CustomText      string     `json:"custom_text"`
-	CustomEmoji     string     `json:"custom_emoji"`
-	CustomExpiresAt *time.Time `json:"custom_expires_at"`
+	Status          string               `json:"status"`
+	CustomText      string               `json:"custom_text"`
+	CustomEmoji     string               `json:"custom_emoji"`
+	CustomExpiresAt *time.Time           `json:"custom_expires_at"`
+	Activities      *[]presence.Activity `json:"activities"`
 }
 
 // readyData READY 载荷：会话 ID + 自身用户 + 全量快照（docs 14 §7-2）。

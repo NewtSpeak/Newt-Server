@@ -93,11 +93,30 @@ WebRTC 媒体层可用 [werift](https://github.com/shinyoshiaki/werift-webrtc) �
 
 ## API 摘要
 
-- 消息：`sendMessage` / `sendCard` / `sendEphemeral` / `getMessages` / `editMessage` / `deleteMessage` / `addReaction` / `typing` / `searchMessages`
+- 消息：`sendMessage` / `sendCard` / `sendEphemeral` / `getMessages` / `getMessage` / `editMessage` / `deleteMessage` / `addReaction` / `removeReaction` / `listReactionUsers` / `typing` / `searchMessages`
 - 交互：`gw.on("interaction", i => ...)` → `Interaction.ack()` / `reply(content, {card?, ephemeral?})` / `updateMessage({content?, card?})`
 - 流式：`startStream(channelId)` → `stream.append(delta)` → `stream.end({content?, card?})`
+- 角色（反应角色 / 验证门）：`roles` / `role` / `createRole` / `updateRole` / `deleteRole` / `addMemberRole` / `removeMemberRole`
+- 覆盖：`overwrites` / `setOverwrite` / `deleteOverwrite` / `channelPermissions`
 - 语音：`joinVoice` / `leaveVoice` / `refreshVoiceToken` / `voiceStates`
-- 资源：`me` / `guilds` / `channels` / `members` / `permissions`
-- 事件：`connectGateway()` → `gw.on("MESSAGE_CREATE" | "MESSAGE_STREAM_DELTA" | "VOICE_STATE_UPDATE" | ... , handler)`
+- 资源：`me` / `guilds` / `channels` / `members` / `member` / `permissions`
+- 事件：`connectGateway()` → `gw.on("MESSAGE_CREATE" | "MESSAGE_REACTION_ADD" | "MESSAGE_STREAM_DELTA" | ... , handler)`
 
-完整协议文档见 [`../README.md`](../README.md)。
+## 反应角色（验证门）示例
+
+```js
+const RULES_MESSAGE_ID = process.env.RULES_MESSAGE_ID
+const VERIFIED_ROLE_ID = process.env.VERIFIED_ROLE_ID
+
+const gw = bot.connectGateway()
+gw.on("MESSAGE_REACTION_ADD", async (ev) => {
+  if (String(ev.message_id) !== RULES_MESSAGE_ID || ev.emoji !== "✅") return
+  await bot.addMemberRole(ev.guild_id, ev.user_id, VERIFIED_ROLE_ID)
+})
+gw.on("MESSAGE_REACTION_REMOVE", async (ev) => {
+  if (String(ev.message_id) !== RULES_MESSAGE_ID || ev.emoji !== "✅") return
+  await bot.removeMemberRole(ev.guild_id, ev.user_id, VERIFIED_ROLE_ID)
+})
+```
+
+安装后需给 bot 绑定带 `MANAGE_ROLES` 的角色，且层级高于「已验证」角色。完整协议与权限位说明见 [`../README.md`](../README.md)。

@@ -15,7 +15,9 @@ type PrivacySettings struct {
 	MessageRequestFilter     bool      `gorm:"not null;default:true" json:"message_request_filter"`
 	ShowMutualGuilds         bool      `gorm:"not null;default:true" json:"show_mutual_guilds"`
 	PublicProfileToNonFriends bool     `gorm:"not null;default:true" json:"public_profile_to_non_friends"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	// ShowActivityTo 活动可见范围（Server-18）：everyone | friends | nobody；空串=默认 friends。
+	ShowActivityTo string    `gorm:"size:32;not null;default:'friends'" json:"show_activity_to"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // GuildMemberPrivacy 每服私信覆盖（Server-16 BM.2）：allow_dm 默认 true，仅 false 时强制落库。
@@ -88,6 +90,10 @@ const (
 	DmFromFriends      = "friends"
 	DmFromMutualGuilds = "mutual_guilds"
 	DmFromNobody       = "nobody"
+
+	ShowActivityEveryone = "everyone"
+	ShowActivityFriends  = "friends"
+	ShowActivityNobody   = "nobody"
 
 	NotificationFriendRequest   = "FRIEND_REQUEST"
 	NotificationFriendAccept    = "FRIEND_ACCEPT"

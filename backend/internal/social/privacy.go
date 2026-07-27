@@ -13,12 +13,13 @@ import (
 )
 
 type privacyView struct {
-	FriendRequestFrom         string                       `json:"friend_request_from"`
-	DmFrom                    string                       `json:"dm_from"`
-	MessageRequestFilter      bool                         `json:"message_request_filter"`
-	ShowMutualGuilds          bool                         `json:"show_mutual_guilds"`
-	PublicProfileToNonFriends bool                         `json:"public_profile_to_non_friends"`
-	GuildOverrides            map[string]guildPrivacyView  `json:"guild_overrides"`
+	FriendRequestFrom         string                      `json:"friend_request_from"`
+	DmFrom                    string                      `json:"dm_from"`
+	MessageRequestFilter      bool                        `json:"message_request_filter"`
+	ShowMutualGuilds          bool                        `json:"show_mutual_guilds"`
+	PublicProfileToNonFriends bool                        `json:"public_profile_to_non_friends"`
+	ShowActivityTo            string                      `json:"show_activity_to"`
+	GuildOverrides            map[string]guildPrivacyView `json:"guild_overrides"`
 }
 
 type guildPrivacyView struct {
@@ -29,12 +30,17 @@ func privacyToView(p model.PrivacySettings, overrides map[string]guildPrivacyVie
 	if overrides == nil {
 		overrides = map[string]guildPrivacyView{}
 	}
+	showActivity := p.ShowActivityTo
+	if showActivity == "" {
+		showActivity = model.ShowActivityFriends
+	}
 	return privacyView{
 		FriendRequestFrom:         p.FriendRequestFrom,
 		DmFrom:                    p.DmFrom,
 		MessageRequestFilter:      p.MessageRequestFilter,
 		ShowMutualGuilds:          p.ShowMutualGuilds,
 		PublicProfileToNonFriends: p.PublicProfileToNonFriends,
+		ShowActivityTo:            showActivity,
 		GuildOverrides:            overrides,
 	}
 }
@@ -62,6 +68,7 @@ type privacyPatch struct {
 	MessageRequestFilter      *bool   `json:"message_request_filter"`
 	ShowMutualGuilds          *bool   `json:"show_mutual_guilds"`
 	PublicProfileToNonFriends *bool   `json:"public_profile_to_non_friends"`
+	ShowActivityTo            *string `json:"show_activity_to"`
 }
 
 func validFriendFrom(v string) bool {
@@ -76,6 +83,14 @@ func validFriendFrom(v string) bool {
 func validDmFrom(v string) bool {
 	switch v {
 	case model.DmFromEveryone, model.DmFromFriends, model.DmFromMutualGuilds, model.DmFromNobody:
+		return true
+	}
+	return false
+}
+
+func validShowActivityTo(v string) bool {
+	switch v {
+	case model.ShowActivityEveryone, model.ShowActivityFriends, model.ShowActivityNobody:
 		return true
 	}
 	return false
@@ -113,12 +128,22 @@ func (h *api) patchPrivacy(c *gin.Context) {
 	if input.PublicProfileToNonFriends != nil {
 		p.PublicProfileToNonFriends = *input.PublicProfileToNonFriends
 	}
+	if input.ShowActivityTo != nil {
+		if !validShowActivityTo(*input.ShowActivityTo) {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "show_activity_to 无效")
+			return
+		}
+		p.ShowActivityTo = *input.ShowActivityTo
+	}
+	if p.ShowActivityTo == "" {
+		p.ShowActivityTo = model.ShowActivityFriends
+	}
 	p.UpdatedAt = time.Now().UTC()
 	if err := h.deps.DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"friend_request_from", "dm_from", "message_request_filter",
-			"show_mutual_guilds", "public_profile_to_non_friends", "updated_at",
+			"show_mutual_guilds", "public_profile_to_non_friends", "show_activity_to", "updated_at",
 		}),
 	}).Create(&p).Error; err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "保存隐私设置失败")

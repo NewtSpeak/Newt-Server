@@ -84,4 +84,30 @@ bot.leave_voice(guild_id)
 
 媒体层可搭配 [aiortc](https://github.com/aiortc/aiortc) 实现音频收发。
 
+## 反应角色（验证门）
+
+```python
+RULES_MESSAGE_ID = "..."
+VERIFIED_ROLE_ID = "..."
+
+async def on_event(event, data):
+    if event == "MESSAGE_REACTION_ADD":
+        if str(data.get("message_id")) != RULES_MESSAGE_ID or data.get("emoji") != "✅":
+            return
+        # user_id 可直接作为 members/{id} 路径（服务端同时接受 member_id / user_id）
+        bot.add_member_role(data["guild_id"], data["user_id"], VERIFIED_ROLE_ID)
+    elif event == "MESSAGE_REACTION_REMOVE":
+        if str(data.get("message_id")) != RULES_MESSAGE_ID or data.get("emoji") != "✅":
+            return
+        try:
+            bot.remove_member_role(data["guild_id"], data["user_id"], VERIFIED_ROLE_ID)
+        except Exception:
+            pass
+
+asyncio.run(run_gateway(bot, on_event))
+```
+
+相关 API：`roles` / `create_role` / `add_member_role` / `remove_member_role` / `member` /
+`set_overwrite` / `list_reaction_users`。安装后需给 bot 绑定带 `MANAGE_ROLES` 的角色。
+
 完整协议文档见 [`../README.md`](../README.md)。

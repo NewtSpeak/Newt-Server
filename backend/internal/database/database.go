@@ -24,6 +24,11 @@ func Open(databaseURL string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(model.Models()...); err != nil {
 		return nil, fmt.Errorf("执行 PostgreSQL 迁移: %w", err)
 	}
+	// 贴图条目：早期 schema 误建 (pack_id, sort_order) UNIQUE，与「同包内 sort 可重复」冲突，
+	// 导致第二张起上传全部 DATABASE_ERROR。GORM AutoMigrate 不会把 unique 降级为普通索引。
+	if err := ensureStickerItemSortIndex(db); err != nil {
+		return nil, fmt.Errorf("修正 sticker_items 排序索引: %w", err)
+	}
 	if err := ensureFirstUserSystemAdmin(db); err != nil {
 		return nil, fmt.Errorf("初始化系统管理员: %w", err)
 	}
@@ -66,4 +71,37 @@ func ensureFirstUserSystemAdmin(db *gorm.DB) error {
 		}
 		return tx.Model(&first).Update("system_admin", true).Error
 	})
+}
+
+// ensureStickerItemSortIndex 将 sticker_items(pack_id, sort_order) 从 UNIQUE 降为普通索引（幂等）。
+func ensureStickerItemSortIndex(db *gorm.DB) error {
+	// 探测是否仍为唯一索引（pg_index.indisunique）
+	var isUnique bool
+	err := db.Raw(`
+		SELECT COALESCE(i.indisunique, false)
+		FROM pg_class t
+		JOIN pg_index i ON i.indrelid = t.oid
+		JOIN pg_class ix ON ix.oid = i.indexrelid
+		WHERE t.relname = 'sticker_items' AND ix.relname = 'idx_sticker_item_pack_sort'
+		LIMIT 1
+	`).Scan(&isUnique).Error
+	if err != nil {
+		// 表/索引尚未存在时忽略；AutoMigrate 之后通常已有表
+		return nil
+	}
+	if !isUnique {
+		// 可能索引不存在或已是非唯一：保证普通索引在
+		return db.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_sticker_item_pack_sort
+			ON sticker_items (pack_id, sort_order)
+		`).Error
+	}
+	// 唯一 → 删除后重建为非唯一
+	if err := db.Exec(`DROP INDEX IF EXISTS idx_sticker_item_pack_sort`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_sticker_item_pack_sort
+		ON sticker_items (pack_id, sort_order)
+	`).Error
 }

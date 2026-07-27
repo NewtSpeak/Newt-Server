@@ -145,6 +145,7 @@ func (h *api) loadOrDefaultPrivacy(userID uuid.UUID) model.PrivacySettings {
 			MessageRequestFilter:      true,
 			ShowMutualGuilds:          true,
 			PublicProfileToNonFriends: true,
+			ShowActivityTo:            model.ShowActivityFriends,
 		}
 	}
 	return p
@@ -192,6 +193,7 @@ func (h *api) ensurePrivacyRow(userID uuid.UUID) model.PrivacySettings {
 			p.MessageRequestFilter = true
 			p.ShowMutualGuilds = true
 			p.PublicProfileToNonFriends = true
+			p.ShowActivityTo = model.ShowActivityFriends
 			_ = h.deps.DB.Save(&p).Error
 		}
 	}

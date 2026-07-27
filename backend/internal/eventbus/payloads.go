@@ -175,18 +175,46 @@ func NewUserUpdatePayload(user model.User) UserUpdatePayload {
 	}
 }
 
+// PresenceActivityTimestamps 活动时间戳（毫秒）。
+type PresenceActivityTimestamps struct {
+	Start *int64 `json:"start,omitempty"`
+	End   *int64 `json:"end,omitempty"`
+}
+
+// PresenceActivityAssets 活动资源图。
+type PresenceActivityAssets struct {
+	LargeImage string `json:"large_image,omitempty"`
+	LargeText  string `json:"large_text,omitempty"`
+	SmallImage string `json:"small_image,omitempty"`
+	SmallText  string `json:"small_text,omitempty"`
+}
+
+// PresenceActivity PRESENCE 中的结构化活动条目（Server-18）。
+type PresenceActivity struct {
+	Type          string                      `json:"type"`
+	Name          string                      `json:"name"`
+	Details       string                      `json:"details,omitempty"`
+	State         string                      `json:"state,omitempty"`
+	ApplicationID string                      `json:"application_id,omitempty"`
+	URL           string                      `json:"url,omitempty"`
+	Assets        *PresenceActivityAssets     `json:"assets,omitempty"`
+	Timestamps    *PresenceActivityTimestamps `json:"timestamps,omitempty"`
+	Source        string                      `json:"source"`
+}
+
 // PresenceUpdatePayload PRESENCE_UPDATE 载荷。
 // Status 取 online / idle / dnd / invisible / offline；发给他人的载荷绝不出现
 // invisible（服务端已掩码为 offline），仅本人的定向载荷携带真实 invisible。
-// CustomText/CustomEmoji/CustomExpiresAt 自定义状态（docs 01 FR-23）：
-// 文本 + 可选 emoji + 可选过期时间（客户端据 expires_at 自行倒计时清除）。
+// CustomText/CustomEmoji/CustomExpiresAt 自定义状态（docs 01 FR-23）。
+// Activities 结构化活动（Server-18）；offline/invisible 掩码后为空；受 show_activity_to 过滤。
 type PresenceUpdatePayload struct {
-	UserID          uuid.UUID  `json:"user_id"`
-	Status          string     `json:"status"`
-	CustomText      string     `json:"custom_text,omitempty"`
-	CustomEmoji     string     `json:"custom_emoji,omitempty"`
-	CustomExpiresAt *time.Time `json:"custom_expires_at,omitempty"`
-	EventAt         time.Time  `json:"event_at"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Status          string             `json:"status"`
+	CustomText      string             `json:"custom_text,omitempty"`
+	CustomEmoji     string             `json:"custom_emoji,omitempty"`
+	CustomExpiresAt *time.Time         `json:"custom_expires_at,omitempty"`
+	Activities      []PresenceActivity `json:"activities,omitempty"`
+	EventAt         time.Time          `json:"event_at"`
 }
 
 // NewPresenceUpdatePayload 供 internal/presence 复用。

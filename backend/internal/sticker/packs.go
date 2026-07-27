@@ -89,8 +89,14 @@ func (h *api) createPack(c *gin.Context) {
 			fail(c, http.StatusBadRequest, "INVALID_GUILD", "guild_id 非法")
 			return
 		}
-		if _, err := perms.LoadGuild(h.db(), user, gid); err != nil {
+		gctx, err := perms.LoadGuild(h.db(), user, gid)
+		if err != nil {
 			fail(c, http.StatusForbidden, "NOT_MEMBER", "须为本服成员才能创建服独属包")
+			return
+		}
+		// 服独属包仅允许服务器所有者创建（归属权归属该服主）
+		if !gctx.Owner {
+			fail(c, http.StatusForbidden, "NOT_OWNER", "仅服务器所有者可为该服创建贴图包")
 			return
 		}
 		guildID = &gid
@@ -248,7 +254,7 @@ func (h *api) uploadPackCover(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "PACK_NOT_ACTIVE", "仅 active 包可设置封面")
 		return
 	}
-	data, mime, _, _, ok := h.readUpload(c)
+	data, mime, _, _, _, ok := h.readUpload(c)
 	if !ok {
 		return
 	}
@@ -495,13 +501,26 @@ func (h *api) getPack(c *gin.Context) {
 	}
 
 	view := h.packView(pack, count, items)
+	// 是否已在当前用户的贴图库（自建包视为已在库）
+	alreadyInstalled := isOwner
+	if !isOwner {
+		var n int64
+		_ = h.db().Model(&model.UserPackLibrary{}).
+			Where("user_id = ? AND pack_id = ? AND status = ?",
+				user.ID, pack.ID, model.UserPackLibraryActive).
+			Count(&n).Error
+		alreadyInstalled = n > 0
+	}
 	// 附带可操作标志，方便客户端 Preview UI
-	canInstallFlag := canInstall(h.db(), pack, ctxGuild) == nil && !isOwner
-	canCopyFlag := canCopy(h.db(), pack) == nil
+	// can_install：允许收藏 + 非本人 + 尚未 Install
+	canInstallFlag := canInstall(h.db(), pack, ctxGuild) == nil && !isOwner && !alreadyInstalled
+	canCopyFlag := canCopy(h.db(), pack) == nil && pack.Scope == model.StickerScopeAccount
 	c.JSON(http.StatusOK, gin.H{
-		"pack":        view,
-		"can_install": canInstallFlag,
-		"can_copy":    canCopyFlag && pack.Scope == model.StickerScopeAccount,
+		"pack":              view,
+		"can_install":       canInstallFlag,
+		"can_copy":          canCopyFlag,
+		"is_owner":          isOwner,
+		"already_installed": alreadyInstalled,
 	})
 }
 

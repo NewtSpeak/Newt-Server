@@ -162,10 +162,22 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 	}
 	unionPresences := []snapshot.Presence{}
 	if h.presence != nil {
-		// 先登记 presence（默认 online，会触发本人/他人 PRESENCE_UPDATE 广播），
+		// 先登记 presence（IDENTIFY 可携带初始 status，避免隐身用户先闪 online；
+		// 会触发本人/他人 PRESENCE_UPDATE 广播——他人载荷已 mask，绝无 invisible），
 		// 再组装 READY presences，保证快照里能看到自己。事件帧只会进入发送队列
 		//（writePump 在握手完成后才启动），不会先于 READY 送达。
-		h.presence.Connect(user.ID, sess.id)
+		h.presence.Connect(user.ID, sess.id, input.Status)
+		// 若 IDENTIFY 附带自定义状态或 activities，合并写入。
+		// 空自定义且无 activities 时不调用，避免覆盖会话内既有自定义。
+		if input.CustomText != "" || input.CustomEmoji != "" || input.CustomExpiresAt != nil || input.Activities != nil {
+			status := input.Status
+			if !presence.ValidStatus(status) {
+				status = presence.StatusOnline
+			}
+			h.presence.SetStatusFull(user.ID, sess.id, status, presence.CustomStatus{
+				Text: input.CustomText, Emoji: input.CustomEmoji, ExpiresAt: input.CustomExpiresAt,
+			}, input.Activities)
+		}
 		seen := make(map[uuid.UUID]struct{}, 16)
 		for i := range guilds {
 			memberIDs, err := h.hub.dir.GuildMemberIDs(guilds[i].Guild.ID)
@@ -179,6 +191,7 @@ func (h *handler) identify(c *conn, data json.RawMessage) (*session, bool) {
 					entry := snapshot.Presence{
 						UserID: memberID, Status: info.Status, CustomText: info.CustomText,
 						CustomEmoji: info.CustomEmoji, CustomExpiresAt: info.CustomExpiresAt,
+						Activities: toSnapshotActivities(info.Activities),
 					}
 					presences = append(presences, entry)
 					// 顶层 presences 为各 guild 的并集（按 user_id 去重，快照一致视角）。
@@ -251,8 +264,8 @@ func (h *handler) resume(c *conn, data json.RawMessage) (*session, bool) {
 	h.hub.register(sess)
 	if h.presence != nil {
 		// 幂等补登记：正常 resume 时 presence 仍持有该会话（保留原状态不被重置）；
-		// 若恰被清扫过，则按新连接重新上线。
-		h.presence.Connect(sess.user.ID, sess.id)
+		// 若恰被清扫过，则按新连接默认 online（客户端 RESUMED 后会重报真实状态）。
+		h.presence.Connect(sess.user.ID, sess.id, "")
 	}
 	if replaced != nil && replaced != c {
 		replaced.shutdown(closeSessionReplaced, "会话被新连接接管", h.opts.WriteTimeout)
@@ -305,9 +318,55 @@ func (h *handler) readLoop(c *conn, sess *session) {
 				continue
 			}
 			// 非法 status 由 SetStatusFull 拒绝（返回 false），与无法解析的帧同样静默忽略。
+			// activities：nil=不改，非 nil（含 []）=替换（Server-18 G.2/G.3）。
 			h.presence.SetStatusFull(sess.user.ID, sess.id, input.Status, presence.CustomStatus{
 				Text: input.CustomText, Emoji: input.CustomEmoji, ExpiresAt: input.CustomExpiresAt,
-			})
+			}, input.Activities)
 		}
 	}
+}
+
+// toSnapshotActivities 将 presence.Activity 转为 READY 快照形态。
+func toSnapshotActivities(in []presence.Activity) []snapshot.PresenceActivity {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]snapshot.PresenceActivity, len(in))
+	for i, a := range in {
+		out[i] = snapshot.PresenceActivity{
+			Type: a.Type, Name: a.Name, Details: a.Details, State: a.State,
+			ApplicationID: a.ApplicationID, URL: a.URL, Source: a.Source,
+		}
+		if a.Assets != nil {
+			assets := map[string]string{}
+			if a.Assets.LargeImage != "" {
+				assets["large_image"] = a.Assets.LargeImage
+			}
+			if a.Assets.LargeText != "" {
+				assets["large_text"] = a.Assets.LargeText
+			}
+			if a.Assets.SmallImage != "" {
+				assets["small_image"] = a.Assets.SmallImage
+			}
+			if a.Assets.SmallText != "" {
+				assets["small_text"] = a.Assets.SmallText
+			}
+			if len(assets) > 0 {
+				out[i].Assets = assets
+			}
+		}
+		if a.Timestamps != nil {
+			ts := map[string]int64{}
+			if a.Timestamps.Start != nil {
+				ts["start"] = *a.Timestamps.Start
+			}
+			if a.Timestamps.End != nil {
+				ts["end"] = *a.Timestamps.End
+			}
+			if len(ts) > 0 {
+				out[i].Timestamps = ts
+			}
+		}
+	}
+	return out
 }

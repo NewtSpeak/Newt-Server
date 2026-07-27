@@ -7,16 +7,23 @@
 // 两个挂载平面：
 //   - Register（/api/v1，后台管理）：bot 档案 CRUD、令牌签发/吊销、安装到服/卸载；
 //     角色绑定（权限赋予）复用既有成员角色端点（bot 即 Member）。
-//   - RegisterBotAPI（/bot-api/v1，开放平面）：bot token 鉴权，完整的消息
-//     （含卡片 + 流式三段协议）、语音进出房（Media Token 带 bot 标记）、
-//     Gateway WS 事件订阅与基础资源目录，供各语言 SDK 调用。
+//   - RegisterBotAPI（/bot-api/v1，开放平面）：bot token 鉴权，能力面与 Discord
+//     开放平台 Bot 对齐——消息/反应/角色/频道/成员治理/邀请/Restriction/语音/
+//     舞台/审计/贴图，全部走同一套 RBAC + 层级校验，不另开特权通道。
 package botapi
 
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/owlspeak/owl-server/backend/internal/auditapi"
 	"github.com/owlspeak/owl-server/backend/internal/gateway"
+	"github.com/owlspeak/owl-server/backend/internal/guildapi"
 	"github.com/owlspeak/owl-server/backend/internal/message"
+	"github.com/owlspeak/owl-server/backend/internal/moderation"
+	"github.com/owlspeak/owl-server/backend/internal/publicinvite"
+	"github.com/owlspeak/owl-server/backend/internal/restriction"
+	"github.com/owlspeak/owl-server/backend/internal/stage"
+	"github.com/owlspeak/owl-server/backend/internal/sticker"
 	"github.com/owlspeak/owl-server/backend/internal/voice"
 )
 
@@ -52,12 +59,20 @@ func RegisterClient(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 }
 
 // RegisterBotAPI 挂载 bot 开放 API（/bot-api 前缀，实际版本化为 /bot-api/v1）。
+// 能力面与 Discord Bot API 对齐（在 OwlSpeak 已实现的产品模型内）：
+//
+//	消息 / 反应 / 附件 / 搜索 / 流式卡片
+//	服务器结构 / 频道 CRUD / 角色 / 权限覆盖
+//	成员踢出·封禁·昵称 / 邀请 / Restriction（Timeout）
+//	语音进房·管理静音闭听移动 / 舞台 / 屏幕共享
+//	审计日志 / 贴图表情
+//
+// 每个领域 handler 内部仍按 RBAC 权限位裁决；bot 仅当被赋予对应角色时才可调用。
 func RegisterBotAPI(botAPI *gin.RouterGroup, deps appdeps.Deps) error {
 	svc := ensureService(deps.DB, deps.Bus, deps.Cfg)
 	v1 := botAPI.Group("/v1")
 
-	// bot 认证平面注入：领域模块（message/voice）经 Deps.Auth/CurrentUser
-	// 以「bot 即用户」复用全部权限计算与业务逻辑。
+	// bot 认证平面注入：领域模块经 Deps.Auth/CurrentUser 以「bot 即用户」复用。
 	botDeps := deps
 	botDeps.Auth = svc.requireBotAuth()
 	botDeps.CurrentUser = CurrentBotUser
@@ -68,19 +83,53 @@ func RegisterBotAPI(botAPI *gin.RouterGroup, deps appdeps.Deps) error {
 	authed.GET("/guilds", svc.myGuilds)
 	authed.GET("/guilds/:guildID/channels", svc.listChannels)
 	authed.GET("/guilds/:guildID/members", svc.listMembers)
+	authed.GET("/guilds/:guildID/members/:memberID", svc.getMember)
 	authed.GET("/guilds/:guildID/permissions/@me", svc.myGuildPermissions)
 
-	// 消息：完整用户级能力（CRUD/附件/搜索/反应/打字）+ 卡片 + 流式三段协议。
+	// 消息：CRUD / 附件 / 搜索 / 反应 / 打字 + 卡片 + 流式（bot 专属）。
 	if err := message.RegisterBot(v1, botDeps); err != nil {
 		return err
 	}
 
-	// 语音：进出房/续签/自我状态/成员列表；签发的 Media Token 携带 bot=true，
-	// SFU 在音频流参与者信令中给 bot 独立标记。
+	// 服务器结构：guild / 频道 / 角色 / 覆盖（Discord Guild+Channel+Permission）。
+	if err := guildapi.RegisterBot(v1, botDeps); err != nil {
+		return err
+	}
+
+	// 成员治理：踢出 / 封禁 / 昵称 / 创建邀请 / 主动退服（Discord Member+Ban+Invite）。
+	if err := moderation.RegisterBot(v1, botDeps); err != nil {
+		return err
+	}
+
+	// 邀请列表与撤销（Discord Get/Delete Guild Invites）。
+	if err := publicinvite.RegisterBot(v1, botDeps); err != nil {
+		return err
+	}
+
+	// Restriction：超时禁言等多维限制（Discord Timeout / Moderate Members）。
+	if err := restriction.RegisterBot(v1, botDeps); err != nil {
+		return err
+	}
+
+	// 审计日志（Discord Get Guild Audit Log）。
+	if err := auditapi.RegisterBot(v1, botDeps); err != nil {
+		return err
+	}
+
+	// 贴图 / 小表情（Discord Guild Expressions 子集 + 用户贴图库）。
+	if err := sticker.RegisterBot(v1, botDeps); err != nil {
+		return err
+	}
+
+	// 语音：自身进房 + 管理踢出/移动/服务器静音闭听。
 	voice.RegisterBotPlane(authed, botDeps)
 	voice.RegisterBotPublic(v1, botDeps)
 
-	// Gateway WS：IDENTIFY 直接携带 bot token（无需 JWT），事件推送按
-	// guild 成员关系 + 频道可见性过滤，与其他平面完全一致。
+	// 舞台 + 屏幕共享。
+	if err := stage.RegisterBot(v1, botDeps); err != nil {
+		return err
+	}
+
+	// Gateway WS：事件与用户端一致（按频道可见性过滤）。
 	return gateway.RegisterWithAuthenticator(v1, deps, svc.authenticateGatewayToken)
 }

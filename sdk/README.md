@@ -1,23 +1,22 @@
-# OwlSpeak Bot 开放平台与 SDK
+# OwlSpeak Bot SDK（兼容镜像）
 
-OwlSpeak 为机器人提供独立的开放 API 平面（`/bot-api/v1`），配套 JavaScript / Python / Go 三种语言的官方 SDK。
-机器人不需要注册用户账号、不需要操作客户端：由管理员在控制台创建机器人并签发 **bot token**，
-即可独立收发消息（含卡片与流式回复）、订阅实时事件、接入语音频道的音频流。
+> **权威源已迁至独立仓库：[OwlSpeak/OwlBotSdk](https://github.com/OwlSpeak/OwlBotSdk)**  
+> 本地路径（本机开发）：`/Users/suanshu/Documents/OwlBotSdk` 或 monorepo 外同级目录 `OwlBotSdk/`。
 
-## 快速开始
+本目录（`Owl-Server/sdk/`）仅作历史兼容与开发参考；新项目请直接依赖 **OwlBotSdk**：
 
-1. 管理控制台 → 「开放平台 / 机器人」→ 创建机器人；
-2. 「token 管理」→ 签发 token（明文形如 `owlbot_xxx`，仅显示一次）；
-3. 「安装到服务器与权限赋予」→ 选择服务器安装，并为机器人绑定角色（权限与人类成员同一套 RBAC，可随时手动调整）；
-4. 用任一 SDK 或直接调 HTTP API 开始工作。
+| 语言 | 安装 |
+|------|------|
+| JavaScript | `npm install @owlspeak/bot-sdk` 或 `file:../OwlBotSdk/javascript` |
+| Go | `go get github.com/OwlSpeak/OwlBotSdk/go` |
+| Python | `pip install owlspeak-bot` 或 `pip install -e ../OwlBotSdk/python` |
+| Rust | `owlspeak-bot = { path = "../OwlBotSdk/rust" }` |
 
-```text
-认证方式：HTTP 头 Authorization: Bot <token>   （也兼容 Bearer <token>）
-基础地址：https://<你的服务器>/bot-api/v1
-限   流：每 bot 20 QPS（突发 40），超限返回 429
-```
+完整协议、能力矩阵与四语言示例见 **OwlBotSdk** 仓库：
 
-## HTTP API 一览
+- [OwlBotSdk README](https://github.com/OwlSpeak/OwlBotSdk)
+- [HTTP / Gateway API](https://github.com/OwlSpeak/OwlBotSdk/blob/main/docs/API.md)
+
 
 ### 基础资源
 
@@ -155,3 +154,4 @@ gw.on("interaction", async (interaction) => {
 | Go | [`go/`](go/) | 独立 module，Gateway 基于 gorilla/websocket；可配合 pion 接入语音媒体 |
 
 各目录内含完整 README 与示例。
+

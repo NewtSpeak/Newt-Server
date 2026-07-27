@@ -127,6 +127,74 @@ func TestGatewayInvisibleMaskedAsOffline(t *testing.T) {
 	}, nil)
 }
 
+// TestGatewayIdentifyWithInvisible 隐身用户 IDENTIFY 直接带 status=invisible：
+// 他人只收到 offline，全程无 invisible 泄露，且无 online 闪现。
+func TestGatewayIdentifyWithInvisible(t *testing.T) {
+	env := newPresenceEnv(t, testOptions())
+	server := newTestServer(t, env.handler)
+
+	wsAlice, _ := handshake(t, server, "tok-a")
+
+	wsBob := dial(t, server)
+	readFrame(t, wsBob) // HELLO
+	sendFrame(t, wsBob, map[string]any{
+		"op": opIdentify,
+		"d":  map[string]string{"token": "tok-b", "status": "invisible"},
+	})
+	f := readFrame(t, wsBob)
+	if f.Op != opReady {
+		t.Fatalf("IDENTIFY 后收到 %s，期待 READY", f.Op)
+	}
+	var ready readyData
+	if err := json.Unmarshal(f.D, &ready); err != nil {
+		t.Fatalf("READY 解析失败: %v", err)
+	}
+	// 本人 READY 快照可见真实 invisible。
+	foundSelf := false
+	for _, p := range ready.Presences {
+		if p.UserID == env.bob.ID {
+			foundSelf = true
+			if p.Status != "invisible" {
+				t.Fatalf("本人 READY status = %q，期待 invisible", p.Status)
+			}
+		}
+	}
+	if !foundSelf {
+		t.Fatal("READY presences 缺少本人（invisible）条目")
+	}
+
+	// alice 侧：offline→offline 无变化，不应收到 bob 的任何 presence；
+	// 尤其不能出现 online（闪现）或 invisible（泄露）。
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		_ = wsAlice.SetReadDeadline(time.Now().Add(40 * time.Millisecond))
+		_, raw, err := wsAlice.ReadMessage()
+		if err != nil {
+			break
+		}
+		var frame testFrame
+		if json.Unmarshal(raw, &frame) != nil || frame.Op != opDispatch || frame.T != eventbus.EventPresenceUpdate {
+			continue
+		}
+		var p presencePayload
+		rawD, _ := json.Marshal(frame.D)
+		if json.Unmarshal(rawD, &p) != nil {
+			continue
+		}
+		if p.UserID != env.bob.ID {
+			continue
+		}
+		if p.Status == "online" {
+			t.Fatal("隐身 IDENTIFY 后他人仍收到 online（隐私闪现）")
+		}
+		if p.Status == "invisible" {
+			t.Fatal("他人收到 invisible（隐私泄露）")
+		}
+		// offline 也不应广播（与未上线无差异）；若出现同样记失败，便于发现多余事件。
+		t.Fatalf("隐身 IDENTIFY 后他人不应收到任何 bob presence，实际 status=%q", p.Status)
+	}
+}
+
 // TestGatewayReadyCarriesPresences 后连接者的 READY 快照附带各 guild 在线成员状态。
 func TestGatewayReadyCarriesPresences(t *testing.T) {
 	env := newPresenceEnv(t, testOptions())

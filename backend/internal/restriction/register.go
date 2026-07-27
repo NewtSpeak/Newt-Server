@@ -33,6 +33,20 @@ func RegisterClient(root *gin.RouterGroup, deps appdeps.Deps) error {
 	return nil
 }
 
+// RegisterBot 挂载机器人开放平面 Restriction API（对齐 Discord Timeout / Moderate Members）。
+// 权限：MODERATE_MEMBERS + 层级；与用户端/后台同一 service 单例。
+func RegisterBot(group *gin.RouterGroup, deps appdeps.Deps) error {
+	svc := impl
+	if svc == nil {
+		svc = newService(deps.DB, deps.Bus)
+		impl = svc
+		SetService(svc)
+		go svc.expiryLoop()
+	}
+	mountRoutes(group, deps, &api{deps: deps, svc: svc})
+	return nil
+}
+
 func mountRoutes(group *gin.RouterGroup, deps appdeps.Deps, handlers *api) {
 	routes := group.Group("/guilds/:guildID/restrictions", deps.Auth)
 	routes.POST("", handlers.create)

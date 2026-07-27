@@ -56,3 +56,15 @@ var RegisterClient = func(authed *gin.RouterGroup, deps appdeps.Deps) {
 	authed.GET("/guilds/:guildID/invites", h.listInvites)
 	authed.DELETE("/invites/:code", h.revokeInviteByCode)
 }
+
+// RegisterBot 机器人开放平面邀请管理（对齐 Discord Get/Delete Guild Invites）。
+// bot 无 SystemAdmin 短路（clientPlane=true）；创建邀请走 moderation.RegisterBot。
+func RegisterBot(group *gin.RouterGroup, deps appdeps.Deps) error {
+	h := &api{deps: deps, clientPlane: true}
+	authed := group.Group("", deps.Auth)
+	authed.GET("/invites/:code/preview", h.previewInvite)
+	authed.GET("/guilds/:guildID/invites", h.listInvites)
+	authed.DELETE("/invites/:code", h.revokeInviteByCode)
+	authed.DELETE("/guilds/:guildID/invites/:code", h.deleteInvite)
+	return nil
+}

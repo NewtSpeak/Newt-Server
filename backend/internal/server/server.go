@@ -10,6 +10,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/owlspeak/owl-server/backend/internal/activityapi"
 	"github.com/owlspeak/owl-server/backend/internal/adminpresence"
 	"github.com/owlspeak/owl-server/backend/internal/appdeps"
 	"github.com/owlspeak/owl-server/backend/internal/auditapi"
@@ -162,9 +163,10 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 		// 社交层（隐私/好友/通知收件箱，Server-16）；DM 频道后续补齐。
 		social.Register,
 		message.Register,
-		sticker.Register,   // 贴图与表情包（docs 17）
-		cosmetics.Register, // 平台装扮商店
-		activity.Register,  // 平台活跃度与每日积分
+		sticker.Register,     // 贴图与表情包（docs 17）
+		cosmetics.Register,   // 平台装扮商店
+		activity.Register,    // 平台活跃度与每日积分
+		activityapi.Register, // 活动封面 / 游戏目录（Server-18）
 		gateway.Register,
 		auditapi.Register,
 		// AI 时代扩展功能（后台管理 API 部分）：
@@ -226,6 +228,10 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	}
 	// 装扮资产公开访问（/public-assets/cosmetics）。
 	if err := cosmetics.RegisterPublic(publicAssets, deps); err != nil {
+		return nil, err
+	}
+	// 活动封面公开访问（游戏图标上传，Server-18）。
+	if err := activityapi.RegisterPublic(publicAssets, deps); err != nil {
 		return nil, err
 	}
 

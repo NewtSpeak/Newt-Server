@@ -55,6 +55,14 @@ func RegisterClient(root *gin.RouterGroup, deps appdeps.Deps) error {
 	return nil
 }
 
+// RegisterBot 挂载机器人开放平面本服审计查询（对齐 Discord Get Guild Audit Log）。
+// 需 VIEW_AUDIT_LOG；不暴露跨服 /admin/audit-logs。
+func RegisterBot(group *gin.RouterGroup, deps appdeps.Deps) error {
+	h := &api{deps: deps}
+	group.GET("/guilds/:guildID/audit-logs", deps.Auth, h.listGuild)
+	return nil
+}
+
 func fail(c *gin.Context, status int, code, message string) {
 	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message}})
 }

@@ -109,9 +109,12 @@ type Message struct {
 	// VisibleTo ephemeral 定向可见名单（bot 专项）：空数组 = 公开消息；
 	// 非空 = 仅名单内用户 + 作者可见（持久化，历史拉取按 viewer 过滤，上限 20）。
 	// 不建索引：读路径先经频道游标索引收敛，残余 jsonb 过滤开销可忽略。
-	VisibleTo UUIDList   `gorm:"type:jsonb;not null;default:'[]'" json:"visible_to,omitempty"`
-	CreatedAt time.Time  `gorm:"index:idx_message_created" json:"created_at"`
-	DeletedAt *time.Time `gorm:"index:idx_message_deleted" json:"deleted_at,omitempty"`
+	VisibleTo UUIDList `gorm:"type:jsonb;not null;default:'[]'" json:"visible_to,omitempty"`
+	// VisibleRoleIDs 消息限定可见身份组（空 = 公开，频道 VIEW 即可）。
+	// 非空时仅：作者 ∪ 持有任一指定角色的成员 ∪ 频道最终 MANAGE_MESSAGES ∪ 服主/系统管可见。
+	VisibleRoleIDs UUIDList  `gorm:"type:jsonb;not null;default:'[]'" json:"visible_role_ids"`
+	CreatedAt      time.Time `gorm:"index:idx_message_created" json:"created_at"`
+	DeletedAt      *time.Time `gorm:"index:idx_message_deleted" json:"deleted_at,omitempty"`
 }
 
 // IsEphemeral 是否为定向可见（ephemeral）消息。

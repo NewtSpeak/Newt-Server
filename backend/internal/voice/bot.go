@@ -17,6 +17,11 @@ import (
 
 // RegisterBotPlane 把语音会话端点挂到 bot 开放平面。
 // authed 为已带 bot token 认证的路由组；deps.CurrentUser 读取 bot 用户。
+//
+// 对齐 Discord Voice State / Move Members / Mute Members：
+//   - 自身进房/离房/静音闭听/续签 Media Token
+//   - 列出频道 voice states
+//   - 管理员踢出语音 / 移动成员 / 服务器静音·闭听（handler 内 RBAC + 层级）
 func RegisterBotPlane(authed *gin.RouterGroup, deps appdeps.Deps) {
 	svc, err := ensureService(deps)
 	if err != nil {
@@ -24,12 +29,21 @@ func RegisterBotPlane(authed *gin.RouterGroup, deps appdeps.Deps) {
 		return
 	}
 	group := authed.Group("", injectCurrentUser(deps.CurrentUser))
+	// 自身会话（Discord: 机器人自身 Voice State）。
 	tryRegister(func() { group.POST("/voice/join", svc.handleJoin) })
 	tryRegister(func() { group.POST("/voice/leave", svc.handleLeave) })
 	tryRegister(func() { group.POST("/voice/refresh-token", svc.handleRefreshToken) })
 	tryRegister(func() { group.PATCH("/voice/state", svc.handleSelfState) })
 	tryRegister(func() { group.POST("/voice/rtt", svc.handleRTTReport) })
+	tryRegister(func() { group.POST("/voice/ice-failed", svc.handleIceFailed) })
+	tryRegister(func() { group.POST("/voice/ice-failure", svc.handleICEFailure) })
+	tryRegister(func() { group.POST("/voice/migrations/:migrationID/ack", svc.handleMigrationAck) })
+	// 频道/服级语音管理。
 	tryRegister(func() { group.GET("/guilds/:guildID/channels/:channelID/voice-states", svc.handleListVoiceStates) })
+	tryRegister(func() { group.GET("/guilds/:guildID/voice/nodes", svc.handleListVoiceNodes) })
+	tryRegister(func() { group.POST("/guilds/:guildID/voice/disconnect", svc.handleAdminDisconnect) })
+	tryRegister(func() { group.POST("/guilds/:guildID/voice/move", svc.handleAdminMove) })
+	tryRegister(func() { group.PATCH("/guilds/:guildID/voice/states/:userID", svc.handleServerState) })
 }
 
 // RegisterBotPublic 把免认证公开端点（Media Token 验签公钥）挂到 bot 平面根组。

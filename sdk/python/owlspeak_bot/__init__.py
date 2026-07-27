@@ -165,10 +165,189 @@ class OwlBotClient:
         return self._request("GET", f"/guilds/{guild_id}/channels").get("channels", [])
 
     def members(self, guild_id: str) -> List[Dict[str, Any]]:
+        """成员目录（含 is_bot、is_owner、role_ids）。"""
         return self._request("GET", f"/guilds/{guild_id}/members").get("members", [])
+
+    def member(self, guild_id: str, member_id: str) -> Dict[str, Any]:
+        """单成员详情；member_id 可为 members.id 或 user_id。"""
+        return self._request("GET", f"/guilds/{guild_id}/members/{member_id}")
 
     def permissions(self, guild_id: str) -> Dict[str, Any]:
         return self._request("GET", f"/guilds/{guild_id}/permissions/@me")
+
+    def channel_permissions(self, guild_id: str, channel_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/guilds/{guild_id}/channels/{channel_id}/permissions/@me")
+
+    # ---------- 角色与成员角色（反应角色 / 验证门） ----------
+
+    def roles(self, guild_id: str) -> List[Dict[str, Any]]:
+        result = self._request("GET", f"/guilds/{guild_id}/roles")
+        return result if isinstance(result, list) else []
+
+    def role(self, guild_id: str, role_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/guilds/{guild_id}/roles/{role_id}")
+
+    def create_role(
+        self,
+        guild_id: str,
+        name: str,
+        *,
+        permissions: int = 0,
+        position: int = 1,
+        color: Optional[str] = None,
+        hoist: Optional[bool] = None,
+        mentionable: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {"name": name, "permissions": permissions, "position": position}
+        if color is not None:
+            body["color"] = color
+        if hoist is not None:
+            body["hoist"] = hoist
+        if mentionable is not None:
+            body["mentionable"] = mentionable
+        return self._request("POST", f"/guilds/{guild_id}/roles", body)
+
+    def update_role(
+        self,
+        guild_id: str,
+        role_id: str,
+        name: str,
+        *,
+        permissions: int = 0,
+        position: int = 1,
+        color: Optional[str] = None,
+        hoist: Optional[bool] = None,
+        mentionable: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {"name": name, "permissions": permissions, "position": position}
+        if color is not None:
+            body["color"] = color
+        if hoist is not None:
+            body["hoist"] = hoist
+        if mentionable is not None:
+            body["mentionable"] = mentionable
+        return self._request("PATCH", f"/guilds/{guild_id}/roles/{role_id}", body)
+
+    def delete_role(self, guild_id: str, role_id: str) -> None:
+        self._request("DELETE", f"/guilds/{guild_id}/roles/{role_id}")
+
+    def add_member_role(self, guild_id: str, member_id: str, role_id: str) -> Dict[str, Any]:
+        """给成员绑定角色；member_id 接受 members.id 或 user_id。"""
+        return self._request("PUT", f"/guilds/{guild_id}/members/{member_id}/roles/{role_id}")
+
+    def remove_member_role(self, guild_id: str, member_id: str, role_id: str) -> None:
+        self._request("DELETE", f"/guilds/{guild_id}/members/{member_id}/roles/{role_id}")
+
+    # ---------- 频道权限覆盖（验证门搭建） ----------
+
+    def overwrites(self, guild_id: str, channel_id: str) -> List[Dict[str, Any]]:
+        result = self._request("GET", f"/guilds/{guild_id}/channels/{channel_id}/overwrites")
+        return result if isinstance(result, list) else []
+
+    def set_overwrite(
+        self,
+        guild_id: str,
+        channel_id: str,
+        target_id: str,
+        *,
+        type: str,
+        allow: int = 0,
+        deny: int = 0,
+    ) -> Dict[str, Any]:
+        return self._request(
+            "PUT",
+            f"/guilds/{guild_id}/channels/{channel_id}/overwrites/{target_id}",
+            {"type": type, "allow": allow, "deny": deny},
+        )
+
+    def delete_overwrite(
+        self, guild_id: str, channel_id: str, target_id: str, *, type: Optional[str] = None
+    ) -> None:
+        query = f"?type={urllib.parse.quote(type)}" if type else ""
+        self._request("DELETE", f"/guilds/{guild_id}/channels/{channel_id}/overwrites/{target_id}{query}")
+
+    # ---------- 服务器 / 频道结构 ----------
+
+    def guild(self, guild_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/guilds/{guild_id}")
+
+    def update_guild(self, guild_id: str, **body: Any) -> Dict[str, Any]:
+        return self._request("PATCH", f"/guilds/{guild_id}", body)
+
+    def channel(self, channel_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/channels/{channel_id}")
+
+    def create_channel(self, guild_id: str, **body: Any) -> Dict[str, Any]:
+        return self._request("POST", f"/guilds/{guild_id}/channels", body)
+
+    def update_channel(self, channel_id: str, **body: Any) -> Dict[str, Any]:
+        return self._request("PATCH", f"/channels/{channel_id}", body)
+
+    def delete_channel(self, channel_id: str) -> None:
+        self._request("DELETE", f"/channels/{channel_id}")
+
+    # ---------- 成员治理 ----------
+
+    def kick_member(self, guild_id: str, member_id: str) -> None:
+        """踢出成员；member_id=@me 时为 bot 主动退服。"""
+        self._request("DELETE", f"/guilds/{guild_id}/members/{member_id}")
+
+    def leave_guild(self, guild_id: str) -> None:
+        self.kick_member(guild_id, "@me")
+
+    def update_member(self, guild_id: str, member_id: str, **body: Any) -> Dict[str, Any]:
+        return self._request("PATCH", f"/guilds/{guild_id}/members/{member_id}", body)
+
+    def ban_user(self, guild_id: str, user_id: str, *, reason: Optional[str] = None) -> None:
+        body: Dict[str, Any] = {}
+        if reason is not None:
+            body["reason"] = reason
+        self._request("PUT", f"/guilds/{guild_id}/bans/{user_id}", body)
+
+    def unban_user(self, guild_id: str, user_id: str) -> None:
+        self._request("DELETE", f"/guilds/{guild_id}/bans/{user_id}")
+
+    def bans(self, guild_id: str) -> Any:
+        return self._request("GET", f"/guilds/{guild_id}/bans")
+
+    def create_invite(
+        self, guild_id: str, *, ttl_seconds: Optional[int] = None, max_uses: Optional[int] = None
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {}
+        if ttl_seconds:
+            body["ttl_seconds"] = ttl_seconds
+        if max_uses:
+            body["max_uses"] = max_uses
+        return self._request("POST", f"/guilds/{guild_id}/invites", body)
+
+    def invites(self, guild_id: str) -> Any:
+        return self._request("GET", f"/guilds/{guild_id}/invites")
+
+    def delete_invite(self, code: str) -> None:
+        self._request("DELETE", f"/invites/{code}")
+
+    # ---------- Restriction / 审计 / 语音管理 ----------
+
+    def create_restriction(self, guild_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", f"/guilds/{guild_id}/restrictions", body)
+
+    def restrictions(self, guild_id: str) -> Any:
+        return self._request("GET", f"/guilds/{guild_id}/restrictions")
+
+    def lift_restriction(self, guild_id: str, restriction_id: str) -> None:
+        self._request("DELETE", f"/guilds/{guild_id}/restrictions/{restriction_id}")
+
+    def audit_logs(self, guild_id: str) -> Any:
+        return self._request("GET", f"/guilds/{guild_id}/audit-logs")
+
+    def voice_disconnect(self, guild_id: str, body: Dict[str, Any]) -> None:
+        self._request("POST", f"/guilds/{guild_id}/voice/disconnect", body)
+
+    def voice_move(self, guild_id: str, body: Dict[str, Any]) -> None:
+        self._request("POST", f"/guilds/{guild_id}/voice/move", body)
+
+    def update_voice_state(self, guild_id: str, user_id: str, body: Dict[str, Any]) -> None:
+        self._request("PATCH", f"/guilds/{guild_id}/voice/states/{user_id}", body)
 
     # ---------- 消息 ----------
 
@@ -215,6 +394,9 @@ class OwlBotClient:
         query = f"?{urllib.parse.urlencode(params)}" if params else ""
         return self._request("GET", f"/channels/{channel_id}/messages{query}").get("messages", [])
 
+    def get_message(self, channel_id: str, message_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/channels/{channel_id}/messages/{message_id}")
+
     def edit_message(self, channel_id: str, message_id: str, content: str) -> Dict[str, Any]:
         return self._request("PATCH", f"/channels/{channel_id}/messages/{message_id}", {"content": content})
 
@@ -228,6 +410,11 @@ class OwlBotClient:
         self._request(
             "DELETE", f"/channels/{channel_id}/messages/{message_id}/reactions/{urllib.parse.quote(emoji)}/@me"
         )
+
+    def list_reaction_users(self, channel_id: str, message_id: str, emoji: str) -> List[Dict[str, Any]]:
+        return self._request(
+            "GET", f"/channels/{channel_id}/messages/{message_id}/reactions/{urllib.parse.quote(emoji)}"
+        ).get("users", [])
 
     def typing(self, channel_id: str) -> None:
         self._request("POST", f"/channels/{channel_id}/typing")

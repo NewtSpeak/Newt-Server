@@ -29,7 +29,18 @@ func RegisterClient(root *gin.RouterGroup, deps appdeps.Deps) error {
 	return nil
 }
 
-// registerGuildRoutes 双平面共用的 guild 级治理路由。
+// RegisterBot 挂载机器人开放平面（/bot-api/v1）成员治理能力。
+// 对齐 Discord：Kick / Ban / Modify Member / Create Invite / Leave Guild。
+// 权限校验与人类成员一致（KICK_MEMBERS / BAN_MEMBERS / MANAGE_NICKNAMES 等 + 层级）。
+// 不挂载「凭邀请加入」（bot 不通过邀请码进服，由管理员安装）。
+func RegisterBot(group *gin.RouterGroup, deps appdeps.Deps) error {
+	handlers := &api{deps: deps}
+	registerGuildRoutes(group, deps, handlers)
+	group.GET("/invites/:code", deps.Auth, handlers.inviteInfo)
+	return nil
+}
+
+// registerGuildRoutes 多平面共用的 guild 级治理路由。
 func registerGuildRoutes(group *gin.RouterGroup, deps appdeps.Deps, handlers *api) {
 	guilds := group.Group("/guilds/:guildID", deps.Auth)
 	guilds.POST("/invites", handlers.createInvite)

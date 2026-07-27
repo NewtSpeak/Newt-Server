@@ -291,7 +291,24 @@ func (s *service) searchMessages(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, "SEARCH_ERROR", "搜索执行失败")
 		return
 	}
-	views, err := s.messageViews(messages, user.ID)
+	// 限定可见消息：搜索命中后再按受众过滤，避免正文/存在性泄漏。
+	// total 在过滤后下调为可见条数（本页维度；全量 total 精确统计代价高，首期保守取 min）。
+	visible := make([]model.Message, 0, len(messages))
+	for _, msg := range messages {
+		if s.userCanViewMessage(user.ID, msg) {
+			visible = append(visible, msg)
+		}
+	}
+	if int64(len(visible)) < total {
+		// 至少不超过可见命中上界；过滤后本页变短时下调 total，避免客户端「共 N 条」虚高。
+		filteredOut := int64(len(messages) - len(visible))
+		if total >= filteredOut {
+			total -= filteredOut
+		} else {
+			total = int64(len(visible))
+		}
+	}
+	views, err := s.messageViews(visible, user.ID)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "读取附件失败")
 		return

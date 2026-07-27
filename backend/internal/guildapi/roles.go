@@ -27,6 +27,25 @@ func (h *api) listRoles(c *gin.Context) {
 	c.JSON(http.StatusOK, roles)
 }
 
+// getRole GET /guilds/{gid}/roles/{roleID}：单角色详情（成员即可见；反应角色 bot 按名解析后精查）。
+func (h *api) getRole(c *gin.Context) {
+	ctx, _, ok := h.guildCtx(c)
+	if !ok {
+		return
+	}
+	roleID, err := uuid.Parse(c.Param("roleID"))
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "角色不存在")
+		return
+	}
+	var role model.Role
+	if err := h.deps.DB.First(&role, "id = ? AND guild_id = ?", roleID, ctx.Guild.ID).Error; err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "角色不存在")
+		return
+	}
+	c.JSON(http.StatusOK, role)
+}
+
 type roleRequest struct {
 	Name        string `json:"name" binding:"required,min=1,max=100"`
 	Permissions int64  `json:"permissions"`

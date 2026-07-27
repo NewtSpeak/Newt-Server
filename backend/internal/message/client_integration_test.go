@@ -127,7 +127,11 @@ func setupTextFixture(t *testing.T, router *gin.Engine, db *gorm.DB) (token, use
 	if err != nil {
 		t.Fatalf("解析 guild id 失败: %v", err)
 	}
-	channel := model.Channel{ID: uuid.New(), GuildID: guildID, Name: "general", Type: model.ChannelText}
+	channel := model.Channel{
+		ID: uuid.New(), GuildID: guildID, Name: "general", Type: model.ChannelText,
+		AllowRestrictedVisibility: true,
+		DefaultVisibleRoleIDs:     model.UUIDList{},
+	}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("插入测试频道失败: %v", err)
 	}

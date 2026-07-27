@@ -157,12 +157,254 @@ func (c *Client) Channels(guildID string) ([]map[string]any, error) {
 	return out.Channels, c.request("GET", "/guilds/"+guildID+"/channels", nil, &out)
 }
 
-// Members 成员目录（含 is_bot 标记）。
+// Members 成员目录（含 is_bot、is_owner、role_ids）。
 func (c *Client) Members(guildID string) ([]map[string]any, error) {
 	var out struct {
 		Members []map[string]any `json:"members"`
 	}
 	return out.Members, c.request("GET", "/guilds/"+guildID+"/members", nil, &out)
+}
+
+// Member 单成员详情；memberID 可为 members.id 或 user_id。
+func (c *Client) Member(guildID, memberID string) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("GET", "/guilds/"+guildID+"/members/"+memberID, nil, &out)
+}
+
+// Permissions 机器人在该服的最终权限位。
+func (c *Client) Permissions(guildID string) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("GET", "/guilds/"+guildID+"/permissions/@me", nil, &out)
+}
+
+// ChannelPermissions 机器人在指定频道的最终权限投影。
+func (c *Client) ChannelPermissions(guildID, channelID string) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("GET", "/guilds/"+guildID+"/channels/"+channelID+"/permissions/@me", nil, &out)
+}
+
+// ---------- 角色与成员角色（反应角色 / 验证门） ----------
+
+// RoleCreateOptions 创建/更新角色参数。
+type RoleCreateOptions struct {
+	Name        string  `json:"name"`
+	Permissions int64   `json:"permissions"`
+	Position    int     `json:"position"`
+	Color       *string `json:"color,omitempty"`
+	Hoist       *bool   `json:"hoist,omitempty"`
+	Mentionable *bool   `json:"mentionable,omitempty"`
+}
+
+// Roles 列出服务器全部角色。
+func (c *Client) Roles(guildID string) ([]map[string]any, error) {
+	var out []map[string]any
+	return out, c.request("GET", "/guilds/"+guildID+"/roles", nil, &out)
+}
+
+// Role 单角色详情。
+func (c *Client) Role(guildID, roleID string) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("GET", "/guilds/"+guildID+"/roles/"+roleID, nil, &out)
+}
+
+// CreateRole 创建角色（需 MANAGE_ROLES）。
+func (c *Client) CreateRole(guildID string, options RoleCreateOptions) (map[string]any, error) {
+	if options.Position == 0 {
+		options.Position = 1
+	}
+	var out map[string]any
+	return out, c.request("POST", "/guilds/"+guildID+"/roles", options, &out)
+}
+
+// UpdateRole 更新角色。
+func (c *Client) UpdateRole(guildID, roleID string, options RoleCreateOptions) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("PATCH", "/guilds/"+guildID+"/roles/"+roleID, options, &out)
+}
+
+// DeleteRole 删除角色。
+func (c *Client) DeleteRole(guildID, roleID string) error {
+	return c.request("DELETE", "/guilds/"+guildID+"/roles/"+roleID, nil, nil)
+}
+
+// AddMemberRole 给成员绑定角色；memberID 接受 members.id 或 user_id。
+func (c *Client) AddMemberRole(guildID, memberID, roleID string) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("PUT", "/guilds/"+guildID+"/members/"+memberID+"/roles/"+roleID, nil, &out)
+}
+
+// RemoveMemberRole 移除成员角色。
+func (c *Client) RemoveMemberRole(guildID, memberID, roleID string) error {
+	return c.request("DELETE", "/guilds/"+guildID+"/members/"+memberID+"/roles/"+roleID, nil, nil)
+}
+
+// ---------- 频道权限覆盖（验证门搭建） ----------
+
+// OverwriteOptions 频道权限覆盖。
+type OverwriteOptions struct {
+	Type  string `json:"type"` // ROLE | MEMBER
+	Allow int64  `json:"allow"`
+	Deny  int64  `json:"deny"`
+}
+
+// Overwrites 列出频道覆盖（需 MANAGE_ROLES）。
+func (c *Client) Overwrites(guildID, channelID string) ([]map[string]any, error) {
+	var out []map[string]any
+	return out, c.request("GET", "/guilds/"+guildID+"/channels/"+channelID+"/overwrites", nil, &out)
+}
+
+// SetOverwrite 创建/更新频道覆盖。
+func (c *Client) SetOverwrite(guildID, channelID, targetID string, options OverwriteOptions) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("PUT", "/guilds/"+guildID+"/channels/"+channelID+"/overwrites/"+targetID, options, &out)
+}
+
+// DeleteOverwrite 删除频道覆盖；overwriteType 可为空，或 ROLE/MEMBER。
+func (c *Client) DeleteOverwrite(guildID, channelID, targetID, overwriteType string) error {
+	path := "/guilds/" + guildID + "/channels/" + channelID + "/overwrites/" + targetID
+	if overwriteType != "" {
+		path += "?type=" + url.QueryEscape(overwriteType)
+	}
+	return c.request("DELETE", path, nil, nil)
+}
+
+// ---------- 服务器 / 频道结构 ----------
+
+// Guild 服务器详情。
+func (c *Client) Guild(guildID string) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("GET", "/guilds/"+guildID, nil, &out)
+}
+
+// UpdateGuild 修改服务器（需 MANAGE_GUILD）。
+func (c *Client) UpdateGuild(guildID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("PATCH", "/guilds/"+guildID, body, &out)
+}
+
+// Channel 单频道详情。
+func (c *Client) Channel(channelID string) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("GET", "/channels/"+channelID, nil, &out)
+}
+
+// CreateChannel 创建频道（需 MANAGE_CHANNELS）。
+func (c *Client) CreateChannel(guildID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("POST", "/guilds/"+guildID+"/channels", body, &out)
+}
+
+// UpdateChannel 修改频道。
+func (c *Client) UpdateChannel(channelID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("PATCH", "/channels/"+channelID, body, &out)
+}
+
+// DeleteChannel 删除频道。
+func (c *Client) DeleteChannel(channelID string) error {
+	return c.request("DELETE", "/channels/"+channelID, nil, nil)
+}
+
+// ---------- 成员治理 ----------
+
+// KickMember 踢出成员；memberID=@me 时为 bot 主动退服。
+func (c *Client) KickMember(guildID, memberID string) error {
+	return c.request("DELETE", "/guilds/"+guildID+"/members/"+memberID, nil, nil)
+}
+
+// LeaveGuild bot 主动离开服务器。
+func (c *Client) LeaveGuild(guildID string) error {
+	return c.KickMember(guildID, "@me")
+}
+
+// UpdateMember 修改成员昵称等。
+func (c *Client) UpdateMember(guildID, memberID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("PATCH", "/guilds/"+guildID+"/members/"+memberID, body, &out)
+}
+
+// BanUser 封禁用户。
+func (c *Client) BanUser(guildID, userID string, reason string) error {
+	body := map[string]any{}
+	if reason != "" {
+		body["reason"] = reason
+	}
+	return c.request("PUT", "/guilds/"+guildID+"/bans/"+userID, body, nil)
+}
+
+// UnbanUser 解除封禁。
+func (c *Client) UnbanUser(guildID, userID string) error {
+	return c.request("DELETE", "/guilds/"+guildID+"/bans/"+userID, nil, nil)
+}
+
+// Bans 封禁列表。
+func (c *Client) Bans(guildID string) (any, error) {
+	var out any
+	return out, c.request("GET", "/guilds/"+guildID+"/bans", nil, &out)
+}
+
+// CreateInvite 创建邀请。
+func (c *Client) CreateInvite(guildID string, ttlSeconds, maxUses int) (map[string]any, error) {
+	body := map[string]any{}
+	if ttlSeconds > 0 {
+		body["ttl_seconds"] = ttlSeconds
+	}
+	if maxUses > 0 {
+		body["max_uses"] = maxUses
+	}
+	var out map[string]any
+	return out, c.request("POST", "/guilds/"+guildID+"/invites", body, &out)
+}
+
+// Invites 本服邀请列表。
+func (c *Client) Invites(guildID string) (any, error) {
+	var out any
+	return out, c.request("GET", "/guilds/"+guildID+"/invites", nil, &out)
+}
+
+// DeleteInvite 撤销邀请。
+func (c *Client) DeleteInvite(code string) error {
+	return c.request("DELETE", "/invites/"+code, nil, nil)
+}
+
+// ---------- Restriction / 审计 / 语音管理 ----------
+
+// CreateRestriction 创建限制（Timeout）。
+func (c *Client) CreateRestriction(guildID string, body map[string]any) (map[string]any, error) {
+	var out map[string]any
+	return out, c.request("POST", "/guilds/"+guildID+"/restrictions", body, &out)
+}
+
+// Restrictions 列出限制。
+func (c *Client) Restrictions(guildID string) (any, error) {
+	var out any
+	return out, c.request("GET", "/guilds/"+guildID+"/restrictions", nil, &out)
+}
+
+// LiftRestriction 解除限制。
+func (c *Client) LiftRestriction(guildID, restrictionID string) error {
+	return c.request("DELETE", "/guilds/"+guildID+"/restrictions/"+restrictionID, nil, nil)
+}
+
+// AuditLogs 本服审计日志。
+func (c *Client) AuditLogs(guildID string) (any, error) {
+	var out any
+	return out, c.request("GET", "/guilds/"+guildID+"/audit-logs", nil, &out)
+}
+
+// VoiceDisconnect 将用户踢出语音。
+func (c *Client) VoiceDisconnect(guildID string, body map[string]any) error {
+	return c.request("POST", "/guilds/"+guildID+"/voice/disconnect", body, nil)
+}
+
+// VoiceMove 移动成员到另一语音频道。
+func (c *Client) VoiceMove(guildID string, body map[string]any) error {
+	return c.request("POST", "/guilds/"+guildID+"/voice/move", body, nil)
+}
+
+// UpdateVoiceState 服务器静音/闭听他人。
+func (c *Client) UpdateVoiceState(guildID, userID string, body map[string]any) error {
+	return c.request("PATCH", "/guilds/"+guildID+"/voice/states/"+userID, body, nil)
 }
 
 // ---------- 消息 ----------
@@ -226,9 +468,29 @@ func (c *Client) DeleteMessage(channelID, messageID string) error {
 	return c.request("DELETE", "/channels/"+channelID+"/messages/"+messageID, nil, nil)
 }
 
+// GetMessage 单条消息详情。
+func (c *Client) GetMessage(channelID, messageID string) (*Message, error) {
+	var out Message
+	return &out, c.request("GET", "/channels/"+channelID+"/messages/"+messageID, nil, &out)
+}
+
 // AddReaction 添加表情反应。
 func (c *Client) AddReaction(channelID, messageID, emoji string) error {
 	return c.request("PUT", "/channels/"+channelID+"/messages/"+messageID+"/reactions/"+url.PathEscape(emoji)+"/@me", nil, nil)
+}
+
+// RemoveReaction 移除自己的表情反应。
+func (c *Client) RemoveReaction(channelID, messageID, emoji string) error {
+	return c.request("DELETE", "/channels/"+channelID+"/messages/"+messageID+"/reactions/"+url.PathEscape(emoji)+"/@me", nil, nil)
+}
+
+// ListReactionUsers 列出对某消息打了指定反应的用户。
+func (c *Client) ListReactionUsers(channelID, messageID, emoji string) ([]map[string]any, error) {
+	var out struct {
+		Users []map[string]any `json:"users"`
+	}
+	err := c.request("GET", "/channels/"+channelID+"/messages/"+messageID+"/reactions/"+url.PathEscape(emoji), nil, &out)
+	return out.Users, err
 }
 
 // Typing 打字指示。

@@ -91,7 +91,7 @@ type StickerAsset struct {
 // StickerItem 包内表情项。
 type StickerItem struct {
 	ID           int64             `gorm:"primaryKey;autoIncrement:false" json:"id,string"`
-	PackID       int64             `gorm:"not null;index:idx_sticker_item_pack" json:"pack_id,string"`
+	PackID       int64             `gorm:"not null;index:idx_sticker_item_pack;index:idx_sticker_item_pack_sort,priority:1" json:"pack_id,string"`
 	Kind         StickerKind       `gorm:"size:16;not null" json:"kind"`
 	Name         string            `gorm:"size:100;not null;default:''" json:"name,omitempty"`
 	ContentHash  string            `gorm:"size:64;not null;index:idx_sticker_item_hash" json:"content_hash"`
@@ -103,7 +103,8 @@ type StickerItem struct {
 	SourceItemID *int64            `json:"source_item_id,string,omitempty"`
 	SourcePackID *int64            `json:"source_pack_id,string,omitempty"`
 	// SortOrder 同 pack 内可重复；列表以 sort_order, id 稳定排序。
-	SortOrder int               `gorm:"not null;default:0" json:"sort_order"`
+	// 不可 uniqueIndex：否则第二张默认 sort_order=0 会 DATABASE_ERROR。
+	SortOrder int               `gorm:"not null;default:0;index:idx_sticker_item_pack_sort,priority:2" json:"sort_order"`
 	Status    StickerItemStatus `gorm:"size:16;not null;default:'active'" json:"status"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`

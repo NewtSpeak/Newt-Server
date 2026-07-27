@@ -92,6 +92,90 @@ func (h *api) validateRateLimitExemptRoles(c *gin.Context, guildID uuid.UUID, ch
 	return unique, true
 }
 
+// validateVisibleRoleIDsForChannel 校验频道默认可见身份组（须为本服角色，可含 @everyone）。
+func (h *api) validateVisibleRoleIDsForChannel(c *gin.Context, guildID uuid.UUID, roleIDs []uuid.UUID) ([]uuid.UUID, bool) {
+	if len(roleIDs) == 0 {
+		return []uuid.UUID{}, true
+	}
+	seen := make(map[uuid.UUID]struct{}, len(roleIDs))
+	unique := make([]uuid.UUID, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		if roleID == uuid.Nil {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "default_visible_role_ids 含无效角色")
+			return nil, false
+		}
+		if _, exists := seen[roleID]; exists {
+			continue
+		}
+		seen[roleID] = struct{}{}
+		unique = append(unique, roleID)
+	}
+	var count int64
+	if err := h.deps.DB.Model(&model.Role{}).Where("guild_id = ? AND id IN ?", guildID, unique).Count(&count).Error; err != nil || count != int64(len(unique)) {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "default_visible_role_ids 含无效角色")
+		return nil, false
+	}
+	return unique, true
+}
+
+// getChannel GET /channels/{cid}：单频道详情；无 VIEW_CHANNEL 一律 404（防扫频）。
+// 对齐 Discord Get Channel。
+func (h *api) getChannel(c *gin.Context) {
+	user := h.deps.CurrentUser(c)
+	channelID, err := uuid.Parse(c.Param("channelID"))
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	var channel model.Channel
+	if err := h.deps.DB.First(&channel, "id = ?", channelID).Error; err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	ctx, err := perms.LoadGuild(h.deps.DB, user, channel.GuildID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	channel, bits, err := ctx.ChannelPerms(h.deps.DB, channel.ID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	unlocked := perms.IsChannelUnlocked(h.deps.DB, user.ID, channel, ctx, bits)
+	c.JSON(http.StatusOK, gin.H{
+		"channel":     channel,
+		"permissions": maskString(bits),
+		"locked":      channel.PasswordHash != "",
+		"unlocked":    unlocked,
+	})
+}
+
+// getChannelByGuild GET /guilds/{gid}/channels/{cid}：guild 前缀下的单频道详情。
+func (h *api) getChannelByGuild(c *gin.Context) {
+	ctx, user, ok := h.guildCtx(c)
+	if !ok {
+		return
+	}
+	channelID, err := uuid.Parse(c.Param("channelID"))
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	channel, bits, err := ctx.ChannelPerms(h.deps.DB, channelID)
+	if err != nil {
+		fail(c, http.StatusNotFound, "NOT_FOUND", "频道不存在")
+		return
+	}
+	unlocked := perms.IsChannelUnlocked(h.deps.DB, user.ID, channel, ctx, bits)
+	c.JSON(http.StatusOK, gin.H{
+		"channel":     channel,
+		"permissions": maskString(bits),
+		"locked":      channel.PasswordHash != "",
+		"unlocked":    unlocked,
+	})
+}
+
 // createChannel POST /guilds/{gid}/channels（需 MANAGE_CHANNELS）→ CHANNEL_CREATE。
 func (h *api) createChannel(c *gin.Context) {
 	var input createChannelRequest
@@ -157,8 +241,11 @@ func (h *api) createChannel(c *gin.Context) {
 		ParentID: input.ParentID, UserLimit: input.UserLimit,
 		RateLimitPerUser:       input.RateLimitPerUser,
 		RateLimitExemptRoleIDs: model.UUIDList(exemptRoleIDs),
-		PasswordHash:           passwordHash,
-		VoiceNote:              voiceNote,
+		// 文本频道默认允许限定可见消息（bool 零值为 false，须显式 true）。
+		AllowRestrictedVisibility: input.Type == model.ChannelText,
+		DefaultVisibleRoleIDs:     model.UUIDList{},
+		PasswordHash:              passwordHash,
+		VoiceNote:                 voiceNote,
 	}
 	channel.SyncLocked()
 
@@ -243,6 +330,12 @@ type updateChannelRequest struct {
 	RateLimitPerUser *int `json:"rate_limit_per_user" binding:"omitempty,gte=0,lte=21600"`
 	// RateLimitExemptRoleIDs 显式传空数组可清空豁免角色。
 	RateLimitExemptRoleIDs *[]uuid.UUID `json:"rate_limit_exempt_role_ids"`
+	// AllowRestrictedVisibility 是否允许限定可见消息（仅 TEXT）。
+	AllowRestrictedVisibility *bool `json:"allow_restricted_visibility"`
+	// DefaultVisibleRoleIDs 默认可见身份组；显式 [] 清空。
+	DefaultVisibleRoleIDs *[]uuid.UUID `json:"default_visible_role_ids"`
+	// ForceDefaultVisibility 强制使用默认可见范围。
+	ForceDefaultVisibility *bool `json:"force_default_visibility"`
 	// Password 设置/更换访问密码；与 Locked=false 同时时以关锁为准。
 	Password *string `json:"password" binding:"omitempty,min=1,max=64"`
 	// Locked 显式关锁（false 清空密码）；true  alone 表示保持/需要密码字段新建锁。
@@ -311,6 +404,34 @@ func (h *api) updateChannel(c *gin.Context) {
 		}
 		channel.RateLimitExemptRoleIDs = model.UUIDList(exemptRoleIDs)
 		updates["rate_limit_exempt_role_ids"] = channel.RateLimitExemptRoleIDs
+	}
+	if input.AllowRestrictedVisibility != nil {
+		if channel.Type != model.ChannelText {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "allow_restricted_visibility 仅文本频道可设")
+			return
+		}
+		channel.AllowRestrictedVisibility = *input.AllowRestrictedVisibility
+		updates["allow_restricted_visibility"] = channel.AllowRestrictedVisibility
+	}
+	if input.DefaultVisibleRoleIDs != nil {
+		if channel.Type != model.ChannelText {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "default_visible_role_ids 仅文本频道可设")
+			return
+		}
+		roleIDs, valid := h.validateVisibleRoleIDsForChannel(c, ctx.Guild.ID, *input.DefaultVisibleRoleIDs)
+		if !valid {
+			return
+		}
+		channel.DefaultVisibleRoleIDs = model.UUIDList(roleIDs)
+		updates["default_visible_role_ids"] = channel.DefaultVisibleRoleIDs
+	}
+	if input.ForceDefaultVisibility != nil {
+		if channel.Type != model.ChannelText {
+			fail(c, http.StatusBadRequest, "INVALID_REQUEST", "force_default_visibility 仅文本频道可设")
+			return
+		}
+		channel.ForceDefaultVisibility = *input.ForceDefaultVisibility
+		updates["force_default_visibility"] = channel.ForceDefaultVisibility
 	}
 	if input.VoiceNote != nil {
 		if channel.Type != model.ChannelVoice {

@@ -133,8 +133,8 @@ type Role struct {
 }
 
 type MemberRole struct {
-	MemberID uuid.UUID `gorm:"type:uuid;primaryKey"`
-	RoleID   uuid.UUID `gorm:"type:uuid;primaryKey"`
+	MemberID uuid.UUID `gorm:"type:uuid;primaryKey" json:"member_id"`
+	RoleID   uuid.UUID `gorm:"type:uuid;primaryKey" json:"role_id"`
 }
 
 type ChannelType string
@@ -177,6 +177,14 @@ type Channel struct {
 	// RateLimitExemptRoleIDs 慢速模式豁免角色；为空表示慢速模式对所有成员生效。
 	// 角色必须属于当前服务器；配置 @everyone 角色时全体成员豁免。
 	RateLimitExemptRoleIDs UUIDList `gorm:"type:jsonb;not null;default:'[]'" json:"rate_limit_exempt_role_ids"`
+	// AllowRestrictedVisibility 是否允许成员发送「限定可见身份组」消息（仅 TEXT 有意义）。
+	// 默认 true；关闭后客户端传入 visible_role_ids 将被拒绝。
+	AllowRestrictedVisibility bool `gorm:"not null;default:true" json:"allow_restricted_visibility"`
+	// DefaultVisibleRoleIDs 发送时未指定可见范围则套用的默认身份组（空 = 默认公开）。
+	DefaultVisibleRoleIDs UUIDList `gorm:"type:jsonb;not null;default:'[]'" json:"default_visible_role_ids"`
+	// ForceDefaultVisibility 为 true 时强制使用 DefaultVisibleRoleIDs，忽略客户端传入。
+	// 与空 Default 组合 = 强制全员公开；与非空 Default 组合 = 全频道强制限定可见。
+	ForceDefaultVisibility bool `gorm:"not null;default:false" json:"force_default_visibility"`
 	// PasswordHash 频道访问密码（argon2）；空串表示未上锁。永不序列化到 JSON。
 	// 上锁后对 TEXT/VOICE 均生效：可见（VIEW_CHANNEL）但访问内容需先解锁。
 	PasswordHash string `gorm:"size:255;not null;default:''" json:"-"`
