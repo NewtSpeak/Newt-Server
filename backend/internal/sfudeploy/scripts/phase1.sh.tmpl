@@ -22,12 +22,12 @@ log "系统 Linux/$ARCH"
 command -v systemctl >/dev/null 2>&1 || err "目标机没有 systemd，无法安装 owl-sfu 服务"
 
 # ---- 已有安装检测 ----
-if [ -f "$INSTALL_DIR/owl-sfu.env" ]; then
+if [ -f "$INSTALL_DIR/newt-sfu.env" ]; then
 {{- if .ForceReinstall }}
-  OLD_NODE=$(grep -oP '^OWLSFU_NODE_ID=\K.*' "$INSTALL_DIR/owl-sfu.env" 2>/dev/null || true)
+  OLD_NODE=$(grep -oP '^NEWTSFU_NODE_ID=\K.*' "$INSTALL_DIR/newt-sfu.env" 2>/dev/null || true)
   warn "检测到已有安装（原 node_id=${OLD_NODE:-未知}），按要求强制重装；原节点记录需在面板手动清理"
 {{- else }}
-  OLD_NODE=$(grep -oP '^OWLSFU_NODE_ID=\K.*' "$INSTALL_DIR/owl-sfu.env" 2>/dev/null || true)
+  OLD_NODE=$(grep -oP '^NEWTSFU_NODE_ID=\K.*' "$INSTALL_DIR/newt-sfu.env" 2>/dev/null || true)
   echo "[x] 目标机已安装 owl-sfu（node_id=${OLD_NODE:-未知}）。如需覆盖请勾选「强制重装」"
   exit 23
 {{- end }}
@@ -84,16 +84,16 @@ fi
 # ---- 下载二进制 ----
 log "下载 owl-sfu（{{.ReleaseName}}）..."
 curl -fSL --retry 3 --retry-delay 2 --max-time 600 \
-  -o "$INSTALL_DIR/bin/owl-sfu.new" "{{.BinaryURL}}" \
+  -o "$INSTALL_DIR/bin/newt-sfu.new" "{{.BinaryURL}}" \
   || err "下载 owl-sfu 失败：{{.BinaryURL}}"
 {{- if .BinarySHA256 }}
-echo "{{.BinarySHA256}}  $INSTALL_DIR/bin/owl-sfu.new" | sha256sum -c - \
+echo "{{.BinarySHA256}}  $INSTALL_DIR/bin/newt-sfu.new" | sha256sum -c - \
   || err "owl-sfu 二进制 SHA-256 校验失败"
 log "SHA-256 校验通过"
 {{- end }}
-chmod +x "$INSTALL_DIR/bin/owl-sfu.new"
-mv -f "$INSTALL_DIR/bin/owl-sfu.new" "$INSTALL_DIR/bin/owl-sfu"
-log "二进制就绪：$INSTALL_DIR/bin/owl-sfu"
+chmod +x "$INSTALL_DIR/bin/newt-sfu.new"
+mv -f "$INSTALL_DIR/bin/newt-sfu.new" "$INSTALL_DIR/bin/newt-sfu"
+log "二进制就绪：$INSTALL_DIR/bin/newt-sfu"
 
 {{- if .ConfigureUFW }}
 

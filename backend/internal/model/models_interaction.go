@@ -11,7 +11,7 @@ import (
 // MessageInteraction 按钮点击交互记录：审计（谁点了什么）、防重放去重、
 // token 化回应（bot 崩溃重启后 TTL 内仍可凭 token 回应）、GC 过期。
 //   - ID 为消息域雪花 ID（与 Message 同生成器，可按时间排序）；
-//   - TokenHash 回应令牌 SHA-256（明文 owlint_… 仅在 INTERACTION_CREATE 事件中下发一次）；
+//   - TokenHash 回应令牌 SHA-256（明文 newtint_… 仅在 INTERACTION_CREATE 事件中下发一次）；
 //   - 状态机 PENDING →(ack)→ ACKED →(reply|update)→ RESPONDED；超时未回应由 GC 置 EXPIRED。
 type MessageInteraction struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement:false" json:"id,string"`

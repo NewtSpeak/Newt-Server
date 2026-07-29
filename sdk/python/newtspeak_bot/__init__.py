@@ -1,7 +1,7 @@
 """NewtSpeak Bot SDK（Python）。
 
 REST 部分仅依赖标准库；Gateway 实时事件需可选依赖 ``websockets``
-（``pip install owlspeak-bot[gateway]``）。
+（``pip install newtspeak-bot[gateway]``）。
 
 认证：``Authorization: Bot <token>``；基础地址自动拼接 ``/bot-api/v1``。
 """
@@ -484,7 +484,7 @@ async def run_gateway(
 ) -> None:
     """连接 Gateway 并把 DISPATCH 事件回调给 on_event(event_type, payload)。
 
-    需要可选依赖 websockets（pip install owlspeak-bot[gateway]）。
+    需要可选依赖 websockets（pip install newtspeak-bot[gateway]）。
     on_event 可为普通函数或协程；内置事件 "READY" 也会回调。
     按钮点击（INTERACTION_CREATE）除原始事件外，还会以包装事件
     ``on_event("interaction", Interaction)`` 再次回调，可直接
@@ -493,7 +493,7 @@ async def run_gateway(
     try:
         import websockets
     except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("Gateway 需要 websockets：pip install owlspeak-bot[gateway]") from exc
+        raise RuntimeError("Gateway 需要 websockets：pip install newtspeak-bot[gateway]") from exc
 
     backoff = 1.0
     while True:

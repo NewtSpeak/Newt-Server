@@ -14,7 +14,7 @@ type InviteLandingConfig struct {
 	Description string `gorm:"type:text;not null;default:''" json:"description"`
 	// Enabled 关闭后公开落地页对该服的邀请返回 404（邀请码本身仍可在客户端内使用）。
 	Enabled bool `gorm:"not null;default:true" json:"enabled"`
-	// AutoDeepLink 打开落地页时自动尝试唤起桌面客户端（owlspeak:// 深链）。
+	// AutoDeepLink 打开落地页时自动尝试唤起桌面客户端（newtspeak:// 深链）。
 	AutoDeepLink bool      `gorm:"not null;default:true" json:"auto_deep_link"`
 	UpdatedBy    uuid.UUID `gorm:"type:uuid" json:"updated_by"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -49,8 +49,8 @@ type InvitePortalConfig struct {
 	ID int `gorm:"primaryKey" json:"-"`
 	// AppName 落地页展示的产品名。
 	AppName string `gorm:"size:64;not null;default:'NewtSpeak'" json:"app_name"`
-	// DeepLinkScheme 客户端自定义协议名（不含 ://），深链形如 owlspeak://invite?...
-	DeepLinkScheme string `gorm:"size:32;not null;default:'owlspeak'" json:"deep_link_scheme"`
+	// DeepLinkScheme 客户端自定义协议名（不含 ://），深链形如 newtspeak://invite?...
+	DeepLinkScheme string `gorm:"size:32;not null;default:'newtspeak'" json:"deep_link_scheme"`
 	WindowsURL     string `gorm:"size:512;not null;default:''" json:"windows_url"`
 	MacosURL       string `gorm:"size:512;not null;default:''" json:"macos_url"`
 	LinuxURL       string `gorm:"size:512;not null;default:''" json:"linux_url"`

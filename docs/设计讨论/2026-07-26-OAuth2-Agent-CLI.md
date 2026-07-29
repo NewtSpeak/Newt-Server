@@ -33,7 +33,7 @@
 |------|------|
 | `/oauth/device` | 设备码授权（可勾选缩减 scope；platform.* 默认不勾选） |
 | `/oauth/authorize` | PKCE 授权（同上） |
-| 深链 `owlspeak://oauth/*` | Tauri deep-link + 单实例聚焦 |
+| 深链 `newtspeak://oauth/*` | Tauri deep-link + 单实例聚焦 |
 | 设置 → 已授权应用 | 列出/吊销 agent grants（scope 标签） |
 
 ### Newt-Agent 发布

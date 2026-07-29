@@ -19,33 +19,33 @@ chmod 700 "$INSTALL_DIR/data/sfu"
 
 # ---- 环境变量 ----
 umask 077
-cat > "$INSTALL_DIR/owl-sfu.env" <<'OWLSFU_ENV_EOF'
+cat > "$INSTALL_DIR/newt-sfu.env" <<'NEWTSFU_ENV_EOF'
 # 由 Newt-Server 自动部署生成，请勿手工编辑（重新部署会覆盖）
-OWLSFU_NODE_ID={{.NodeID}}
-OWLSFU_ENROLL_TOKEN={{.EnrollToken}}
-OWLSFU_SERVER_ENROLL_ENDPOINT={{.ControlEndpoint}}
-OWLSFU_ENROLL_INSECURE={{.EnrollInsecure}}
-OWLSFU_DATA_DIR={{.InstallDir}}/data/sfu
-OWLSFU_WSS_LISTEN={{.WSSListen}}
-OWLSFU_NO_TLS={{.NoTLS}}
+NEWTSFU_NODE_ID={{.NodeID}}
+NEWTSFU_ENROLL_TOKEN={{.EnrollToken}}
+NEWTSFU_SERVER_ENROLL_ENDPOINT={{.ControlEndpoint}}
+NEWTSFU_ENROLL_INSECURE={{.EnrollInsecure}}
+NEWTSFU_DATA_DIR={{.InstallDir}}/data/sfu
+NEWTSFU_WSS_LISTEN={{.WSSListen}}
+NEWTSFU_NO_TLS={{.NoTLS}}
 {{- if .TLSCertFile }}
-OWLSFU_TLS_CERT_FILE={{.TLSCertFile}}
-OWLSFU_TLS_KEY_FILE={{.TLSKeyFile}}
+NEWTSFU_TLS_CERT_FILE={{.TLSCertFile}}
+NEWTSFU_TLS_KEY_FILE={{.TLSKeyFile}}
 {{- end }}
-OWLSFU_MEDIA_UDP_PORT={{.MediaUDPPort}}
-OWLSFU_PUBLIC_IP={{.PublicIP}}
-OWLSFU_ADVERTISE_WSS_URL={{.AdvertiseWssURL}}
+NEWTSFU_MEDIA_UDP_PORT={{.MediaUDPPort}}
+NEWTSFU_PUBLIC_IP={{.PublicIP}}
+NEWTSFU_ADVERTISE_WSS_URL={{.AdvertiseWssURL}}
 {{- if .EnableCascade }}
-OWLSFU_CASCADE_LISTEN=0.0.0.0:8843
-OWLSFU_ADVERTISE_CASCADE_ENDPOINT={{.PublicIP}}:8843
+NEWTSFU_CASCADE_LISTEN=0.0.0.0:8843
+NEWTSFU_ADVERTISE_CASCADE_ENDPOINT={{.PublicIP}}:8843
 {{- end }}
-OWLSFU_MAX_USERS={{.MaxUsers}}
-OWLSFU_ENV_EOF
-chmod 600 "$INSTALL_DIR/owl-sfu.env"
-log "已写入 $INSTALL_DIR/owl-sfu.env"
+NEWTSFU_MAX_USERS={{.MaxUsers}}
+NEWTSFU_ENV_EOF
+chmod 600 "$INSTALL_DIR/newt-sfu.env"
+log "已写入 $INSTALL_DIR/newt-sfu.env"
 
 # ---- systemd 单元 ----
-cat > /etc/systemd/system/owl-sfu.service <<'OWLSFU_UNIT_EOF'
+cat > /etc/systemd/system/newt-sfu.service <<'NEWTSFU_UNIT_EOF'
 [Unit]
 Description=NewtSpeak SFU Media Node
 After=network-online.target
@@ -55,8 +55,8 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory={{.InstallDir}}
-EnvironmentFile={{.InstallDir}}/owl-sfu.env
-ExecStart={{.InstallDir}}/bin/owl-sfu
+EnvironmentFile={{.InstallDir}}/newt-sfu.env
+ExecStart={{.InstallDir}}/bin/newt-sfu
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
@@ -65,14 +65,14 @@ ReadWritePaths={{.InstallDir}}/data
 
 [Install]
 WantedBy=multi-user.target
-OWLSFU_UNIT_EOF
-log "已写入 /etc/systemd/system/owl-sfu.service"
+NEWTSFU_UNIT_EOF
+log "已写入 /etc/systemd/system/newt-sfu.service"
 
 {{- if .InstallCaddy }}
 
 # ---- Caddy 反向代理（自动申请 Let's Encrypt 证书）----
 mkdir -p /etc/caddy/owlspeak.d
-cat > /etc/caddy/owlspeak.d/owl-sfu.caddy <<'OWLSFU_CADDY_EOF'
+cat > /etc/caddy/owlspeak.d/newt-sfu.caddy <<'NEWTSFU_CADDY_EOF'
 {{.Domain}} {
 	encode gzip zstd
 	reverse_proxy 127.0.0.1:{{.LocalWSSPort}} {
@@ -85,7 +85,7 @@ cat > /etc/caddy/owlspeak.d/owl-sfu.caddy <<'OWLSFU_CADDY_EOF'
 		}
 	}
 }
-OWLSFU_CADDY_EOF
+NEWTSFU_CADDY_EOF
 touch /etc/caddy/Caddyfile
 if ! grep -q 'owlspeak.d' /etc/caddy/Caddyfile 2>/dev/null; then
   printf '\nimport /etc/caddy/owlspeak.d/*.caddy\n' >> /etc/caddy/Caddyfile
@@ -104,7 +104,7 @@ fi
 systemctl daemon-reload
 systemctl reset-failed owl-sfu >/dev/null 2>&1 || true
 systemctl enable owl-sfu >/dev/null 2>&1 || true
-log "启动 owl-sfu..."
+log "启动 newt-sfu..."
 systemctl restart owl-sfu
 
 HEALTHY=0

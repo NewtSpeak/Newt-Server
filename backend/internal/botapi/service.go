@@ -19,9 +19,9 @@ import (
 )
 
 // tokenPrefix bot token 明文前缀：便于泄露扫描与人工辨识（同类如 ghp_ / xoxb-）。
-const tokenPrefix = "owlbot_"
+const tokenPrefix = "newtbot_"
 
-// tokenDisplayPrefixLen 存库供后台展示的明文前缀长度（owlbot_ + 8 位）。
+// tokenDisplayPrefixLen 存库供后台展示的明文前缀长度（newtbot_ + 8 位）。
 const tokenDisplayPrefixLen = len(tokenPrefix) + 8
 
 // lastUsedThrottle last_used_at 落库节流：一分钟内最多写一次，避免高频 API 打爆该列。
@@ -85,7 +85,7 @@ func bind(c *gin.Context, target any) bool {
 
 // ---------- bot token 生成与校验 ----------
 
-// newBotToken 生成 bot 长期令牌：明文 owlbot_<base64url 32B>，仅创建响应返回一次；
+// newBotToken 生成 bot 长期令牌：明文 newtbot_<base64url 32B>，仅创建响应返回一次；
 // DB 只存 SHA-256（同 RefreshToken 策略）。
 func newBotToken() (plain, hash, displayPrefix string, err error) {
 	raw := make([]byte, 32)

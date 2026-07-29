@@ -13,7 +13,7 @@ pip install "newtspeak-bot[gateway]" # REST + Gateway（websockets）
 import asyncio
 from newtspeak_bot import OwlBotClient, run_gateway
 
-bot = OwlBotClient("https://owl.example.com", token="owlbot_xxx")
+bot = OwlBotClient("https://newt.example.com", token="newtbot_xxx")
 
 # 普通消息 / 卡片消息
 bot.send_message(channel_id, "你好！")

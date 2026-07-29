@@ -620,7 +620,7 @@ func (a *API) updateSfuBinary(c *gin.Context) {
 	// 旧版 SFU 不认识 UpdateBinary 时会回 BAD_COMMAND：给出可操作提示。
 	if resp.ErrorCode == "BAD_COMMAND" || strings.Contains(strings.ToLower(resp.ErrorMessage), "unknown") {
 		resp.ErrorMessage = fmt.Sprintf(
-			"%s（节点当前版本 %q 可能过旧，不支持远程升级；请先手动替换该节点 owl-sfu 为含 UpdateBinary 的版本，再点升级。本机内嵌 SFU 请重编 data/embedded-sfu/bin/owl-sfu）",
+			"%s（节点当前版本 %q 可能过旧，不支持远程升级；请先手动替换该节点 owl-sfu 为含 UpdateBinary 的版本，再点升级。本机内嵌 SFU 请重编 data/embedded-sfu/bin/newt-sfu）",
 			resp.ErrorMessage, node.NodeVersion,
 		)
 	}

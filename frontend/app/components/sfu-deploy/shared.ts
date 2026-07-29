@@ -272,7 +272,7 @@ export const DIAGNOSIS_RULES: DiagnosisRule[] = [
     ],
   },
   {
-    keywords: ["已安装 owl-sfu", "已安装", "owl-sfu.env"],
+    keywords: ["已安装 owl-sfu", "已安装", "newt-sfu.env"],
     cause: "目标机上已经存在一份 owl-sfu 安装。",
     actions: [
       "若要覆盖，在高级选项勾选「强制重装」后重试（原节点需手动吊销）",

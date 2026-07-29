@@ -42,7 +42,7 @@ type Client struct {
 	http    *http.Client
 }
 
-// New 创建客户端；baseURL 形如 https://owl.example.com。
+// New 创建客户端；baseURL 形如 https://newt.example.com。
 func New(baseURL, token string) *Client {
 	return &Client{
 		apiBase: strings.TrimRight(baseURL, "/") + "/bot-api/v1",

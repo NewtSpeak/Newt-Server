@@ -81,13 +81,13 @@ func (h *api) baseURL(c *gin.Context) string {
 
 // loadPortal 读取全局门户配置（单行，缺省值兜底）。
 func (h *api) loadPortal() model.InvitePortalConfig {
-	portal := model.InvitePortalConfig{ID: 1, AppName: "NewtSpeak", DeepLinkScheme: "owlspeak"}
+	portal := model.InvitePortalConfig{ID: 1, AppName: "NewtSpeak", DeepLinkScheme: "newtspeak"}
 	_ = h.deps.DB.First(&portal, "id = 1").Error
 	if portal.AppName == "" {
 		portal.AppName = "NewtSpeak"
 	}
 	if portal.DeepLinkScheme == "" {
-		portal.DeepLinkScheme = "owlspeak"
+		portal.DeepLinkScheme = "newtspeak"
 	}
 	return portal
 }

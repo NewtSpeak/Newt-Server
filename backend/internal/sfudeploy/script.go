@@ -16,7 +16,7 @@ var scriptFS embed.FS
 var scriptTemplates = template.Must(template.ParseFS(scriptFS, "scripts/*.tmpl"))
 
 // installDir 远端安装根目录（与 deploy/prod/install.sh 保持一致）。
-const installDir = "/opt/owlspeak"
+const installDir = "/opt/newtspeak"
 
 // TLS 模式。
 const (

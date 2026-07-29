@@ -67,7 +67,7 @@ export interface InteractionMember {
 export class Interaction {
   /** 交互 ID（雪花）。 */
   id: string
-  /** 一次性回应令牌（owlint_...）。 */
+  /** 一次性回应令牌（newtint_...）。 */
   token: string
   guildId: string
   channelId: string

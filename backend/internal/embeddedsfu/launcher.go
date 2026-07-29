@@ -100,7 +100,7 @@ func Start(parent context.Context, db *gorm.DB, cfg config.Config) (*Process, er
 	}
 
 	// 先清掉上一轮残留进程（air 热重载 / 异常退出后 PID 文件仍在）。
-	killStalePID(log, filepath.Join(opts.WorkDir, "owl-sfu.pid"))
+	killStalePID(log, filepath.Join(opts.WorkDir, "newt-sfu.pid"))
 
 	bin, err := resolveBinary(log, opts.BinPath, opts.WorkDir)
 	if err != nil {
@@ -295,7 +295,7 @@ func (p *Process) runOnce(ctx context.Context, enrollToken string) error {
 		}
 	}
 
-	logPath := filepath.Join(p.opts.WorkDir, "owl-sfu.log")
+	logPath := filepath.Join(p.opts.WorkDir, "newt-sfu.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("打开 SFU 日志失败: %w", err)
@@ -316,14 +316,14 @@ func (p *Process) runOnce(ctx context.Context, enrollToken string) error {
 	p.mu.Lock()
 	p.cmd = cmd
 	p.mu.Unlock()
-	_ = os.WriteFile(filepath.Join(p.opts.WorkDir, "owl-sfu.pid"), []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
+	_ = os.WriteFile(filepath.Join(p.opts.WorkDir, "newt-sfu.pid"), []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
 	p.log.Info("内嵌 SFU 进程已启动", "pid", cmd.Process.Pid, "node_id", p.nodeID)
 
 	waitErr := cmd.Wait()
 	p.mu.Lock()
 	p.cmd = nil
 	p.mu.Unlock()
-	_ = os.Remove(filepath.Join(p.opts.WorkDir, "owl-sfu.pid"))
+	_ = os.Remove(filepath.Join(p.opts.WorkDir, "newt-sfu.pid"))
 	return waitErr
 }
 
@@ -332,27 +332,27 @@ func (p *Process) childEnv(enrollToken string) []string {
 	set := func(k, v string) {
 		env = append(env, k+"="+v)
 	}
-	set("OWLSFU_NODE_ID", p.nodeID.String())
-	set("OWLSFU_SERVER_ENROLL_ENDPOINT", p.opts.EnrollEndpoint)
-	set("OWLSFU_ENROLL_INSECURE", strconv.FormatBool(p.opts.EnrollInsecure))
-	set("OWLSFU_DATA_DIR", filepath.Join(p.opts.WorkDir, "sfu-data"))
-	set("OWLSFU_WSS_LISTEN", p.opts.WSSListen)
-	set("OWLSFU_NO_TLS", strconv.FormatBool(p.opts.NoTLS))
-	set("OWLSFU_MEDIA_UDP_PORT", strconv.Itoa(p.opts.MediaUDPPort))
-	set("OWLSFU_PUBLIC_IP", p.opts.PublicIP)
-	set("OWLSFU_ADVERTISE_WSS_URL", p.opts.AdvertiseWSSURL)
-	set("OWLSFU_MAX_USERS", strconv.Itoa(p.opts.MaxUsers))
+	set("NEWTSFU_NODE_ID", p.nodeID.String())
+	set("NEWTSFU_SERVER_ENROLL_ENDPOINT", p.opts.EnrollEndpoint)
+	set("NEWTSFU_ENROLL_INSECURE", strconv.FormatBool(p.opts.EnrollInsecure))
+	set("NEWTSFU_DATA_DIR", filepath.Join(p.opts.WorkDir, "sfu-data"))
+	set("NEWTSFU_WSS_LISTEN", p.opts.WSSListen)
+	set("NEWTSFU_NO_TLS", strconv.FormatBool(p.opts.NoTLS))
+	set("NEWTSFU_MEDIA_UDP_PORT", strconv.Itoa(p.opts.MediaUDPPort))
+	set("NEWTSFU_PUBLIC_IP", p.opts.PublicIP)
+	set("NEWTSFU_ADVERTISE_WSS_URL", p.opts.AdvertiseWSSURL)
+	set("NEWTSFU_MAX_USERS", strconv.Itoa(p.opts.MaxUsers))
 	// 与常见手工 SFU 的 :8843 错开，降低本机端口冲突。
-	set("OWLSFU_CASCADE_LISTEN", ":8844")
+	set("NEWTSFU_CASCADE_LISTEN", ":8844")
 	if enrollToken != "" {
-		set("OWLSFU_ENROLL_TOKEN", enrollToken)
+		set("NEWTSFU_ENROLL_TOKEN", enrollToken)
 	}
 	// 审计：显式传入作为兜底（RegisterAck 也会下发）。
 	if p.opts.AuditIngestURL != "" {
-		set("OWLSFU_AUDIT_INGEST_URL", p.opts.AuditIngestURL)
+		set("NEWTSFU_AUDIT_INGEST_URL", p.opts.AuditIngestURL)
 	}
 	if p.opts.AuditIngestToken != "" {
-		set("OWLSFU_AUDIT_INGEST_TOKEN", p.opts.AuditIngestToken)
+		set("NEWTSFU_AUDIT_INGEST_TOKEN", p.opts.AuditIngestToken)
 	}
 	return env
 }
@@ -377,7 +377,7 @@ func resolveBinary(log *slog.Logger, configured, workDir string) (string, error)
 	if configured != "" {
 		candidates = append(candidates, configured)
 	}
-	if v := os.Getenv("OWLSFU_BIN"); v != "" {
+	if v := os.Getenv("NEWTSFU_BIN"); v != "" {
 		candidates = append(candidates, v)
 	}
 	// 固定落盘位置：优先使用已编译缓存。
@@ -399,7 +399,7 @@ func resolveBinary(log *slog.Logger, configured, workDir string) (string, error)
 		}
 	}
 
-	// 尝试从 monorepo 源码编译到 workDir/bin/owl-sfu。
+	// 尝试从 monorepo 源码编译到 workDir/bin/newt-sfu。
 	src := findSFUModuleRoot()
 	if src == "" {
 		return "", fmt.Errorf("未找到 owl-sfu 可执行文件；请设置 EMBEDDED_SFU_BIN 或将 Newt-SFU 放在 monorepo 中")

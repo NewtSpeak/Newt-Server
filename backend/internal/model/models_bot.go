@@ -33,7 +33,7 @@ type Bot struct {
 }
 
 // BotToken 机器人长期访问令牌（非密码登录）：
-//   - 明文形如 owlbot_<base64url 32B>，仅创建响应返回一次；
+//   - 明文形如 newtbot_<base64url 32B>，仅创建响应返回一次；
 //   - DB 只存 SHA-256（与 RefreshToken 同策略），Prefix 存前几位供后台辨识；
 //   - 可设过期时间，可随时吊销（RevokedAt），LastUsedAt 用于闲置令牌治理。
 type BotToken struct {

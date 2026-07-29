@@ -32,8 +32,8 @@ const (
 	interactionDedupeWindow = 3 * time.Second
 	// interactionRetentionDays 交互记录审计保留天数（到期硬删）。
 	interactionRetentionDays = 30
-	// interactionTokenPrefix 回应令牌明文前缀（对齐 botapi 的 owlbot_ 惯例）。
-	interactionTokenPrefix = "owlint_"
+	// interactionTokenPrefix 回应令牌明文前缀（对齐 botapi 的 newtbot_ 惯例）。
+	interactionTokenPrefix = "newtint_"
 )
 
 // newInteractionToken 生成一次性回应令牌：明文仅在 INTERACTION_CREATE 中下发，DB 存 SHA-256。

@@ -218,7 +218,7 @@ func TestAdminInviteLifecycle(t *testing.T) {
 		t.Fatalf("share_url 拼接异常: %s", shareURL)
 	}
 	deep := created["deep_link"].(string)
-	if !strings.HasPrefix(deep, "owlspeak://register?server=") || !strings.Contains(deep, "code="+code) {
+	if !strings.HasPrefix(deep, "newtspeak://register?server=") || !strings.Contains(deep, "code="+code) {
 		t.Fatalf("deep_link 拼接异常: %s", deep)
 	}
 

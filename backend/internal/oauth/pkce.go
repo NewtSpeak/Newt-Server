@@ -26,7 +26,7 @@ func allowedRedirectURI(uri string) bool {
 	case "http", "https":
 		host := strings.ToLower(u.Hostname())
 		return host == "127.0.0.1" || host == "localhost" || host == "[::1]"
-	case "owlspeak":
+	case "newtspeak":
 		return true
 	default:
 		return false
@@ -65,7 +65,7 @@ func (h *handler) postAuthorizeApprove(c *gin.Context) {
 		return
 	}
 	if !allowedRedirectURI(input.RedirectURI) {
-		fail(c, http.StatusBadRequest, "INVALID_REDIRECT", "redirect_uri 仅允许 loopback 或 owlspeak://")
+		fail(c, http.StatusBadRequest, "INVALID_REDIRECT", "redirect_uri 仅允许 loopback 或 newtspeak://")
 		return
 	}
 	method := strings.ToUpper(strings.TrimSpace(input.CodeChallengeMethod))

@@ -107,7 +107,7 @@ func (ca *ClusterCA) SignNodeCSR(csrPEM []byte, nodeID uuid.UUID) (certPEM []byt
 	}
 	now := time.Now().UTC()
 	notAfter = now.Add(nodeCertTTL)
-	spiffe := &url.URL{Scheme: "spiffe", Host: "owlspeak", Path: "/sfu/" + nodeID.String()}
+	spiffe := &url.URL{Scheme: "spiffe", Host: "newtspeak", Path: "/sfu/" + nodeID.String()}
 	template := &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: nodeID.String(), Organization: []string{"NewtSpeak SFU Node"}},

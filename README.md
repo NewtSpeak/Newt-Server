@@ -66,8 +66,8 @@ make dev               # 后端 Air + 前端开发服；浏览器 http://localho
 生产构建：
 
 ```bash
-cd backend && make build   # 前端进二进制 → bin/owl-server
-APP_ENV=production DATABASE_URL=… JWT_SECRET=… ./bin/owl-server
+cd backend && make build   # 前端进二进制 → bin/newt-server
+APP_ENV=production DATABASE_URL=… JWT_SECRET=… ./bin/newt-server
 ```
 
 ## API 平面

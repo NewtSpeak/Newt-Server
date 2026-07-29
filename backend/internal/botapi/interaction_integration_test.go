@@ -222,7 +222,7 @@ func TestInteractionAndEphemeralFlow(t *testing.T) {
 
 	// 错 token 404。
 	rec, _ = doBotReq(t, router, http.MethodPost, "/bot-api/v1/interactions/"+interactionID+"/callback", botAuth, map[string]any{
-		"token": "owlint_wrong", "type": "ack",
+		"token": "newtint_wrong", "type": "ack",
 	})
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("错误 token 应 404，实际 %d", rec.Code)

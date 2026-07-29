@@ -107,9 +107,9 @@ func TestNormalizeSpecRejectsShellInjection(t *testing.T) {
 
 func TestSplitEndpoint(t *testing.T) {
 	for _, tc := range []struct{ in, host, port string }{
-		{"owl.example.com:9443", "owl.example.com", "9443"},
+		{"newt.example.com:9443", "newt.example.com", "9443"},
 		{"1.2.3.4:19443", "1.2.3.4", "19443"},
-		{"owl.example.com", "owl.example.com", "9443"},
+		{"newt.example.com", "newt.example.com", "9443"},
 		{"", "127.0.0.1", "9443"},
 	} {
 		host, port := splitEndpoint(tc.in)
@@ -120,7 +120,7 @@ func TestSplitEndpoint(t *testing.T) {
 }
 
 func TestValidateURL(t *testing.T) {
-	if err := validateURL("url", "https://owl.example.com/sfu-releases/owl-sfu-1.0-linux-amd64"); err != nil {
+	if err := validateURL("url", "https://newt.example.com/sfu-releases/owl-sfu-1.0-linux-amd64"); err != nil {
 		t.Fatalf("合法 URL 被拒: %v", err)
 	}
 	for _, bad := range []string{"file:///etc/passwd", "https://a.com/x;rm -rf /", "not-a-url", "https://a.com/`id`"} {
@@ -134,15 +134,15 @@ func TestValidateURL(t *testing.T) {
 func TestRenderScripts(t *testing.T) {
 	p1, err := renderPhase1(phase1Data{
 		InstallDir: installDir, SSHHost: "1.2.3.4", ReleaseName: "owl-sfu-1.0-linux-amd64",
-		BinaryURL: "https://owl.example.com/sfu-releases/owl-sfu-1.0-linux-amd64",
-		BinarySHA256: strings.Repeat("a", 64), ServerHealthURL: "https://owl.example.com/healthz",
-		ControlHost: "owl.example.com", ControlPort: "9443", MediaUDPPort: 3478,
+		BinaryURL: "https://newt.example.com/sfu-releases/owl-sfu-1.0-linux-amd64",
+		BinarySHA256: strings.Repeat("a", 64), ServerHealthURL: "https://newt.example.com/healthz",
+		ControlHost: "newt.example.com", ControlPort: "9443", MediaUDPPort: 3478,
 		InstallCaddy: true, ConfigureUFW: true, Domain: "sfu.example.com",
 	})
 	if err != nil {
 		t.Fatalf("phase1 渲染失败: %v", err)
 	}
-	for _, want := range []string{"PHASE1_OK", "sha256sum -c", "owl-sfu.new", "ufw allow 3478/udp", "caddy"} {
+	for _, want := range []string{"PHASE1_OK", "sha256sum -c", "newt-sfu.new", "ufw allow 3478/udp", "caddy"} {
 		if !strings.Contains(p1, want) {
 			t.Fatalf("phase1 缺少 %q", want)
 		}
@@ -153,7 +153,7 @@ func TestRenderScripts(t *testing.T) {
 
 	p2, err := renderPhase2(phase2Data{
 		InstallDir: installDir, NodeID: "11111111-2222-3333-4444-555555555555",
-		EnrollToken: "deadbeef", ControlEndpoint: "owl.example.com:9443", EnrollInsecure: true,
+		EnrollToken: "deadbeef", ControlEndpoint: "newt.example.com:9443", EnrollInsecure: true,
 		WSSListen: "127.0.0.1:8443", LocalWSSPort: "8443", NoTLS: true,
 		MediaUDPPort: 3478, PublicIP: "1.2.3.4", AdvertiseWssURL: "wss://sfu.example.com/ws",
 		MaxUsers: 1200, InstallCaddy: true, Domain: "sfu.example.com",
@@ -162,8 +162,8 @@ func TestRenderScripts(t *testing.T) {
 		t.Fatalf("phase2 渲染失败: %v", err)
 	}
 	for _, want := range []string{
-		"PHASE2_OK", "OWLSFU_NODE_ID=11111111-2222-3333-4444-555555555555",
-		"OWLSFU_ENROLL_TOKEN=deadbeef", "chmod 600", "systemctl restart owl-sfu",
+		"PHASE2_OK", "NEWTSFU_NODE_ID=11111111-2222-3333-4444-555555555555",
+		"NEWTSFU_ENROLL_TOKEN=deadbeef", "chmod 600", "systemctl restart owl-sfu",
 		"reverse_proxy 127.0.0.1:8443", "/healthz",
 	} {
 		if !strings.Contains(p2, want) {
@@ -174,7 +174,7 @@ func TestRenderScripts(t *testing.T) {
 		t.Fatal("phase2 不得开启 set -x")
 	}
 	// env heredoc 必须是引号形式，否则 token 里的 $ 会被 shell 展开。
-	if !strings.Contains(p2, "<<'OWLSFU_ENV_EOF'") {
+	if !strings.Contains(p2, "<<'NEWTSFU_ENV_EOF'") {
 		t.Fatal("env heredoc 必须用引号形式防止变量展开")
 	}
 }

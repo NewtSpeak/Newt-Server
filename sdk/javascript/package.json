@@ -9,5 +9,5 @@
   "engines": {
     "node": ">=21"
   },
-  "keywords": ["owlspeak", "bot", "sdk", "chat", "voice"]
+  "keywords": ["newtspeak", "bot", "sdk", "chat", "voice"]
 }

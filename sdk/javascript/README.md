@@ -15,8 +15,8 @@ npm install newtspeak-bot        # 发布后
 import { OwlBotClient } from "newtspeak-bot"
 
 const bot = new OwlBotClient({
-  baseUrl: "https://owl.example.com",
-  token: process.env.OWL_BOT_TOKEN, // owlbot_xxx，控制台签发
+  baseUrl: "https://newt.example.com",
+  token: process.env.NEWT_BOT_TOKEN, // newtbot_xxx，控制台签发
 })
 
 // 1. 实时事件：监听新消息

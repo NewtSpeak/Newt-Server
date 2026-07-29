@@ -14,7 +14,7 @@ export class OwlBotError extends Error {
 export class OwlBotClient {
   /**
    * @param {{ baseUrl: string, token: string }} options
-   *   baseUrl 形如 https://owl.example.com（自动拼接 /bot-api/v1）
+   *   baseUrl 形如 https://newt.example.com（自动拼接 /bot-api/v1）
    */
   constructor({ baseUrl, token }) {
     if (!baseUrl || !token) throw new Error("baseUrl 与 token 必填")

@@ -12,7 +12,7 @@ frontend:
 	cp -R ../frontend/build/client/. internal/web/dist/
 
 build: swagger frontend
-	go build -o bin/owl-server ./cmd/server
+	go build -o bin/newt-server ./cmd/server
 
 run:
 	go run ./cmd/server
