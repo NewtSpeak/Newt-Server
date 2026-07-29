@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // KindSystemOwner 系统所有者徽章 kind，客户端可据此渲染专属样式。

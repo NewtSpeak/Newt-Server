@@ -1,4 +1,4 @@
-// Package owlbot 是 OwlSpeak 机器人开放平台的官方 Go SDK。
+// Package owlbot 是 NewtSpeak 机器人开放平台的官方 Go SDK。
 //
 // 认证：Authorization: Bot <token>；基础地址自动拼接 /bot-api/v1。
 // 语音媒体层可搭配 pion/webrtc 使用（Media Token 携带 bot=true claim，
@@ -35,7 +35,7 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("请求失败（%d）", e.Status)
 }
 
-// Client OwlSpeak 机器人开放 API 客户端。
+// Client NewtSpeak 机器人开放 API 客户端。
 type Client struct {
 	apiBase string
 	token   string

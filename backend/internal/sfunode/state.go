@@ -3,7 +3,7 @@ package sfunode
 import (
 	"fmt"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // validTransitions 节点状态机（docs 03 §8）：

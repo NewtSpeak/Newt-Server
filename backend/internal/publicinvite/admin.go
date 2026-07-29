@@ -6,10 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/audit"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/audit"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
 // requireLandingManager 落地页内容管理权限：MANAGE_GUILD。
@@ -227,7 +227,7 @@ func (h *api) deleteInvite(c *gin.Context) {
 }
 
 // revokeInviteByCode DELETE /invites/{code}：按码撤销邀请（用户端顶级入口，
-// Owl-Desktop docs 02 §8-2：客户端只持有邀请码，不强制携带 guildID）。
+// Newt-Desktop docs 02 §8-2：客户端只持有邀请码，不强制携带 guildID）。
 // 由码反查 guild 后走标准 RBAC：非成员/码不存在统一 404（不泄露归属），
 // 成员但无 MANAGE_GUILD 且无 CREATE_INSTANT_INVITE 返回 403。
 func (h *api) revokeInviteByCode(c *gin.Context) {

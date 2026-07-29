@@ -7,15 +7,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
-	"github.com/owlspeak/owl-server/backend/internal/voice"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/voice"
 	"gorm.io/gorm"
 )
 
-// getGuild GET /guilds/{gid}：服务器详情（成员可见，Owl-Desktop docs 02 §8-1）。
+// getGuild GET /guilds/{gid}：服务器详情（成员可见，Newt-Desktop docs 02 §8-1）。
 // 附带 member_count 便于客户端展示与 banners（多 banner 列表，position 升序）；
 // 非成员一律 404（防扫频）。
 func (h *api) getGuild(c *gin.Context) {
@@ -124,7 +124,7 @@ func (h *api) updateGuild(c *gin.Context) {
 }
 
 type deleteGuildRequest struct {
-	// ConfirmName 防误删确认：必须与服务器当前名称完全一致（Owl-Desktop docs 02
+	// ConfirmName 防误删确认：必须与服务器当前名称完全一致（Newt-Desktop docs 02
 	// FR-27：删除确认弹窗要求手动输入服务器名称，对标 Discord）。
 	ConfirmName string `json:"confirm_name" binding:"required"`
 }
@@ -250,7 +250,7 @@ func (h *api) transferOwnership(c *gin.Context) {
 
 // myGuildPermissions GET /guilds/{gid}/permissions/@me：服务器级最终权限投影。
 // permissions 为十进制字符串形式的 uint64 掩码（扩展位 52–54 超出 JS Number
-// 2^53 精度，客户端应以 BigInt 解析，Owl-Desktop docs 04 FR-16）。
+// 2^53 精度，客户端应以 BigInt 解析，Newt-Desktop docs 04 FR-16）。
 func (h *api) myGuildPermissions(c *gin.Context) {
 	ctx, _, ok := h.guildCtx(c)
 	if !ok {

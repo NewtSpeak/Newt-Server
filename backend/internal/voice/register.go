@@ -7,9 +7,9 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/sfuctl"
 )
 
 // tryRegister 容错注册路由：并行开发期间其他模块可能已抢注同一路径（gin 对重复注册会 panic），

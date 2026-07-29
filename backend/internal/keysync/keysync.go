@@ -4,7 +4,7 @@
 //   - 多端登录同一账号时，PUT 成功后经 Gateway 定向下发 VAULT_UPDATE，实现实时同步；
 //   - 乐观并发：Version 单调递增，PUT 需带 base_version，冲突返回 409 让客户端先合并。
 //
-// 挂载于用户端平面（/gapi/v1，aud=client）：同一 OwlSpeak 后端账号即同步单元。
+// 挂载于用户端平面（/gapi/v1，aud=client）：同一 NewtSpeak 后端账号即同步单元。
 package keysync
 
 import (
@@ -15,9 +15,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

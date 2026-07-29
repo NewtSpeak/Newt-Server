@@ -441,7 +441,7 @@ export type SfuTopologyAggEdge = {
   remote_ip?: string
 }
 
-/** Owl-Server 控制面节点（拓扑图中心） */
+/** Newt-Server 控制面节点（拓扑图中心） */
 export type SfuTopologyServer = {
   id: string
   display_name: string
@@ -485,7 +485,7 @@ export const getSfuTopology = () =>
     generated_at: raw.generated_at,
     server: raw.server ?? {
       id: "owl-server",
-      display_name: "Owl-Server",
+      display_name: "Newt-Server",
       role: "control_plane",
       online: true,
       connected_sfu_count: 0,

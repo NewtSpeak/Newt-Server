@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
+	"github.com/newtspeak/newt-server/backend/internal/sfuctl"
 )
 
 // controller sfuctl.Controller 实现：把指令经控制通道发给目标节点连接。

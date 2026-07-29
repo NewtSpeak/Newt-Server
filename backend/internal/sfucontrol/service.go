@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	owlsfuv1 "github.com/owlspeak/owl-server/backend/gen/owlsfu/v1"
-	"github.com/owlspeak/owl-server/backend/internal/ca"
-	"github.com/owlspeak/owl-server/backend/internal/mediatoken"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	owlsfuv1 "github.com/newtspeak/newt-server/backend/gen/owlsfu/v1"
+	"github.com/newtspeak/newt-server/backend/internal/ca"
+	"github.com/newtspeak/newt-server/backend/internal/mediatoken"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -449,7 +449,7 @@ func (s *Service) recordEdgeDownSuspicion(reporterID uuid.UUID, es *owlsfuv1.Edg
 // 提前判死在「1 次心跳丢失 + 信号齐备」后尽快触发，压缩静音窗口。
 const heartbeatMonitorTick = time.Second
 
-// runHeartbeatMonitor 每 1s 扫描两条判死路径（判死权威仅 Owl-Server，15 BI.4）：
+// runHeartbeatMonitor 每 1s 扫描两条判死路径（判死权威仅 Newt-Server，15 BI.4）：
 //   - 硬判死：连续 3 个心跳周期（5s×3=15s 上限，15 BI.1）未上报；
 //   - 提前判死（BI.3）：≥2 个独立信号源（级联邻居 EdgeDown 指控 / 客户端 ICE
 //     失败上报）+ ≥1 次心跳丢失，无需等满 3 次。

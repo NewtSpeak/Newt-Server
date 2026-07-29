@@ -1,10 +1,10 @@
-// Package oauth 实现 OwlSpeak OAuth2 Authorization Server（设备码为主），
+// Package oauth 实现 NewtSpeak OAuth2 Authorization Server（设备码为主），
 // 为 CLI / AI Agent 签发 aud=agent 的用户委托令牌。
 package oauth
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // Register 挂载 /oauth/v1/* 路由到传入的根引擎 group（通常为 router.Group("") 或 /oauth/v1）。

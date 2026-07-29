@@ -1,4 +1,4 @@
-// OwlSpeak Bot SDK 类型声明。
+// NewtSpeak Bot SDK 类型声明。
 
 export interface Message {
   id: string

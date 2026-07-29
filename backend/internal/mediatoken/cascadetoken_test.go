@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
 )
 
 // TestSignCascade 验证级联 token 签发：EdDSA 可验签、claims 绑定 room+epoch+edge、TTL 生效。

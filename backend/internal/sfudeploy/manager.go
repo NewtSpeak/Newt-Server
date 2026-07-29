@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/audit"
-	"github.com/owlspeak/owl-server/backend/internal/config"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
-	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
+	"github.com/newtspeak/newt-server/backend/internal/audit"
+	"github.com/newtspeak/newt-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/sfucontrol"
 	"gorm.io/gorm"
 )
 
@@ -68,7 +68,7 @@ func (m *Manager) failStaleDeployments() {
 		Where("status = ?", model.SfuDeployRunning).
 		Updates(map[string]any{
 			"status":      model.SfuDeployFailed,
-			"error_msg":   "Owl-Server 重启，部署中断；远端脚本幂等，可直接重试",
+			"error_msg":   "Newt-Server 重启，部署中断；远端脚本幂等，可直接重试",
 			"finished_at": now,
 		}).Error
 	if err != nil {

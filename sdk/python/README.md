@@ -1,17 +1,17 @@
-# owlspeak-bot（Python SDK）
+# newtspeak-bot（Python SDK）
 
-OwlSpeak 机器人开放平台官方 Python SDK。REST 仅用标准库；Gateway 实时事件需可选依赖：
+NewtSpeak 机器人开放平台官方 Python SDK。REST 仅用标准库；Gateway 实时事件需可选依赖：
 
 ```bash
-pip install owlspeak-bot            # REST
-pip install "owlspeak-bot[gateway]" # REST + Gateway（websockets）
+pip install newtspeak-bot            # REST
+pip install "newtspeak-bot[gateway]" # REST + Gateway（websockets）
 ```
 
 ## 快速上手
 
 ```python
 import asyncio
-from owlspeak_bot import OwlBotClient, run_gateway
+from newtspeak_bot import OwlBotClient, run_gateway
 
 bot = OwlBotClient("https://owl.example.com", token="owlbot_xxx")
 
@@ -42,7 +42,7 @@ asyncio.run(run_gateway(bot, on_event))
 ## 按钮交互与 ephemeral
 
 ```python
-from owlspeak_bot import Interaction
+from newtspeak_bot import Interaction
 
 # 1. 发带交互按钮的卡片（custom_id 触发 INTERACTION_CREATE；url 为链接按钮）
 bot.send_card(channel_id, {

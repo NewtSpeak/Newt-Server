@@ -1,10 +1,10 @@
 // Package moderation 成员治理：邀请/加入、退出、昵称、踢出、Ban Member
-//（docs 12 AG.4 / AO.3、Owl-Desktop docs 02/08）。
+//（docs 12 AG.4 / AO.3、Newt-Desktop docs 02/08）。
 package moderation
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // Register 挂载成员治理 REST API（后台管理平面 /api/v1）。

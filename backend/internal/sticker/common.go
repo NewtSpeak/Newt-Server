@@ -13,10 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/config"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 	"gorm.io/gorm"
 )
 

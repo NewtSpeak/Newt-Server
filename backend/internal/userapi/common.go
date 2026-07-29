@@ -6,10 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/security"
 )
 
 // api 模块内共享句柄。tokens 仅用于从 Authorization 头提取 sid（会话链）claim：

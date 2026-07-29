@@ -1,4 +1,4 @@
-// 与 Owl-Desktop/app/lib/bot-card.ts 保持同步（复制版）
+// 与 Newt-Desktop/app/lib/bot-card.ts 保持同步（复制版）
 // Bot 消息卡片（message.card）解析：服务端自 2026-07 起解析并校验 buttons 键
 //（互斥/上限/裁剪，设计文档 2026-07-26），其余键仍由客户端约定渲染。
 // 客户端解析保持「宽容跳过」白名单风格：非法按钮丢弃而非整卡拒绝（防御旧数据）。

@@ -1,18 +1,18 @@
-# owlspeak-bot（JavaScript SDK）
+# newtspeak-bot（JavaScript SDK）
 
-OwlSpeak 机器人开放平台官方 JS SDK。零依赖，要求 Node ≥ 21（原生 `fetch` 与 `WebSocket`）。
+NewtSpeak 机器人开放平台官方 JS SDK。零依赖，要求 Node ≥ 21（原生 `fetch` 与 `WebSocket`）。
 
 ## 安装
 
 ```bash
-npm install owlspeak-bot        # 发布后
+npm install newtspeak-bot        # 发布后
 # 或在本仓库内直接引用 sdk/javascript
 ```
 
 ## 快速上手：一个会流式回复的 AI 机器人
 
 ```js
-import { OwlBotClient } from "owlspeak-bot"
+import { OwlBotClient } from "newtspeak-bot"
 
 const bot = new OwlBotClient({
   baseUrl: "https://owl.example.com",

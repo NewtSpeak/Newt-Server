@@ -13,12 +13,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
-// 服务器图标/横幅存储（Owl-Desktop docs 02 FR-13/§8-9）：与用户头像同用
+// 服务器图标/横幅存储（Newt-Desktop docs 02 FR-13/§8-9）：与用户头像同用
 // DataDir/profile 目录和 /public-assets/profile/:name 公开访问路由（customization
 // 模块注册），文件名带纳秒版本号保证 URL 不可变，可配 immutable 长缓存。
 // 图标/banner 额外支持短循环 MP4（客户端默认静音、悬停出声；banner 多张轮播）。

@@ -107,5 +107,5 @@ export function pageTitle(pathname: string): string {
       if (item.url === pathname) return item.title
     }
   }
-  return "OwlSpeak 管理控制台"
+  return "NewtSpeak 管理控制台"
 }

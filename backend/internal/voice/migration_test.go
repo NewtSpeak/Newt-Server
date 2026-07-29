@@ -3,7 +3,7 @@ package voice
 import (
 	"testing"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // TestNextMigrationState 五段状态机转换表驱动（docs 09 §5.1）。

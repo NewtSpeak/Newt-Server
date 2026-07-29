@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
 )
 
 // credentialSecretName 凭据加密主密钥在 ClusterSecret 中的键名（与 CA 私钥同一存储层级）。

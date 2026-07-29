@@ -3,9 +3,9 @@ package database
 import (
 	"fmt"
 
-	"github.com/owlspeak/owl-server/backend/internal/guildseed"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/guildseed"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/plugin/opentelemetry/tracing"

@@ -5,11 +5,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/audit"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/audit"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
 )
 
 // api 模块内共享句柄。clientPlane=true 表示挂载在用户端（/gapi/v1）：

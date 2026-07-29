@@ -11,7 +11,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // Register 挂载 /api/v1/admin/users 与 /api/v1/admin/registration。

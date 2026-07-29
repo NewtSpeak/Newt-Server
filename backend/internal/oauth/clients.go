@@ -16,12 +16,12 @@ var builtinClients = map[string]clientInfo{
 	ClientOwlCLI: {
 		ID:          ClientOwlCLI,
 		Name:        "Owl CLI",
-		Description: "官方命令行与 AI Agent 工具，代表你操作 OwlSpeak。",
+		Description: "官方命令行与 AI Agent 工具，代表你操作 NewtSpeak。",
 	},
 	ClientOwlMCP: {
 		ID:          ClientOwlMCP,
 		Name:        "Owl MCP",
-		Description: "官方 MCP Server，供 AI 助手调用 OwlSpeak 工具。",
+		Description: "官方 MCP Server，供 AI 助手调用 NewtSpeak 工具。",
 	},
 }
 

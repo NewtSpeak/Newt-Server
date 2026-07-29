@@ -1,8 +1,8 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "OwlSpeak 账号、Guild RBAC 与权限管理 API。",
-        "title": "Owl-Server API",
+        "description": "NewtSpeak 账号、Guild RBAC 与权限管理 API。",
+        "title": "Newt-Server API",
         "contact": {},
         "version": "0.1.0"
     },

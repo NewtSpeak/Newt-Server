@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 	"gorm.io/gorm"
 )
 
@@ -109,10 +109,10 @@ func (h *api) baseURL(c *gin.Context) string {
 // loadPortal 读取全局门户配置（publicinvite 管理，单行，缺省值兜底）：
 // 深链协议与产品名（公开预检的 server_name）均取自本表。
 func (h *api) loadPortal() model.InvitePortalConfig {
-	portal := model.InvitePortalConfig{ID: 1, AppName: "OwlSpeak", DeepLinkScheme: "owlspeak"}
+	portal := model.InvitePortalConfig{ID: 1, AppName: "NewtSpeak", DeepLinkScheme: "owlspeak"}
 	_ = h.deps.DB.First(&portal, "id = 1").Error
 	if portal.AppName == "" {
-		portal.AppName = "OwlSpeak"
+		portal.AppName = "NewtSpeak"
 	}
 	if portal.DeepLinkScheme == "" {
 		portal.DeepLinkScheme = "owlspeak"

@@ -1,10 +1,10 @@
 # owlbot（Go SDK）
 
-OwlSpeak 机器人开放平台官方 Go SDK。可搭配 [pion/webrtc](https://github.com/pion/webrtc)
-实现完整的语音媒体收发（参考 Owl-SFU 仓库 `cmd/loadbot` 的信令时序）。
+NewtSpeak 机器人开放平台官方 Go SDK。可搭配 [pion/webrtc](https://github.com/pion/webrtc)
+实现完整的语音媒体收发（参考 Newt-SFU 仓库 `cmd/loadbot` 的信令时序）。
 
 ```bash
-go get github.com/owlspeak/owl-server/sdk/go
+go get github.com/newtspeak/newt-server/sdk/go
 ```
 
 ## 快速上手
@@ -16,7 +16,7 @@ import (
 	"encoding/json"
 	"log"
 
-	owlbot "github.com/owlspeak/owl-server/sdk/go"
+	owlbot "github.com/newtspeak/newt-server/sdk/go"
 )
 
 func main() {
@@ -93,7 +93,7 @@ voice, err := bot.JoinVoice(guildID, voiceChannelID)
 defer bot.LeaveVoice(guildID)
 ```
 
-媒体层完整示例可直接参考 Owl-SFU 仓库的 `cmd/loadbot/main.go`（pion 建 PC、
+媒体层完整示例可直接参考 Newt-SFU 仓库的 `cmd/loadbot/main.go`（pion 建 PC、
 发 Opus RTP、订阅下行轨），把 `--token` 换成 `JoinVoice` 返回的 Media Token 即可。
 
 ## 反应角色（验证门）

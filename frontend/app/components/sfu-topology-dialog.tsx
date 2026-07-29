@@ -274,7 +274,7 @@ export function SfuTopologyDialog({
             集群拓扑
           </DialogTitle>
           <DialogDescription>
-            中心为 Owl-Server 控制面；环上为 SFU。蓝色虚线为 gRPC 控制通道；节点间双向媒体连线带箭头指示方向：
+            中心为 Newt-Server 控制面；环上为 SFU。蓝色虚线为 gRPC 控制通道；节点间双向媒体连线带箭头指示方向：
             <span className="font-medium text-emerald-700 dark:text-emerald-400"> 绿色=内网</span>、
             <span className="font-medium text-amber-700 dark:text-amber-400"> 琥珀色=外网</span>
             ，线宽反映实时速率。约每 {POLL_MS / 1000}s 刷新。
@@ -320,7 +320,7 @@ export function SfuTopologyDialog({
         <div className="flex flex-wrap items-center gap-4 rounded-xl border bg-muted/30 px-3 py-2 text-[11px]">
           <span className="flex items-center gap-1.5">
             <span className="inline-block size-2.5 rounded-sm bg-sky-500" />
-            Owl-Server
+            Newt-Server
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-sky-500/80" />
@@ -362,7 +362,7 @@ export function SfuTopologyDialog({
               viewBox={`0 0 ${width} ${height}`}
               className="h-auto w-full"
               role="img"
-              aria-label="Owl-Server 与 SFU 集群拓扑图"
+              aria-label="Newt-Server 与 SFU 集群拓扑图"
             >
               <defs>
                 {/* 控制通道箭头；媒体流量用几何箭头（与线同色）保证指向清晰 */}
@@ -566,7 +566,7 @@ export function SfuTopologyDialog({
                 )
               })}
 
-              {/* Owl-Server 中心节点 */}
+              {/* Newt-Server 中心节点 */}
               {server && serverPos && (
                 <g transform={`translate(${serverPos.x}, ${serverPos.y})`}>
                   <rect
@@ -602,7 +602,7 @@ export function SfuTopologyDialog({
                     控制面
                   </text>
                   <text textAnchor="middle" y={4} className="fill-foreground" style={{ fontSize: 12, fontWeight: 700 }}>
-                    {(server.display_name || "Owl-Server").slice(0, 12)}
+                    {(server.display_name || "Newt-Server").slice(0, 12)}
                   </text>
                   <text textAnchor="middle" y={20} className="fill-muted-foreground" style={{ fontSize: 9 }}>
                     已连 {server.connected_sfu_count}/{nodes.length} SFU
@@ -698,7 +698,7 @@ export function SfuTopologyDialog({
                   return (
                     <tr key={`ctl-row-${link.node_id}`} className="border-t">
                       <td className="px-2 py-1 font-mono">
-                        <span className="text-sky-700 dark:text-sky-300">{server?.display_name ?? "Owl-Server"}</span>
+                        <span className="text-sky-700 dark:text-sky-300">{server?.display_name ?? "Newt-Server"}</span>
                         <span className="text-muted-foreground"> → </span>
                         {node?.display_name ?? link.node_id.slice(0, 8)}
                       </td>

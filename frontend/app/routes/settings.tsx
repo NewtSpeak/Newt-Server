@@ -86,7 +86,7 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">账号</CardTitle>
-            <CardDescription>令牌自动刷新；权限由 Owl-Server 权威裁决。</CardDescription>
+            <CardDescription>令牌自动刷新；权限由 Newt-Server 权威裁决。</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
             <div className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5">

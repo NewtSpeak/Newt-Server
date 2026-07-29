@@ -5,7 +5,7 @@ package stage
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // RegisterBot 把舞台与屏幕共享端点挂到 bot 开放平面。

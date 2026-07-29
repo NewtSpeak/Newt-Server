@@ -2,8 +2,8 @@
 # =============================================================================
 # M3 级联端到端联调脚本（双节点跨节点互听 + NodeWant 订阅剪枝）
 #
-# 链路：Owl-Server（voice 级联编排：AnchorLease + cascade token 签发 + 等 EdgeUp）
-#       ←mTLS gRPC→ Owl-SFU ×2（级联 mTLS 信令 tcp/1884x + 节点间 WebRTC PC）
+# 链路：Newt-Server（voice 级联编排：AnchorLease + cascade token 签发 + 等 EdgeUp）
+#       ←mTLS gRPC→ Newt-SFU ×2（级联 mTLS 信令 tcp/1884x + 节点间 WebRTC PC）
 #       ← WS/WebRTC → cmd/loadbot ×2（分别落在两个节点，跨级联互听）
 #
 # 验收点（docs 15 BM M3：双节点两用户互听、剪枝生效）：
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Owl-SFU}"
+SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Newt-SFU}"
 
 PG_ADMIN_URL="${PG_ADMIN_URL:-postgres://owl:owl_dev_password@127.0.0.1:5432/owl?sslmode=disable}"
 DB_NAME="owl_e2e_cas_$(date +%s)"
@@ -81,9 +81,9 @@ echo "==> 编译 owl-server / owl-sfu / loadbot"
 (cd "$SFU_DIR" && go build -o "$WORK/owl-sfu" ./cmd/owl-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
 
 # -----------------------------------------------------------------------------
-# 1. 启动 Owl-Server
+# 1. 启动 Newt-Server
 # -----------------------------------------------------------------------------
-echo "==> 启动 Owl-Server"
+echo "==> 启动 Newt-Server"
 mkdir -p "$WORK/server-data"
 env \
   APP_ADDRESS=":${APP_PORT}" \

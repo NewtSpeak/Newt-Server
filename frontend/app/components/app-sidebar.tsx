@@ -33,7 +33,7 @@ export function AppSidebar({
               <span className="grid size-6 place-items-center rounded-lg bg-primary text-primary-foreground">
                 <AudioLinesIcon className="size-4!" />
               </span>
-              <span className="text-base font-semibold">OwlSpeak</span>
+              <span className="text-base font-semibold">NewtSpeak</span>
               <span className="ml-auto rounded-full border px-1.5 py-px text-[10px] leading-4 text-muted-foreground">管理台</span>
             </SidebarMenuButton>
           </SidebarMenuItem>

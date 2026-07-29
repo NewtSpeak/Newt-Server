@@ -3,7 +3,7 @@ package voice
 import (
 	"testing"
 
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
 // TestProjectCaps caps 投影表驱动（docs 02 §7 + 舞台/Restriction 叠加规则）。

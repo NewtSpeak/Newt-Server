@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OwlSpeak SFU 节点自动部署 —— 阶段二：写配置、装 systemd、启动并等待健康。
+# NewtSpeak SFU 节点自动部署 —— 阶段二：写配置、装 systemd、启动并等待健康。
 # 本脚本含一次性 enrollment token，故全程禁用命令回显（不得开启 shell 调试跟踪）。
 set -euo pipefail
 
@@ -20,7 +20,7 @@ chmod 700 "$INSTALL_DIR/data/sfu"
 # ---- 环境变量 ----
 umask 077
 cat > "$INSTALL_DIR/owl-sfu.env" <<'OWLSFU_ENV_EOF'
-# 由 Owl-Server 自动部署生成，请勿手工编辑（重新部署会覆盖）
+# 由 Newt-Server 自动部署生成，请勿手工编辑（重新部署会覆盖）
 OWLSFU_NODE_ID={{.NodeID}}
 OWLSFU_ENROLL_TOKEN={{.EnrollToken}}
 OWLSFU_SERVER_ENROLL_ENDPOINT={{.ControlEndpoint}}
@@ -47,7 +47,7 @@ log "已写入 $INSTALL_DIR/owl-sfu.env"
 # ---- systemd 单元 ----
 cat > /etc/systemd/system/owl-sfu.service <<'OWLSFU_UNIT_EOF'
 [Unit]
-Description=OwlSpeak SFU Media Node
+Description=NewtSpeak SFU Media Node
 After=network-online.target
 Wants=network-online.target
 

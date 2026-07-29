@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // sharedIDs 进程内唯一的雪花 ID 生成器：后台与用户端两个平面共用，

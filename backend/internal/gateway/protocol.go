@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
-	"github.com/owlspeak/owl-server/backend/internal/presence"
-	"github.com/owlspeak/owl-server/backend/internal/snapshot"
+	"github.com/newtspeak/newt-server/backend/internal/platformbadge"
+	"github.com/newtspeak/newt-server/backend/internal/presence"
+	"github.com/newtspeak/newt-server/backend/internal/snapshot"
 )
 
 // WebSocket 帧协议（Discord 风格简化版）：所有帧均为 JSON 文本帧 {"op":..., "t":..., "s":..., "d":...}。

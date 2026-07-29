@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/security"
 	"gorm.io/gorm"
 )
 
@@ -18,7 +18,7 @@ type deleteAccountRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
-// deleteAccount DELETE /users/@me：注销账号（Owl-Desktop docs 16 FR-04）。
+// deleteAccount DELETE /users/@me：注销账号（Newt-Desktop docs 16 FR-04）。
 // 语义对标 Discord「删除账户」：
 //   - 密码确认；仍拥有服务器时返回 409 OWNS_GUILDS（须先转让或删除）；
 //   - 历史消息保留但作者匿名化（用户行改写为「已注销用户」，不物理删行，

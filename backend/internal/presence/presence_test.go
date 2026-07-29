@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
 )
 
 // collector 收集总线事件（分发异步，断言用轮询等待）。

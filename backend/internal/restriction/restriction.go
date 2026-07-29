@@ -5,8 +5,8 @@ package restriction
 
 import (
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
 // Scope 限制作用域（docs 12 §2.1）。

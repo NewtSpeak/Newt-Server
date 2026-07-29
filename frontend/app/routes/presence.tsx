@@ -112,7 +112,7 @@ function PlatformAuditCard() {
                 <p className="font-medium">审计上传管线未就绪</p>
                 <p className="mt-1 text-xs opacity-90">
                   主节点未配置 <code className="rounded bg-muted px-1">AUDIT_INGEST_TOKEN</code>
-                  ，SFU 即使录制也无法上传。请在 Owl-Server 设置该环境变量，并在 SFU 配置相同的{" "}
+                  ，SFU 即使录制也无法上传。请在 Newt-Server 设置该环境变量，并在 SFU 配置相同的{" "}
                   <code className="rounded bg-muted px-1">audit_ingest_token</code> 与{" "}
                   <code className="rounded bg-muted px-1">audit_ingest_url</code>
                   （如 <code className="rounded bg-muted px-1">https://你的域名/audit-api/records</code>）。

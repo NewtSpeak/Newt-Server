@@ -14,17 +14,17 @@ package botapi
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/auditapi"
-	"github.com/owlspeak/owl-server/backend/internal/gateway"
-	"github.com/owlspeak/owl-server/backend/internal/guildapi"
-	"github.com/owlspeak/owl-server/backend/internal/message"
-	"github.com/owlspeak/owl-server/backend/internal/moderation"
-	"github.com/owlspeak/owl-server/backend/internal/publicinvite"
-	"github.com/owlspeak/owl-server/backend/internal/restriction"
-	"github.com/owlspeak/owl-server/backend/internal/stage"
-	"github.com/owlspeak/owl-server/backend/internal/sticker"
-	"github.com/owlspeak/owl-server/backend/internal/voice"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/auditapi"
+	"github.com/newtspeak/newt-server/backend/internal/gateway"
+	"github.com/newtspeak/newt-server/backend/internal/guildapi"
+	"github.com/newtspeak/newt-server/backend/internal/message"
+	"github.com/newtspeak/newt-server/backend/internal/moderation"
+	"github.com/newtspeak/newt-server/backend/internal/publicinvite"
+	"github.com/newtspeak/newt-server/backend/internal/restriction"
+	"github.com/newtspeak/newt-server/backend/internal/stage"
+	"github.com/newtspeak/newt-server/backend/internal/sticker"
+	"github.com/newtspeak/newt-server/backend/internal/voice"
 )
 
 // Register 挂载后台管理侧机器人管理 API（/api/v1）。
@@ -59,7 +59,7 @@ func RegisterClient(v1 *gin.RouterGroup, deps appdeps.Deps) error {
 }
 
 // RegisterBotAPI 挂载 bot 开放 API（/bot-api 前缀，实际版本化为 /bot-api/v1）。
-// 能力面与 Discord Bot API 对齐（在 OwlSpeak 已实现的产品模型内）：
+// 能力面与 Discord Bot API 对齐（在 NewtSpeak 已实现的产品模型内）：
 //
 //	消息 / 反应 / 附件 / 搜索 / 流式卡片
 //	服务器结构 / 频道 CRUD / 角色 / 权限覆盖

@@ -13,7 +13,7 @@ package stage
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // RegisterClient 把舞台与屏幕共享端点挂到用户端认证平面（/gapi/v1，aud=client）。

@@ -1,4 +1,4 @@
-// OwlSpeak Bot SDK（JavaScript，零依赖；需要 Node >= 21 的原生 fetch 与 WebSocket）。
+// NewtSpeak Bot SDK（JavaScript，零依赖；需要 Node >= 21 的原生 fetch 与 WebSocket）。
 // 认证：Authorization: Bot <token>；基础地址默认 /bot-api/v1。
 
 /** SDK 统一错误：携带 HTTP 状态码与服务端错误码。 */

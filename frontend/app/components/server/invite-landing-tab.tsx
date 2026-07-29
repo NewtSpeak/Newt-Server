@@ -447,7 +447,7 @@ function InvitesCard({
 }
 
 const PORTAL_FIELDS: { key: keyof InvitePortalConfig; label: string; placeholder?: string }[] = [
-  { key: "app_name", label: "产品名", placeholder: "OwlSpeak" },
+  { key: "app_name", label: "产品名", placeholder: "NewtSpeak" },
   { key: "deep_link_scheme", label: "深链协议（scheme）", placeholder: "owlspeak" },
   { key: "windows_url", label: "Windows 下载地址" },
   { key: "macos_url", label: "macOS 下载地址" },

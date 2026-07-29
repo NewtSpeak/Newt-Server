@@ -2,8 +2,8 @@
 # =============================================================================
 # M5 舞台 caps 衔接 + 屏幕轨端到端联调脚本（docs 11 AD.4/AF、14、15 §7/§9 BM M5）
 #
-# 链路：Owl-Server（stage bring-up/bring-down → InternalCapsDirty → voice caps 重算
-#       → sfuctl UpdateParticipantCaps）←mTLS gRPC→ Owl-SFU ×2（caps 执行 +
+# 链路：Newt-Server（stage bring-up/bring-down → InternalCapsDirty → voice caps 重算
+#       → sfuctl UpdateParticipantCaps）←mTLS gRPC→ Newt-SFU ×2（caps 执行 +
 #       无 cap 音频轨挂起接纳 + 级联视频转发）← WS/WebRTC → cmd/loadbot ×2
 #
 # 场景 A（STAGE 模式舞台 caps，跨节点）：
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Owl-SFU}"
+SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Newt-SFU}"
 
 PG_ADMIN_URL="${PG_ADMIN_URL:-postgres://owl:owl_dev_password@127.0.0.1:5432/owl?sslmode=disable}"
 DB_NAME="owl_e2e_stage_$(date +%s)"
@@ -121,9 +121,9 @@ echo "==> 编译 owl-server / owl-sfu / loadbot"
 (cd "$SFU_DIR" && go build -o "$WORK/owl-sfu" ./cmd/owl-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
 
 # -----------------------------------------------------------------------------
-# 1. 启动 Owl-Server
+# 1. 启动 Newt-Server
 # -----------------------------------------------------------------------------
-echo "==> 启动 Owl-Server"
+echo "==> 启动 Newt-Server"
 mkdir -p "$WORK/server-data"
 env \
   APP_ADDRESS=":${APP_PORT}" \

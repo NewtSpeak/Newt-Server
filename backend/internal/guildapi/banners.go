@@ -9,15 +9,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 	"gorm.io/gorm"
 )
 
 // 服务器多 banner 列表（服务器外观专项）：每服多张、position 有序、可增删与重排序。
 //
-// 与既有单张 Guild.BannerURL（Owl-Desktop docs 02 FR-13）并存：单张字段与端点
+// 与既有单张 Guild.BannerURL（Newt-Desktop docs 02 FR-13）并存：单张字段与端点
 // 保持兼容不动，多 banner 走独立的 GuildBanner 表与 /banners 复数端点。
 // 二进制存储复用本文件夹 assets.go 的公开资产约定（DataDir/profile +
 // /public-assets/profile/{name}，文件名含 guild ID 与纳秒版本号，不可枚举、

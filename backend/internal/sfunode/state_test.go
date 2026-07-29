@@ -3,7 +3,7 @@ package sfunode
 import (
 	"testing"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 func TestStateMachine(t *testing.T) {

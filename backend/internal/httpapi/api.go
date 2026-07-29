@@ -9,12 +9,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
-	"github.com/owlspeak/owl-server/backend/internal/security"
-	"github.com/owlspeak/owl-server/backend/internal/sfudeploy"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/platformbadge"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/sfudeploy"
 	"gorm.io/gorm"
 )
 
@@ -69,7 +69,7 @@ func (a *API) RegisterRoutes(group *gin.RouterGroup) {
 	//（后台 /api/v1 保持原路径不变，用户端 /gapi/v1 走标准 RBAC 无 SystemAdmin 短路）。
 
 	// SFU 节点管理（基于 sfucontrol gRPC 控制面，handler 见 sfu_admin.go）：
-	// 创建占位 + enrollment token、状态迁移、吊销；Owl-SFU 节点只讲 proto/owlsfu/v1 的
+	// 创建占位 + enrollment token、状态迁移、吊销；Newt-SFU 节点只讲 proto/owlsfu/v1 的
 	// gRPC 协议（Enroll + ControlService.Channel，默认外连 :9443），Media Token 验签
 	// 公钥经 Enroll/RegisterAck 下发。
 	admin := protected.Group("/admin/sfu", a.requireSystemAdmin())

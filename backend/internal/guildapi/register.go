@@ -13,7 +13,7 @@ package guildapi
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // Register 挂载服务器结构管理路由。group 为未认证的平面根组（/api/v1 或 /gapi/v1），
@@ -28,7 +28,7 @@ func Register(group *gin.RouterGroup, deps appdeps.Deps) error {
 	guilds.PATCH("", h.updateGuild)
 	guilds.DELETE("", h.deleteGuild)
 	guilds.POST("/transfer-ownership", h.transferOwnership)
-	// 服务器图标 / 横幅（Owl-Desktop docs 02 FR-13/§8-9）。
+	// 服务器图标 / 横幅（Newt-Desktop docs 02 FR-13/§8-9）。
 	guilds.POST("/icon", h.uploadGuildIcon)
 	guilds.DELETE("/icon", h.deleteGuildIcon)
 	guilds.POST("/banner", h.uploadGuildBanner)
@@ -50,13 +50,13 @@ func Register(group *gin.RouterGroup, deps appdeps.Deps) error {
 	guilds.GET("/permissions/@me", h.myGuildPermissions)
 	guilds.GET("/channels/:channelID/permissions/@me", h.myChannelPermissions)
 
-	// 顶级频道资源（PATCH/DELETE /channels/{cid}，Owl-Desktop docs 03 FR-09/FR-11）。
+	// 顶级频道资源（PATCH/DELETE /channels/{cid}，Newt-Desktop docs 03 FR-09/FR-11）。
 	authed.PATCH("/channels/:channelID", h.updateChannel)
 	authed.DELETE("/channels/:channelID", h.deleteChannel)
 	// 频道访问密码解锁（上锁频道访问消息/语音前调用）。
 	authed.POST("/channels/:channelID/unlock", h.unlockChannel)
 	authed.GET("/channels/:channelID/unlock-status", h.unlockStatus)
-	// 顶级频道权限覆盖与权限投影（Owl-Desktop docs 04 FR-15：客户端以频道为入口，
+	// 顶级频道权限覆盖与权限投影（Newt-Desktop docs 04 FR-15：客户端以频道为入口，
 	// 不强制携带 guildID）。语义与 guild 前缀版一致，额外要求调用者对频道可见
 	//（无 VIEW_CHANNEL 一律 404，防扫频）。
 	mountTopLevelOverwriteRoutes(authed, h)

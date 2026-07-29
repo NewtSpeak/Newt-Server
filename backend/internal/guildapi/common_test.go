@@ -5,9 +5,9 @@ package guildapi
 import (
 	"testing"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
 func normalCtx(highest int, bits rbac.Permission) *perms.GuildContext {

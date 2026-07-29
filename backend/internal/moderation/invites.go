@@ -9,11 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/audit"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
-	"github.com/owlspeak/owl-server/backend/internal/snapshot"
+	"github.com/newtspeak/newt-server/backend/internal/audit"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/snapshot"
 	"gorm.io/gorm"
 )
 
@@ -41,7 +41,7 @@ func newInviteCode() (string, error) {
 type createInviteRequest struct {
 	// TTLSeconds 邀请有效期（秒），可选；0 或缺省表示不过期。
 	TTLSeconds int `json:"ttl_seconds" binding:"omitempty,min=60,max=2592000"`
-	// MaxUses 最大使用次数，可选；0 或缺省表示不限次（docs Owl-Desktop 02 FR-15）。
+	// MaxUses 最大使用次数，可选；0 或缺省表示不限次（docs Newt-Desktop 02 FR-15）。
 	MaxUses int `json:"max_uses" binding:"omitempty,min=1,max=10000"`
 }
 
@@ -117,7 +117,7 @@ func ConsumeInviteUse(tx *gorm.DB, inviteID uuid.UUID) (bool, error) {
 }
 
 // inviteInfo GET /invites/{code}：登录用户预览邀请（服务器名称/图标占位/成员数，
-// docs Owl-Desktop 02 FR-08）。失效 404、超次 410，均不泄露服务器信息。
+// docs Newt-Desktop 02 FR-08）。失效 404、超次 410，均不泄露服务器信息。
 func (h *api) inviteInfo(c *gin.Context) {
 	invite, status := ResolveActiveInvite(h.deps.DB, c.Param("code"))
 	if status == http.StatusNotFound {
@@ -143,7 +143,7 @@ func (h *api) inviteInfo(c *gin.Context) {
 		"guild": gin.H{
 			"id":           guild.ID,
 			"name":         guild.Name,
-			"icon":         nil, // 图标占位：服务器图标上传未实现（Owl-Desktop docs 02 §8-9）
+			"icon":         nil, // 图标占位：服务器图标上传未实现（Newt-Desktop docs 02 §8-9）
 			"member_count": memberCount,
 		},
 	})

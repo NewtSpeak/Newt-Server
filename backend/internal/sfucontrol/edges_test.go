@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	owlsfuv1 "github.com/owlspeak/owl-server/backend/gen/owlsfu/v1"
+	owlsfuv1 "github.com/newtspeak/newt-server/backend/gen/owlsfu/v1"
 )
 
 func edgeUp(room string, epoch uint64, parent, child string) *owlsfuv1.EdgeStatus {

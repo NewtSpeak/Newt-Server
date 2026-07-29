@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/security"
 )
 
 // TestDbAuthenticatorRejectsCrossAudience 用户端 Gateway（aud=client）拒绝后台 token，

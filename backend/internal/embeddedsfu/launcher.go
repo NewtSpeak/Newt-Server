@@ -1,4 +1,4 @@
-// Package embeddedsfu 在 Owl-Server 启动时自动创建本机 SFU 占位并拉起 owl-sfu 子进程，
+// Package embeddedsfu 在 Newt-Server 启动时自动创建本机 SFU 占位并拉起 owl-sfu 子进程，
 // 纳入平台默认调度池，使用户无需单独启动/接入 SFU 即可语音通话。
 package embeddedsfu
 
@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/config"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
+	"github.com/newtspeak/newt-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/sfucontrol"
 	"gorm.io/gorm"
 )
 
@@ -402,7 +402,7 @@ func resolveBinary(log *slog.Logger, configured, workDir string) (string, error)
 	// 尝试从 monorepo 源码编译到 workDir/bin/owl-sfu。
 	src := findSFUModuleRoot()
 	if src == "" {
-		return "", fmt.Errorf("未找到 owl-sfu 可执行文件；请设置 EMBEDDED_SFU_BIN 或将 Owl-SFU 放在 monorepo 中")
+		return "", fmt.Errorf("未找到 owl-sfu 可执行文件；请设置 EMBEDDED_SFU_BIN 或将 Newt-SFU 放在 monorepo 中")
 	}
 	out := cached
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
@@ -431,10 +431,10 @@ func monorepoSFUBinCandidates() []string {
 		cur := root
 		for i := 0; i < 6; i++ {
 			out = append(out,
-				filepath.Join(cur, "Owl-SFU", "owl-sfu"),
-				filepath.Join(cur, "Owl-SFU", "bin", "owl-sfu"),
-				filepath.Join(cur, "..", "Owl-SFU", "owl-sfu"),
-				filepath.Join(cur, "..", "Owl-SFU", "bin", "owl-sfu"),
+				filepath.Join(cur, "Newt-SFU", "owl-sfu"),
+				filepath.Join(cur, "Newt-SFU", "bin", "owl-sfu"),
+				filepath.Join(cur, "..", "Newt-SFU", "owl-sfu"),
+				filepath.Join(cur, "..", "Newt-SFU", "bin", "owl-sfu"),
 			)
 			parent := filepath.Dir(cur)
 			if parent == cur {
@@ -455,11 +455,11 @@ func findSFUModuleRoot() string {
 	for _, root := range roots {
 		cur := root
 		for i := 0; i < 6; i++ {
-			candidate := filepath.Join(cur, "Owl-SFU")
+			candidate := filepath.Join(cur, "Newt-SFU")
 			if fileExists(filepath.Join(candidate, "go.mod")) && fileExists(filepath.Join(candidate, "cmd", "owl-sfu", "main.go")) {
 				return candidate
 			}
-			candidate = filepath.Join(cur, "..", "Owl-SFU")
+			candidate = filepath.Join(cur, "..", "Newt-SFU")
 			if abs, err := filepath.Abs(candidate); err == nil {
 				if fileExists(filepath.Join(abs, "go.mod")) && fileExists(filepath.Join(abs, "cmd", "owl-sfu", "main.go")) {
 					return abs

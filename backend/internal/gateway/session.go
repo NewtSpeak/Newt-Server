@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // dispatchRecord 回放缓冲中的单条 DISPATCH：序列号 + 已序列化帧（含 s）+ 入缓冲时间。

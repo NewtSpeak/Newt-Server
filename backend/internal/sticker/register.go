@@ -2,7 +2,7 @@ package sticker
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // Register 挂载后台平面（/api/v1）贴图 API + 系统管理员治理端点。

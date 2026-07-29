@@ -2,8 +2,8 @@ package main
 import (
   "bytes"; "fmt"; "io"; "net/http"; "os"; "time"
   "github.com/google/uuid"
-  "github.com/owlspeak/owl-server/backend/internal/security"
-  "github.com/owlspeak/owl-server/backend/internal/model"
+  "github.com/newtspeak/newt-server/backend/internal/security"
+  "github.com/newtspeak/newt-server/backend/internal/model"
   "gorm.io/driver/postgres"
   "gorm.io/gorm"
   "gorm.io/gorm/logger"

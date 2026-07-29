@@ -1,21 +1,21 @@
-# OwlSpeak Bot SDK（兼容镜像）
+# NewtSpeak Bot SDK（兼容镜像）
 
-> **权威源已迁至独立仓库：[OwlSpeak/OwlBotSdk](https://github.com/OwlSpeak/OwlBotSdk)**  
-> 本地路径（本机开发）：`/Users/suanshu/Documents/OwlBotSdk` 或 monorepo 外同级目录 `OwlBotSdk/`。
+> **权威源已迁至独立仓库：[NewtSpeak/NewtBotSdk](https://github.com/NewtSpeak/NewtBotSdk)**  
+> 本地路径（本机开发）：`/Users/suanshu/Documents/NewtBotSdk` 或 monorepo 外同级目录 `NewtBotSdk/`。
 
-本目录（`Owl-Server/sdk/`）仅作历史兼容与开发参考；新项目请直接依赖 **OwlBotSdk**：
+本目录（`Newt-Server/sdk/`）仅作历史兼容与开发参考；新项目请直接依赖 **NewtBotSdk**：
 
 | 语言 | 安装 |
 |------|------|
-| JavaScript | `npm install @owlspeak/bot-sdk` 或 `file:../OwlBotSdk/javascript` |
-| Go | `go get github.com/OwlSpeak/OwlBotSdk/go` |
-| Python | `pip install owlspeak-bot` 或 `pip install -e ../OwlBotSdk/python` |
-| Rust | `owlspeak-bot = { path = "../OwlBotSdk/rust" }` |
+| JavaScript | `npm install @newtspeak/bot-sdk` 或 `file:../NewtBotSdk/javascript` |
+| Go | `go get github.com/NewtSpeak/NewtBotSdk/go` |
+| Python | `pip install newtspeak-bot` 或 `pip install -e ../NewtBotSdk/python` |
+| Rust | `newtspeak-bot = { path = "../NewtBotSdk/rust" }` |
 
-完整协议、能力矩阵与四语言示例见 **OwlBotSdk** 仓库：
+完整协议、能力矩阵与四语言示例见 **NewtBotSdk** 仓库：
 
-- [OwlBotSdk README](https://github.com/OwlSpeak/OwlBotSdk)
-- [HTTP / Gateway API](https://github.com/OwlSpeak/OwlBotSdk/blob/main/docs/API.md)
+- [NewtBotSdk README](https://github.com/NewtSpeak/NewtBotSdk)
+- [HTTP / Gateway API](https://github.com/NewtSpeak/NewtBotSdk/blob/main/docs/API.md)
 
 
 ### 基础资源
@@ -137,7 +137,7 @@ gw.on("interaction", async (interaction) => {
 })
 ```
 
-完整协议（含各语言等价 API）见 OwlBotSdk 仓库 `docs/API.md` 的 Interactions 章节。
+完整协议（含各语言等价 API）见 NewtBotSdk 仓库 `docs/API.md` 的 Interactions 章节。
 
 ## 管理 API（后台 `/api/v1`，管理员 JWT）
 

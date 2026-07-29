@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // 心跳语义：节点每 10s 上报一次，连续 3 次未收到（30s）判定离线（docs 03 §5.1）。

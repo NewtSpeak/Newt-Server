@@ -3,7 +3,7 @@ package oauth
 import (
 	"strings"
 
-	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/security"
 )
 
 // 内置 scope（粗粒度 v1）。

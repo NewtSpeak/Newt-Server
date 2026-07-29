@@ -7,8 +7,8 @@ package adminpresence
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/voice"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/voice"
 )
 
 // Register 挂载系统管理员临场 API（/api/v1，仅 SystemAdmin），并把「隐身/审计」

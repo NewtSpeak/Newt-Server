@@ -1,4 +1,4 @@
-// Package userapi 用户账号自助端点（Owl-Desktop docs 01 / 16），双认证平面共享 handler
+// Package userapi 用户账号自助端点（Newt-Desktop docs 01 / 16），双认证平面共享 handler
 //（模式对齐 internal/guildapi）：
 //   - 后台（/api/v1，aud=admin）与用户端（/gapi/v1，aud=client）挂载同一套路由，
 //     认证中间件与当前用户读取取 deps.Auth / deps.CurrentUser（各平面注入自己的实现）；
@@ -24,8 +24,8 @@ package userapi
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/security"
 )
 
 // Register 挂载用户账号端点。group 为平面根组（/api/v1 或 /gapi/v1）。

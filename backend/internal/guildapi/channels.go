@@ -8,13 +8,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
-	"github.com/owlspeak/owl-server/backend/internal/security"
-	"github.com/owlspeak/owl-server/backend/internal/snapshot"
-	"github.com/owlspeak/owl-server/backend/internal/voice"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/snapshot"
+	"github.com/newtspeak/newt-server/backend/internal/voice"
 	"gorm.io/gorm"
 )
 
@@ -26,7 +26,7 @@ type createChannelRequest struct {
 	Type     model.ChannelType `json:"type" binding:"required,oneof=TEXT VOICE CATEGORY"`
 	Topic    string            `json:"topic" binding:"omitempty,max=1024"`
 	Position int               `json:"position" binding:"omitempty,gte=0"`
-	// ParentID 所属分类（Owl-Desktop docs 03 FR-03）：仅 TEXT/VOICE 可设，
+	// ParentID 所属分类（Newt-Desktop docs 03 FR-03）：仅 TEXT/VOICE 可设，
 	// 必须指向本服 CATEGORY 频道。
 	ParentID *uuid.UUID `json:"parent_id"`
 	// UserLimit 语音频道人数上限（docs 09 FR-40）：0=不限，1–99。
@@ -654,7 +654,7 @@ func (h *api) deleteChannel(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// channelPositionEntry 批量排序条目（Owl-Desktop docs 03 FR-12）。
+// channelPositionEntry 批量排序条目（Newt-Desktop docs 03 FR-12）。
 // ParentID：JSON null / 省略均表示根级（无分类）；分类频道强制 parent_id=null。
 // 客户端提交「受影响项」或「全量可见频道」均可；事务内原子写入。
 type channelPositionEntry struct {

@@ -1,16 +1,16 @@
-# Owl-Server
+# Newt-Server
 
-OwlSpeak **控制面**：业务权威状态、权限裁决、实时事件、SFU 调度与机器人开放平面。  
-媒体（音频/屏幕）**不经本服务中转**，由 [Owl-SFU](https://github.com/OwlSpeak/Owl-SFU) 负责。
+NewtSpeak **控制面**：业务权威状态、权限裁决、实时事件、SFU 调度与机器人开放平面。  
+媒体（音频/屏幕）**不经本服务中转**，由 [Newt-SFU](https://github.com/NewtSpeak/Newt-SFU) 负责。
 
 ```text
-Desktop / Web  ──REST + Gateway WS──►  Owl-Server  ──► PostgreSQL
+Desktop / Web  ──REST + Gateway WS──►  Newt-Server  ──► PostgreSQL
 Bot            ──/bot-api/v1────────►      │
 Agent (OAuth)  ──/gapi·/api─────────►      │
                                            │
                                      gRPC mTLS :9443
                                            ▲
-                                      Owl-SFU（主动外连）
+                                      Newt-SFU（主动外连）
 ```
 
 ## 功能
@@ -35,7 +35,7 @@ Agent (OAuth)  ──/gapi·/api─────────►      │
 ## 仓库结构
 
 ```text
-Owl-Server/
+Newt-Server/
 ├── backend/           # Go（Gin）主服务
 │   ├── cmd/server/    # 入口
 │   ├── internal/      # 域模块（auth/gateway/voice/botapi/…）
@@ -47,7 +47,7 @@ Owl-Server/
 │   └── 协议/          # Media Token、级联、热迁移等
 ├── deploy/signoz/     # 可观测示例
 ├── docker-compose.yml # 开发用 PostgreSQL
-└── sdk/               # 旧镜像；权威 SDK 见 OwlBotSdk
+└── sdk/               # 旧镜像；权威 SDK 见 NewtBotSdk
 ```
 
 ## 快速开始（开发）
@@ -88,16 +88,16 @@ APP_ENV=production DATABASE_URL=… JWT_SECRET=… ./bin/owl-server
 | [docs/deploy/server.md](./docs/deploy/server.md) | **生产部署** |
 | [docs/设计讨论/](./docs/设计讨论/) | 架构与产品定稿 |
 | [docs/协议/](./docs/协议/) | 媒体与控制协议 |
-| [OwlBotSdk](https://github.com/OwlSpeak/OwlBotSdk) | Bot 开放平面官方 SDK |
+| [NewtBotSdk](https://github.com/NewtSpeak/NewtBotSdk) | Bot 开放平面官方 SDK |
 
 ## 相关仓库
 
 | 仓库 | 关系 |
 |------|------|
-| [Owl-SFU](https://github.com/OwlSpeak/Owl-SFU) | 媒体节点；proto 源在本仓 |
-| [Owl-Desktop](https://github.com/OwlSpeak/Owl-Desktop) | 用户端 |
-| [OwlBotSdk](https://github.com/OwlSpeak/OwlBotSdk) | 官方 Bot SDK |
-| [Owl-Agent](https://github.com/OwlSpeak/Owl-Agent) | OAuth CLI / MCP |
+| [Newt-SFU](https://github.com/NewtSpeak/Newt-SFU) | 媒体节点；proto 源在本仓 |
+| [Newt-Desktop](https://github.com/NewtSpeak/Newt-Desktop) | 用户端 |
+| [NewtBotSdk](https://github.com/NewtSpeak/NewtBotSdk) | 官方 Bot SDK |
+| [Newt-Agent](https://github.com/NewtSpeak/Newt-Agent) | OAuth CLI / MCP |
 
 ## 许可证
 

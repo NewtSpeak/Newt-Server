@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/config"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
+	"github.com/newtspeak/newt-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/sfuctl"
 )
 
 // overloadConfig 过载检测与批量参数（docs 09 I.3–I.5，阈值可配）。

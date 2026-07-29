@@ -1,4 +1,4 @@
-# Owl-Server 发布：嵌入 SPA 的多平台二进制 → 本仓 Release + 同步到 OwlSpeak/OwlSpeak
+# Newt-Server 发布：嵌入 SPA 的多平台二进制 → 本仓 Release + 同步到 NewtSpeak/NewtSpeak
 name: Release
 
 on:
@@ -21,7 +21,7 @@ permissions:
 
 env:
   CGO_ENABLED: "0"
-  RELEASE_HUB_REPO: OwlSpeak/OwlSpeak
+  RELEASE_HUB_REPO: NewtSpeak/NewtSpeak
 
 jobs:
   resolve-version:
@@ -171,13 +171,13 @@ jobs:
           chmod +x scripts/ci/generate-release-notes.sh
           EXTRA=""
           if [ -f EXTRA_NOTES.md ]; then EXTRA=EXTRA_NOTES.md; fi
-          scripts/ci/generate-release-notes.sh "Owl-Server" "$EXTRA" | tee RELEASE_BODY.md
+          scripts/ci/generate-release-notes.sh "Newt-Server" "$EXTRA" | tee RELEASE_BODY.md
 
       - name: Create own-repo Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-version.outputs.tag }}
-          name: Owl-Server ${{ needs.resolve-version.outputs.tag }}
+          name: Newt-Server ${{ needs.resolve-version.outputs.tag }}
           body_path: RELEASE_BODY.md
           files: |
             release-assets/owl-server-*
@@ -187,13 +187,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync to OwlSpeak/OwlSpeak hub
+      - name: Sync to NewtSpeak/NewtSpeak hub
         env:
           RELEASE_HUB_TOKEN: ${{ secrets.RELEASE_HUB_TOKEN }}
           RELEASE_HUB_REPO: ${{ env.RELEASE_HUB_REPO }}
           TAG: ${{ needs.resolve-version.outputs.tag }}
-          COMPONENT_KEY: Owl-Server
-          COMPONENT_TITLE: Owl-Server（控制面）
+          COMPONENT_KEY: Newt-Server
+          COMPONENT_TITLE: Newt-Server（控制面）
           RELEASE_BODY_PATH: RELEASE_BODY.md
           ASSET_GLOBS: "release-assets/owl-server-* release-assets/SHA256SUMS-owl-server-*"
         run: |

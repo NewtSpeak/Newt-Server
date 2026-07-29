@@ -39,7 +39,7 @@ export function LoginForm({ className, ...props }: React.ComponentProps<"div">) 
 
   return <div className={cn("flex flex-col gap-6", className)} {...props}>
     <Card>
-      <CardHeader className="text-center"><CardTitle className="text-xl">欢迎回来</CardTitle><CardDescription>使用用户名或邮箱登录 OwlSpeak</CardDescription></CardHeader>
+      <CardHeader className="text-center"><CardTitle className="text-xl">欢迎回来</CardTitle><CardDescription>使用用户名或邮箱登录 NewtSpeak</CardDescription></CardHeader>
       <CardContent><form onSubmit={submit}><FieldGroup>
         <Field><FieldLabel htmlFor="identifier">用户名或邮箱</FieldLabel><Input id="identifier" name="identifier" autoComplete="username" placeholder="night-owl 或 owl@example.com" required /></Field>
         <Field><FieldLabel htmlFor="password">密码</FieldLabel><Input id="password" name="password" type="password" autoComplete="current-password" required /></Field>
@@ -47,6 +47,6 @@ export function LoginForm({ className, ...props }: React.ComponentProps<"div">) 
         <Field><Button type="submit" disabled={loading}>{loading ? "正在登录…" : "登录"}</Button>{registrationOpen && <FieldDescription className="text-center">首次部署？ <Link className="underline underline-offset-4" to="/signup">初始化系统管理员</Link></FieldDescription>}</Field>
       </FieldGroup></form></CardContent>
     </Card>
-    <FieldDescription className="px-6 text-center">登录即表示你同意遵守 OwlSpeak 社区规则。</FieldDescription>
+    <FieldDescription className="px-6 text-center">登录即表示你同意遵守 NewtSpeak 社区规则。</FieldDescription>
   </div>
 }

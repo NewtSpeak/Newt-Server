@@ -2,7 +2,7 @@
 // 除心跳外聚合两类独立提前信号源——级联邻居 EdgeDown 指控（BI.2 ①）与
 // 客户端/节点侧 ICE 失败上报（BI.2 ②）。组合规则（BI.3，阈值可配）：
 // ≥ MinSources 个独立信号源 + ≥ MinHeartbeatMisses 次心跳丢失 → 提前判死，
-// 无需等满 3 次心跳失败。判死权威仍仅 Owl-Server（BI.4），信号只是证据来源。
+// 无需等满 3 次心跳失败。判死权威仍仅 Newt-Server（BI.4），信号只是证据来源。
 package sfucontrol
 
 import (

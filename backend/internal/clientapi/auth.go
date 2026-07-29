@@ -9,12 +9,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/moderation"
-	"github.com/owlspeak/owl-server/backend/internal/platformadmin"
-	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
-	"github.com/owlspeak/owl-server/backend/internal/registrationinvite"
-	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/moderation"
+	"github.com/newtspeak/newt-server/backend/internal/platformadmin"
+	"github.com/newtspeak/newt-server/backend/internal/platformbadge"
+	"github.com/newtspeak/newt-server/backend/internal/registrationinvite"
+	"github.com/newtspeak/newt-server/backend/internal/security"
 	"gorm.io/gorm"
 )
 

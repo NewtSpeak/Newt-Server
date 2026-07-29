@@ -7,8 +7,8 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/audit"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/audit"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 func stateOf(log model.AuditLog) (before, after, detail map[string]any) {

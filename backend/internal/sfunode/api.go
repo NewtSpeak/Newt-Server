@@ -9,11 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
 // api REST 层：错误响应格式与 httpapi 一致 {"error":{"code","message"}}；
@@ -152,7 +152,7 @@ type topologyAggEdge struct {
 	RemoteIP     string  `json:"remote_ip,omitempty"`
 }
 
-// topologyServerInfo 拓扑图中的 Owl-Server 控制面节点（编排 / 租约 / 边下发）。
+// topologyServerInfo 拓扑图中的 Newt-Server 控制面节点（编排 / 租约 / 边下发）。
 type topologyServerInfo struct {
 	ID                 string `json:"id"`
 	DisplayName        string `json:"display_name"`
@@ -255,7 +255,7 @@ func (a *api) listTopology(c *gin.Context) {
 
 	serverInfo := topologyServerInfo{
 		ID:                 "owl-server",
-		DisplayName:        "Owl-Server",
+		DisplayName:        "Newt-Server",
 		Role:               "control_plane",
 		HTTPAddress:        a.deps.Cfg.Address,
 		SFUControlEndpoint: a.deps.Cfg.SFUControlPublicEndpoint,

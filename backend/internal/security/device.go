@@ -2,7 +2,7 @@ package security
 
 import "strings"
 
-// DeviceInfo 从 User-Agent 推断「设备名 / 平台」展示串（Owl-Desktop docs 01 FR-27
+// DeviceInfo 从 User-Agent 推断「设备名 / 平台」展示串（Newt-Desktop docs 01 FR-27
 // 会话列表设备元数据）。只做粗粒度识别，识别不出时回退原始 UA 截断。
 func DeviceInfo(userAgent string) (device, platform string) {
 	ua := strings.ToLower(userAgent)

@@ -1,4 +1,4 @@
-module github.com/owlspeak/owl-server/backend
+module github.com/newtspeak/newt-server/backend
 
 go 1.26.0
 

@@ -16,13 +16,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	owlsfuv1 "github.com/owlspeak/owl-server/backend/gen/owlsfu/v1"
-	"github.com/owlspeak/owl-server/backend/internal/config"
-	"github.com/owlspeak/owl-server/backend/internal/mediatoken"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
-	"github.com/owlspeak/owl-server/backend/internal/sfudeploy"
-	"github.com/owlspeak/owl-server/backend/internal/voice"
+	owlsfuv1 "github.com/newtspeak/newt-server/backend/gen/owlsfu/v1"
+	"github.com/newtspeak/newt-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/mediatoken"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/sfucontrol"
+	"github.com/newtspeak/newt-server/backend/internal/sfudeploy"
+	"github.com/newtspeak/newt-server/backend/internal/voice"
 )
 
 // SFUOptions SFU 配套子系统依赖（由 main 装配注入）。
@@ -277,7 +277,7 @@ func (a *API) listSfuTopology(c *gin.Context) {
 		GeneratedAt: time.Now().UTC(),
 		Server: sfuTopologyServerInfo{
 			ID:                 "owl-server",
-			DisplayName:        "Owl-Server",
+			DisplayName:        "Newt-Server",
 			Role:               "control_plane",
 			HTTPAddress:        httpAddr,
 			SFUControlEndpoint: controlEP,

@@ -8,10 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/platformbadge"
-	"github.com/owlspeak/owl-server/backend/internal/presence"
-	"github.com/owlspeak/owl-server/backend/internal/snapshot"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/platformbadge"
+	"github.com/newtspeak/newt-server/backend/internal/presence"
+	"github.com/newtspeak/newt-server/backend/internal/snapshot"
 )
 
 // options 协议时序与回放参数（单测缩短超时用；生产默认见 defaultOptions）。

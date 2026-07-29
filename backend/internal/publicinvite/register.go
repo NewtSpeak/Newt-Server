@@ -7,7 +7,7 @@ package publicinvite
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // RegisterAdmin 挂载后台管理侧邀请落地内容管理 API（/api/v1）：落地页配置、

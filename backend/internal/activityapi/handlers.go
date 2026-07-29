@@ -13,7 +13,7 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 type api struct {
@@ -151,7 +151,7 @@ func (h *api) lookupITunes(term, artist string) (coverURL, trackName, artistName
 	if err != nil {
 		return "", "", "", err
 	}
-	req.Header.Set("User-Agent", "OwlSpeak-ActivityCover/1.0")
+	req.Header.Set("User-Agent", "NewtSpeak-ActivityCover/1.0")
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return "", "", "", err

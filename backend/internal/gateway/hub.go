@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/presence"
-	"github.com/owlspeak/owl-server/backend/internal/snapshot"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/presence"
+	"github.com/newtspeak/newt-server/backend/internal/snapshot"
 )
 
 // directory 抽象 guild 成员、频道可见性与 READY 快照查询：生产走 PostgreSQL（见 store.go），

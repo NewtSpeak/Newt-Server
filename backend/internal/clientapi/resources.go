@@ -8,15 +8,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/audit"
-	"github.com/owlspeak/owl-server/backend/internal/cosmetics"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/guildapi"
-	"github.com/owlspeak/owl-server/backend/internal/guildseed"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/moderation"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/snapshot"
+	"github.com/newtspeak/newt-server/backend/internal/audit"
+	"github.com/newtspeak/newt-server/backend/internal/cosmetics"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/guildapi"
+	"github.com/newtspeak/newt-server/backend/internal/guildseed"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/moderation"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/snapshot"
 	"gorm.io/gorm"
 )
 
@@ -152,7 +152,7 @@ type memberSummary struct {
 }
 
 // listMembers GET /gapi/v1/guilds/{gid}/members：服务器成员列表（需本人是成员）。
-// 支持游标分页（Owl-Desktop docs 02 FR-24/FR-25 大服懒加载）：
+// 支持游标分页（Newt-Desktop docs 02 FR-24/FR-25 大服懒加载）：
 // ?limit=1..1000（缺省=全量，兼容旧客户端）、?after=<member_id>（按 created_at,id 游标）。
 // 附带用户全局资料（显示名/头像/横幅/签名），供成员列表与消息区渲染。
 func (h *api) listMembers(c *gin.Context) {

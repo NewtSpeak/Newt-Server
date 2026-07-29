@@ -75,7 +75,7 @@ type Config struct {
 	// EmbeddedSFU 是否在进程内自动创建占位并拉起本机 owl-sfu 子进程。
 	// development 默认 true；production 默认 false（可用 EMBEDDED_SFU=true 显式开启）。
 	EmbeddedSFU bool
-	// EmbeddedSFUBin owl-sfu 可执行文件路径；空则自动搜索 / 按需编译 monorepo 中的 Owl-SFU。
+	// EmbeddedSFUBin owl-sfu 可执行文件路径；空则自动搜索 / 按需编译 monorepo 中的 Newt-SFU。
 	EmbeddedSFUBin string
 	// EmbeddedSFUWSSListen 内嵌 SFU 信令监听（默认 :8445）。
 	EmbeddedSFUWSSListen string
@@ -114,7 +114,7 @@ func Load() (Config, error) {
 		DataDir:          env("DATA_DIR", "./data"),
 
 		// SFU_GRPC_ADDRESS 为规范名，SFU_CONTROL_ADDRESS 为兼容别名；
-		// 默认 :9443（与 Owl-SFU 默认 server_enroll_endpoint 对齐）。
+		// 默认 :9443（与 Newt-SFU 默认 server_enroll_endpoint 对齐）。
 		SFUControlAddress:        env("SFU_GRPC_ADDRESS", env("SFU_CONTROL_ADDRESS", ":9443")),
 		SFUControlPublicEndpoint: env("SFU_CONTROL_PUBLIC_ENDPOINT", "127.0.0.1:9443"),
 		SFUControlTLSSANs:        splitCSV(env("SFU_CONTROL_TLS_SANS", "localhost,127.0.0.1")),
@@ -155,7 +155,7 @@ func Load() (Config, error) {
 		SFUReleaseDir: os.Getenv("SFU_RELEASE_DIR"),
 	}
 	if cfg.DatabaseURL == "" {
-		return Config{}, fmt.Errorf("DATABASE_URL 不能为空，Owl-Server 仅支持 PostgreSQL")
+		return Config{}, fmt.Errorf("DATABASE_URL 不能为空，Newt-Server 仅支持 PostgreSQL")
 	}
 	if len(cfg.JWTSecret) < 32 {
 		return Config{}, fmt.Errorf("JWT_SECRET 至少需要 32 个字符")

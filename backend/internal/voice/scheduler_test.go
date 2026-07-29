@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
+	"github.com/newtspeak/newt-server/backend/internal/sfuctl"
 )
 
 func onlineNode(id uuid.UUID, region string, maxUsers, current int) sfuctl.NodeInfo {

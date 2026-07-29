@@ -93,7 +93,7 @@ export function DeployProgress({
   const logMeta = useMemo(() => {
     const stamp = deployment.created_at.replace(/[-:T]/g, "").slice(0, 15)
     const header = [
-      "# OwlSpeak SFU 部署日志",
+      "# NewtSpeak SFU 部署日志",
       `# 部署 ID    : ${deployment.id}`,
       `# 目标       : ${deployment.username}@${deployment.host}:${deployment.port}`,
       `# 节点       : ${displayName || "—"}${deployment.node_id ? ` (${deployment.node_id})` : ""}`,

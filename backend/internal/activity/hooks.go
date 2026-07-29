@@ -4,7 +4,7 @@ package activity
 // 单例未装配（如相关包单测）时静默忽略；bot 统一在此排除。
 
 import (
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // TrackMessage 用户成功发出一条消息（30s 限流内多条只计 1 条）。

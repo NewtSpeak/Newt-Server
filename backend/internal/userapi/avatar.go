@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // 头像存储：本地磁盘 DataDir/profile/（与 customization 专项的头像/横幅同目录同 URL 约定，

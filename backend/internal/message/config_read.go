@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // getUploadLimit GET /admin/guilds/{gid}/upload-limit：上传上限读回（系统管理员）。
@@ -34,7 +34,7 @@ func (s *service) getUploadLimit(c *gin.Context) {
 }
 
 // getUploadLimitForMember GET /guilds/{gid}/upload-limit：本服成员读取生效上限
-//（Owl-Desktop docs 07 FR-06/§8-1：客户端上传前置校验的数据源）。非成员 404。
+//（Newt-Desktop docs 07 FR-06/§8-1：客户端上传前置校验的数据源）。非成员 404。
 func (s *service) getUploadLimitForMember(c *gin.Context) {
 	ctx, ok := s.guildAccess(c)
 	if !ok {

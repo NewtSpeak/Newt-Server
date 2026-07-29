@@ -8,11 +8,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/activity"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
-	"github.com/owlspeak/owl-server/backend/internal/sticker"
+	"github.com/newtspeak/newt-server/backend/internal/activity"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/sticker"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -154,7 +154,7 @@ func (s *service) deleteReaction(c *gin.Context) {
 }
 
 // listReactionUsers GET /channels/{id}/messages/{mid}/reactions/{emoji}
-//（Owl-Desktop docs 05 FR-26：hover 反应胶囊查看反应者列表）。
+//（Newt-Desktop docs 05 FR-26：hover 反应胶囊查看反应者列表）。
 // 需 READ_MESSAGE_HISTORY；?limit=1..100（默认 100），按反应时间升序。
 func (s *service) listReactionUsers(c *gin.Context) {
 	channelID, ok := parseUUIDParam(c, "channelID")

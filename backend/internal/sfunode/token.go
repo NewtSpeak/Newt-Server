@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // DefaultEnrollmentTokenTTL enrollment token 默认有效期（docs 03 §4.2：15–60 分钟）。

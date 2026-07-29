@@ -2,7 +2,7 @@ package restriction
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // Register 注入真实 Service 实现、挂载 Restriction REST API 并启动过期扫描（docs 12）。

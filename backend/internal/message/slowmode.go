@@ -2,8 +2,8 @@ package message
 
 import (
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
 )
 
 // slowmodeExempt 判断当前成员是否持有频道配置的任一豁免角色。

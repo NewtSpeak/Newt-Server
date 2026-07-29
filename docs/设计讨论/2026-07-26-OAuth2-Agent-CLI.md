@@ -4,11 +4,11 @@
 |------|------|
 | 日期 | 2026-07-26 |
 | 状态 | 已落地 MVP |
-| 相关仓 | Owl-Server / Owl-Desktop / Owl-Agent |
+| 相关仓 | Newt-Server / Newt-Desktop / Newt-Agent |
 
 ## 摘要
 
-为 CLI 与 AI Agent 增加 OAuth2 **设备码**授权，签发独立受众 `aud=agent` 的用户委托令牌。授权 UI 仅在 **Owl-Desktop / 用户 Web**（`/oauth/device`），不进入管理台。
+为 CLI 与 AI Agent 增加 OAuth2 **设备码**授权，签发独立受众 `aud=agent` 的用户委托令牌。授权 UI 仅在 **Newt-Desktop / 用户 Web**（`/oauth/device`），不进入管理台。
 
 ## 端点
 
@@ -36,7 +36,7 @@
 | 深链 `owlspeak://oauth/*` | Tauri deep-link + 单实例聚焦 |
 | 设置 → 已授权应用 | 列出/吊销 agent grants（scope 标签） |
 
-### Owl-Agent 发布
+### Newt-Agent 发布
 
 - CI：`.github/workflows/ci.yml`（test + 多平台 artifact）
 - Release：tag `v*` → `.github/workflows/release.yml`
@@ -56,4 +56,4 @@
 ## 客户端
 
 - Desktop 路由：`/oauth/device`
-- CLI：`Owl-Agent` 仓 `owl login --server …`
+- CLI：`Newt-Agent` 仓 `owl login --server …`

@@ -1,4 +1,4 @@
-module github.com/owlspeak/owl-server/sdk/go
+module github.com/newtspeak/newt-server/sdk/go
 
 go 1.22
 

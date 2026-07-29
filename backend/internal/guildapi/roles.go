@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 	"gorm.io/gorm"
 )
 
@@ -51,7 +51,7 @@ type roleRequest struct {
 	Permissions int64  `json:"permissions"`
 	// position：自定义角色 ≥1；@everyone 固定 0（update 时允许 0，create 仍由 canGrant 拒绝 0 级）。
 	Position int `json:"position" binding:"gte=0"`
-	// 展示属性（Owl-Desktop docs 04 §8）：可选，缺省时保留原值（更新）或用零值（创建）。
+	// 展示属性（Newt-Desktop docs 04 §8）：可选，缺省时保留原值（更新）或用零值（创建）。
 	Color       *string `json:"color" binding:"omitempty,max=16"`
 	Hoist       *bool   `json:"hoist"`
 	Mentionable *bool   `json:"mentionable"`
@@ -201,7 +201,7 @@ type rolePositionEntry struct {
 }
 
 // reorderRoles PATCH /guilds/{gid}/roles（需 MANAGE_ROLES）：角色批量排序
-// （Owl-Desktop docs 04 §8：拖拽调整层级）。body 为 [{id, position}] 数组；
+// （Newt-Desktop docs 04 §8：拖拽调整层级）。body 为 [{id, position}] 数组；
 // @everyone（position=0）不可参与排序；每个被移动的角色必须处于调用者可管理
 // 层级内，且目标 position 不得超过自身最高角色（防自我提权）；事务整体生效，
 // 逐角色发 GUILD_ROLE_UPDATE。

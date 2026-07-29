@@ -2,7 +2,7 @@ package cosmetics
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // Register 后台平面：管理 CRUD + 用户端同源读接口（admin token）。

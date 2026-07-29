@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/security"
 )
 
 // newAuthTestRouter 只挂 requireAuth 的最小路由。db 传 nil：交叉受众的 token 在

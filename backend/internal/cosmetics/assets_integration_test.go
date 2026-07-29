@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // audioVisualSchema 视觉槽 + 音频槽（音频槽仅接受 audio 组）。

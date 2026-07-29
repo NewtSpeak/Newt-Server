@@ -1,7 +1,7 @@
-// Package main Owl-Server 控制面 API。
-// @title Owl-Server API
+// Package main Newt-Server 控制面 API。
+// @title Newt-Server API
 // @version 0.1.0
-// @description OwlSpeak 账号、Guild RBAC 与权限管理 API。
+// @description NewtSpeak 账号、Guild RBAC 与权限管理 API。
 // @BasePath /api/v1
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -20,22 +20,22 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/owlspeak/owl-server/backend/docs"
-	owlsfuv1 "github.com/owlspeak/owl-server/backend/gen/owlsfu/v1"
-	"github.com/owlspeak/owl-server/backend/internal/ca"
-	"github.com/owlspeak/owl-server/backend/internal/config"
-	"github.com/owlspeak/owl-server/backend/internal/database"
-	"github.com/owlspeak/owl-server/backend/internal/embeddedsfu"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/httpapi"
-	"github.com/owlspeak/owl-server/backend/internal/mediatoken"
-	"github.com/owlspeak/owl-server/backend/internal/observability"
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
-	"github.com/owlspeak/owl-server/backend/internal/server"
-	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
-	"github.com/owlspeak/owl-server/backend/internal/sfudeploy"
-	"github.com/owlspeak/owl-server/backend/internal/stage"
-	"github.com/owlspeak/owl-server/backend/internal/voice"
+	_ "github.com/newtspeak/newt-server/backend/docs"
+	owlsfuv1 "github.com/newtspeak/newt-server/backend/gen/owlsfu/v1"
+	"github.com/newtspeak/newt-server/backend/internal/ca"
+	"github.com/newtspeak/newt-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/database"
+	"github.com/newtspeak/newt-server/backend/internal/embeddedsfu"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/httpapi"
+	"github.com/newtspeak/newt-server/backend/internal/mediatoken"
+	"github.com/newtspeak/newt-server/backend/internal/observability"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/server"
+	"github.com/newtspeak/newt-server/backend/internal/sfucontrol"
+	"github.com/newtspeak/newt-server/backend/internal/sfudeploy"
+	"github.com/newtspeak/newt-server/backend/internal/stage"
+	"github.com/newtspeak/newt-server/backend/internal/voice"
 )
 
 func main() {

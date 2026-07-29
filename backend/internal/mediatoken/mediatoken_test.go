@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
 )
 
 func keyForKid(t *testing.T, manager *Manager, kid string) ed25519.PublicKey {

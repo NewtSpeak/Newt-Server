@@ -2,8 +2,8 @@
 # =============================================================================
 # 语音频道端到端联调脚本（单节点互听 + 管理员踢人计时）
 #
-# 链路：Owl-Server（gRPC 控制面 sfucontrol + voice 编排 + sfubridge 桥接）
-#       ←mTLS gRPC→ Owl-SFU（enroll → 控制通道 → WSS 信令 + UDPMux 媒体）
+# 链路：Newt-Server（gRPC 控制面 sfucontrol + voice 编排 + sfubridge 桥接）
+#       ←mTLS gRPC→ Newt-SFU（enroll → 控制通道 → WSS 信令 + UDPMux 媒体）
 #       ← WS/WebRTC → cmd/loadbot ×2（互发互收模拟 Opus RTP）
 #
 # 验收点：
@@ -13,13 +13,13 @@
 #   4. 管理员 POST /guilds/{gid}/voice/disconnect → SFU 会话关闭，计时（目标 P99 < 1s）
 #
 # 前置：本机 PostgreSQL（默认 postgres://owl:owl_dev_password@localhost:5432），
-#       Go 工具链，python3；Owl-SFU 仓与本仓平级（可用 SFU_DIR 覆盖）。
+#       Go 工具链，python3；Newt-SFU 仓与本仓平级（可用 SFU_DIR 覆盖）。
 # 每次运行新建独立数据库 owl_e2e_<时间戳>，不触碰既有库。
 # =============================================================================
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Owl-SFU}"
+SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Newt-SFU}"
 
 PG_ADMIN_URL="${PG_ADMIN_URL:-postgres://owl:owl_dev_password@localhost:5432/owl?sslmode=disable}"
 DB_NAME="owl_e2e_$(date +%s)"
@@ -71,9 +71,9 @@ echo "==> 编译 owl-server / owl-sfu / loadbot"
 (cd "$SFU_DIR" && go build -o "$WORK/owl-sfu" ./cmd/owl-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
 
 # -----------------------------------------------------------------------------
-# 1. 启动 Owl-Server（业务 API :18080 + SFU 控制面 gRPC :19443）
+# 1. 启动 Newt-Server（业务 API :18080 + SFU 控制面 gRPC :19443）
 # -----------------------------------------------------------------------------
-echo "==> 启动 Owl-Server"
+echo "==> 启动 Newt-Server"
 mkdir -p "$WORK/server-data"
 env \
   APP_ADDRESS=":${APP_PORT}" \

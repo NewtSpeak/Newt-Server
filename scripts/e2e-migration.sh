@@ -2,8 +2,8 @@
 # =============================================================================
 # M4 热迁移端到端联调脚本（叶死 / Drain / 根死切根，docs 09 + 08 §7.1）
 #
-# 链路：Owl-Server（迁移状态机 + 调度 + 级联编排 + Gateway）
-#       ←mTLS gRPC→ Owl-SFU ×2（MigrateParticipants MARK/EXECUTE + 双会话共存）
+# 链路：Newt-Server（迁移状态机 + 调度 + 级联编排 + Gateway）
+#       ←mTLS gRPC→ Newt-SFU ×2（MigrateParticipants MARK/EXECUTE + 双会话共存）
 #       ← Gateway WS / WebRTC → cmd/loadbot ×2（--server-url 模式：
 #          登录 → voice/join → Gateway 收 VOICE_MIGRATING/VOICE_SERVER_UPDATE
 #          → 双 PC 热切 → ack → 输出 mute_gap_ms）
@@ -23,7 +23,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Owl-SFU}"
+SFU_DIR="${SFU_DIR:-$(cd "$ROOT/.." && pwd)/Newt-SFU}"
 
 PG_ADMIN_URL="${PG_ADMIN_URL:-postgres://owl:owl_dev_password@127.0.0.1:5432/owl?sslmode=disable}"
 DB_NAME="owl_e2e_mig_$(date +%s)"
@@ -133,9 +133,9 @@ echo "==> 编译 owl-server / owl-sfu / loadbot"
 (cd "$SFU_DIR" && go build -o "$WORK/owl-sfu" ./cmd/owl-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
 
 # -----------------------------------------------------------------------------
-# 1. 启动 Owl-Server
+# 1. 启动 Newt-Server
 # -----------------------------------------------------------------------------
-echo "==> 启动 Owl-Server"
+echo "==> 启动 Newt-Server"
 mkdir -p "$WORK/server-data"
 env \
   APP_ADDRESS=":${APP_PORT}" \

@@ -48,7 +48,7 @@ type InviteNotice struct {
 type InvitePortalConfig struct {
 	ID int `gorm:"primaryKey" json:"-"`
 	// AppName 落地页展示的产品名。
-	AppName string `gorm:"size:64;not null;default:'OwlSpeak'" json:"app_name"`
+	AppName string `gorm:"size:64;not null;default:'NewtSpeak'" json:"app_name"`
 	// DeepLinkScheme 客户端自定义协议名（不含 ://），深链形如 owlspeak://invite?...
 	DeepLinkScheme string `gorm:"size:32;not null;default:'owlspeak'" json:"deep_link_scheme"`
 	WindowsURL     string `gorm:"size:512;not null;default:''" json:"windows_url"`

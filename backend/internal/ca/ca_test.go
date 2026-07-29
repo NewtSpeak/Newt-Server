@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
 )
 
 func newCSR(t *testing.T, commonName string) string {
@@ -41,7 +41,7 @@ func TestLoadPersistsAndReloads(t *testing.T) {
 	if first.CertPEM() != second.CertPEM() {
 		t.Fatal("重启后 CA 证书应保持一致")
 	}
-	if first.cert.Subject.CommonName != "OwlSpeak Cluster CA" {
+	if first.cert.Subject.CommonName != "NewtSpeak Cluster CA" {
 		t.Fatalf("CA CN 错误: %s", first.cert.Subject.CommonName)
 	}
 	if !first.cert.IsCA {

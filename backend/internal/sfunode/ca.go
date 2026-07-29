@@ -110,7 +110,7 @@ func (ca *ClusterCA) SignNodeCSR(csrPEM []byte, nodeID uuid.UUID) (certPEM []byt
 	spiffe := &url.URL{Scheme: "spiffe", Host: "owlspeak", Path: "/sfu/" + nodeID.String()}
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: nodeID.String(), Organization: []string{"OwlSpeak SFU Node"}},
+		Subject:      pkix.Name{CommonName: nodeID.String(), Organization: []string{"NewtSpeak SFU Node"}},
 		URIs:         []*url.URL{spiffe},
 		NotBefore:    now.Add(-5 * time.Minute),
 		NotAfter:     notAfter,
@@ -158,7 +158,7 @@ func generateCA(certPath, keyPath string) error {
 	now := time.Now().UTC()
 	template := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "OwlSpeak Cluster CA", Organization: []string{"OwlSpeak"}},
+		Subject:               pkix.Name{CommonName: "NewtSpeak Cluster CA", Organization: []string{"NewtSpeak"}},
 		NotBefore:             now.Add(-5 * time.Minute),
 		NotAfter:              now.Add(caCertTTL),
 		IsCA:                  true,
@@ -196,7 +196,7 @@ func (ca *ClusterCA) generateServerCert(certPath, keyPath string) error {
 	}
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "owl-server-control", Organization: []string{"OwlSpeak"}},
+		Subject:      pkix.Name{CommonName: "owl-server-control", Organization: []string{"NewtSpeak"}},
 		DNSNames:     dnsNames,
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 		NotBefore:    now.Add(-5 * time.Minute),

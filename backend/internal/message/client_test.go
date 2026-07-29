@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
 // TestTypingAllowed 打字指示权限纯逻辑：需 SEND_MESSAGES，与其他权限位无关。

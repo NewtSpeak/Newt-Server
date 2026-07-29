@@ -12,13 +12,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 )
 
 // leaveGuild 主动退出服务器 → GUILD_MEMBER_REMOVE（reason=leave）。
-// 所有者不可退出（Owl-Desktop docs 02 FR-10：需先转让所有权或删除服务器），
+// 所有者不可退出（Newt-Desktop docs 02 FR-10：需先转让所有权或删除服务器），
 // 返回 409（与所有权状态冲突，而非权限不足，客户端据此弹「转让/删服」引导）。
 func (h *api) leaveGuild(c *gin.Context) {
 	ctx, user, ok := h.guildCtx(c)

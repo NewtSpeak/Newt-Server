@@ -15,7 +15,7 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // RegisterClient 把语音编排的用户级端点挂到用户端认证平面（/gapi/v1，aud=client）。

@@ -4,11 +4,11 @@
 //   - 节点目录：SfuNode 表（静态属性 + 节点池表）+ sfucontrol.Registry 内存快照（实时在线/容量）；
 //   - 控制指令：经 Registry.SendCommand 走 proto/owlsfu/v1 的 Command（EnsureLogicalRoom /
 //     DisconnectUser / UpdateParticipantCaps / Drain / 级联指令），等待 CommandAck；
-//   - Owl-SFU M1 对级联/迁移指令按协议约定回 UNIMPLEMENTED，本桥视为非致命（记日志放行），
+//   - Newt-SFU M1 对级联/迁移指令按协议约定回 UNIMPLEMENTED，本桥视为非致命（记日志放行），
 //     M3/M4 实装后自然生效。
 //
 // 装配位置见 internal/server/server.go；本包取代 internal/sfunode 中基于自研 WSS
-// 控制通道的 directory/controller 实现（该协议与真实 Owl-SFU 不兼容，已停用）。
+// 控制通道的 directory/controller 实现（该协议与真实 Newt-SFU 不兼容，已停用）。
 package sfubridge
 
 import (
@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	owlsfuv1 "github.com/owlspeak/owl-server/backend/gen/owlsfu/v1"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/sfucontrol"
-	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
+	owlsfuv1 "github.com/newtspeak/newt-server/backend/gen/owlsfu/v1"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/sfucontrol"
+	"github.com/newtspeak/newt-server/backend/internal/sfuctl"
 	"gorm.io/gorm"
 )
 

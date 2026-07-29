@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	owlsfuv1 "github.com/owlspeak/owl-server/backend/gen/owlsfu/v1"
+	owlsfuv1 "github.com/newtspeak/newt-server/backend/gen/owlsfu/v1"
 )
 
 // edgeKey 唯一标识一条级联边（房间内 parent+child 唯一）。

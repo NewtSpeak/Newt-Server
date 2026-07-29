@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OwlSpeak SFU 节点自动部署 —— 阶段一：环境依赖与二进制。
+# NewtSpeak SFU 节点自动部署 —— 阶段一：环境依赖与二进制。
 # 幂等：可重复执行。裁剪自 deploy/prod/install.sh（去掉 docker/postgres/owl-server）。
 set -euo pipefail
 
@@ -74,9 +74,9 @@ mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/data/sfu"
 chmod 700 "$INSTALL_DIR/data/sfu"
 
 # ---- 与 Server 的连通性预检 ----
-log "检查与 Owl-Server 的连通性..."
+log "检查与 Newt-Server 的连通性..."
 curl -fsS --max-time 10 -o /dev/null {{.ServerHealthURL}} \
-  || err "无法访问 Owl-Server（{{.ServerHealthURL}}）。请确认 PUBLIC_BASE_URL 对该节点可达"
+  || err "无法访问 Newt-Server（{{.ServerHealthURL}}）。请确认 PUBLIC_BASE_URL 对该节点可达"
 if ! timeout 5 bash -c 'cat < /dev/null > /dev/tcp/{{.ControlHost}}/{{.ControlPort}}' 2>/dev/null; then
   warn "无法建立到控制面 {{.ControlHost}}:{{.ControlPort}} 的 TCP 连接，节点可能无法 enroll（请检查防火墙与 SFU_CONTROL_PUBLIC_ENDPOINT）"
 fi

@@ -1,4 +1,4 @@
-"""OwlSpeak Bot SDK（Python）。
+"""NewtSpeak Bot SDK（Python）。
 
 REST 部分仅依赖标准库；Gateway 实时事件需可选依赖 ``websockets``
 （``pip install owlspeak-bot[gateway]``）。
@@ -123,7 +123,7 @@ class Interaction:
 
 
 class OwlBotClient:
-    """OwlSpeak 机器人开放 API 客户端（同步 REST）。"""
+    """NewtSpeak 机器人开放 API 客户端（同步 REST）。"""
 
     def __init__(self, base_url: str, token: str, timeout: float = 15.0):
         if not base_url or not token:

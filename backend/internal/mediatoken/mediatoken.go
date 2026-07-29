@@ -13,7 +13,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
 )
 
 const secretName = "media_token_keys"

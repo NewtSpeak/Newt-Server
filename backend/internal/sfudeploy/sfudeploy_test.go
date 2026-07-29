@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
 )
 
 func TestCredentialRoundTrip(t *testing.T) {

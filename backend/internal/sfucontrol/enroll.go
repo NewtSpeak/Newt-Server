@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 var (

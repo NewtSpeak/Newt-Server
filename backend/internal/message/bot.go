@@ -2,7 +2,7 @@ package message
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // bot 开放平面（/bot-api/v1）挂载：复用后台/用户端同一套 handler，

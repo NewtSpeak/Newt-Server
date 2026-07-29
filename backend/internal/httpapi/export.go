@@ -2,7 +2,7 @@ package httpapi
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // AuthMiddleware 暴露登录校验中间件，供其他领域模块（voice/message/...）复用。

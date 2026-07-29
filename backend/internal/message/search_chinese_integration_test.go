@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/message"
+	"github.com/newtspeak/newt-server/backend/internal/message"
 )
 
 // searchHits 执行一次搜索并返回命中数；429（限流）返回 -1 由调用方重试。

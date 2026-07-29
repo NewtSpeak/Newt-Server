@@ -12,7 +12,7 @@ import (
 	"log"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // DisconnectChannelUsers 断开某频道内全部语音用户（频道删除联动）。

@@ -1,10 +1,10 @@
-# 生成到 Owl-Server backend：buf generate --template buf.gen.server.yaml
+# 生成到 Newt-Server backend：buf generate --template buf.gen.server.yaml
 version: v2
 managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/owlspeak/owl-server/backend/gen
+      value: github.com/newtspeak/newt-server/backend/gen
 plugins:
   - local: protoc-gen-go
     out: backend/gen

@@ -10,7 +10,7 @@
 | 热迁移（状态机 + Gateway 事件 + MigrateParticipants） | gRPC 指令 + Gateway JSON 事件 | [热迁移.md](./热迁移.md) |
 | 服务器外观资产（图标 + 多 Banner REST API + GUILD_UPDATE 载荷） | REST + Gateway JSON 事件 | [服务器外观资产.md](./服务器外观资产.md) |
 
-代码生成：仓库根 `buf generate --template buf.gen.server.yaml`（→ `backend/gen/`）与 `--template buf.gen.sfu.yaml`（→ `../Owl-SFU/gen/`）。
+代码生成：仓库根 `buf generate --template buf.gen.server.yaml`（→ `backend/gen/`）与 `--template buf.gen.sfu.yaml`（→ `../Newt-SFU/gen/`）。
 
 ---
 

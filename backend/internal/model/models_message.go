@@ -146,7 +146,7 @@ type Attachment struct {
 	Size       int64     `gorm:"not null" json:"size"`
 	// ObjectKey 存储层对象键；本地实现为 DataDir/attachments 下的相对路径，日后可平移到对象存储。
 	ObjectKey string `gorm:"size:255;not null" json:"-"`
-	// Width/Height 图片像素尺寸（Owl-Desktop docs 07 §8-5 UX-04 占位比例）：
+	// Width/Height 图片像素尺寸（Newt-Desktop docs 07 §8-5 UX-04 占位比例）：
 	// 上传完成时服务端解码探测（PNG/JPEG/GIF），非图片或解码失败为 0。
 	Width    int  `gorm:"not null;default:0" json:"width,omitempty"`
 	Height   int  `gorm:"not null;default:0" json:"height,omitempty"`

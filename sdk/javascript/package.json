@@ -1,7 +1,7 @@
 {
-  "name": "owlspeak-bot",
+  "name": "newtspeak-bot",
   "version": "0.1.0",
-  "description": "OwlSpeak 机器人开放平台官方 JavaScript SDK（零依赖，Node >= 21）",
+  "description": "NewtSpeak 机器人开放平台官方 JavaScript SDK（零依赖，Node >= 21）",
   "type": "module",
   "main": "index.js",
   "types": "index.d.ts",

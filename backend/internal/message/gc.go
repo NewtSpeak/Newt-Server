@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // 后台清理任务（docs 13 AT.8 / 上传时序注 / AW）：

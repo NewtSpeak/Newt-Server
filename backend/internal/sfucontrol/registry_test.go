@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	owlsfuv1 "github.com/owlspeak/owl-server/backend/gen/owlsfu/v1"
+	owlsfuv1 "github.com/newtspeak/newt-server/backend/gen/owlsfu/v1"
 )
 
 type fakeStream struct {

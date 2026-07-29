@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// ================= 入场语音包完整模型（Owl-Desktop docs 12、07 专项 5A）=================
+// ================= 入场语音包完整模型（Newt-Desktop docs 12、07 专项 5A）=================
 //
 // 服级单条 audio_url 配置（GuildVoicePackConfig，models_message.go）继续保留，
 // 作为「服级默认语音包」与触发场景/范围/开关的载体；本文件补充完整的包模型：

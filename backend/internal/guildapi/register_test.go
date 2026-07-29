@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
-	"github.com/owlspeak/owl-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/model"
 )
 
 // TestRegisterCompatibleWithExistingTree 冒烟：本包顶级 /channels/{cid} 路由

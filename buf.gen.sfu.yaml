@@ -1,14 +1,14 @@
-# 生成到 Owl-SFU：buf generate --template buf.gen.sfu.yaml
+# 生成到 Newt-SFU：buf generate --template buf.gen.sfu.yaml
 version: v2
 managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/owlspeak/owl-sfu/gen
+      value: github.com/newtspeak/newt-sfu/gen
 plugins:
   - local: protoc-gen-go
-    out: ../Owl-SFU/gen
+    out: ../Newt-SFU/gen
     opt: paths=source_relative
   - local: protoc-gen-go-grpc
-    out: ../Owl-SFU/gen
+    out: ../Newt-SFU/gen
     opt: paths=source_relative

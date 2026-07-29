@@ -1,4 +1,4 @@
-// Bot 消息卡片渲染（与 Owl-Desktop message-card 对齐，按控制台惯例简化）：
+// Bot 消息卡片渲染（与 Newt-Desktop message-card 对齐，按控制台惯例简化）：
 // title/description/color 色条/fields/thumbnail/image/footer + 按钮行（layoutButtonRows）。
 // buttons 支持外链（<a>，outline 样式 + 外链图标）与交互回调按钮三态
 // idle → pending(spinner) → acked/responded(√)；INTERACTION_ACK 由本组件订阅

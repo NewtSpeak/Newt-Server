@@ -17,7 +17,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/owlspeak/owl-server/backend/internal/secretstore"
+	"github.com/newtspeak/newt-server/backend/internal/secretstore"
 )
 
 const (
@@ -78,7 +78,7 @@ func generate() (*CA, error) {
 	now := time.Now().UTC()
 	template := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "OwlSpeak Cluster CA"},
+		Subject:               pkix.Name{CommonName: "NewtSpeak Cluster CA"},
 		NotBefore:             now.Add(-5 * time.Minute),
 		NotAfter:              now.Add(caValidity),
 		IsCA:                  true,

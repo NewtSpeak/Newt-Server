@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
 )
 
 func TestCategoryCreateAndSchemaValidation(t *testing.T) {

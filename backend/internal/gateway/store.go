@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/security"
-	"github.com/owlspeak/owl-server/backend/internal/snapshot"
-	"github.com/owlspeak/owl-server/backend/internal/social"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/security"
+	"github.com/newtspeak/newt-server/backend/internal/snapshot"
+	"github.com/newtspeak/newt-server/backend/internal/social"
 	"gorm.io/gorm"
 )
 

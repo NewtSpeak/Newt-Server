@@ -9,11 +9,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/config"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
 	"gorm.io/gorm"
 )
 
@@ -165,7 +165,7 @@ type attachmentView struct {
 	DownloadURL string `json:"download_url"`
 }
 
-// reactionSummary 消息响应中的反应聚合（Owl-Desktop docs 05 FR-26）：
+// reactionSummary 消息响应中的反应聚合（Newt-Desktop docs 05 FR-26）：
 // 每种 emoji 一条，count 为总数；me 仅在传入 viewer 时填充（REST 列表/单条），
 // Gateway 广播的 MESSAGE_CREATE/UPDATE 无 per-recipient viewer，省略 me，
 // 避免客户端把广播侧的 false 当成「我未反应」而清掉本地高亮。

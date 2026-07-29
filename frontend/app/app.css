@@ -66,7 +66,7 @@
     --accent: oklch(0.966 0.005 106.5);
     --accent-foreground: oklch(0.228 0.013 107.4);
     --destructive: oklch(0.577 0.245 27.325);
-    /* success：确认类交互按钮（bot 卡片 style=success 等），与 Owl-Desktop 同值 */
+    /* success：确认类交互按钮（bot 卡片 style=success 等），与 Newt-Desktop 同值 */
     --success: oklch(0.627 0.194 149.214);
     --success-foreground: oklch(0.985 0 0);
     --border: oklch(0.93 0.007 106.5);
@@ -348,7 +348,7 @@
   animation: owl-log-shimmer 1600ms linear infinite;
 }
 
-/* ---- bot 卡片交互按钮（设计文档 2026-07-26，对齐 Owl-Desktop） ---- */
+/* ---- bot 卡片交互按钮（设计文档 2026-07-26，对齐 Newt-Desktop） ---- */
 
 /* pending→acked/responded：spinner 原位换 check 的弹性 pop */
 @keyframes t-card-check-pop {

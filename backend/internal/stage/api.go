@@ -6,12 +6,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/audit"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
-	"github.com/owlspeak/owl-server/backend/internal/restriction"
+	"github.com/newtspeak/newt-server/backend/internal/audit"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/restriction"
 	"gorm.io/gorm/clause"
 )
 
@@ -306,7 +306,7 @@ func (h *handlers) cancelApply(c *gin.Context) {
 }
 
 // removeFromQueue DELETE /channels/:channelID/stage/queue/:userID
-//（Owl-Desktop docs 10 FR-15「移出队列」按钮）：管理员将他人移出麦序队列。
+//（Newt-Desktop docs 10 FR-15「移出队列」按钮）：管理员将他人移出麦序队列。
 // 需 STAGE_MANAGE_QUEUE 或 STAGE_BRING_UP；移除本人请走 DELETE /stage/apply。
 func (h *handlers) removeFromQueue(c *gin.Context) {
 	scope, ok := h.voiceChannelScope(c)

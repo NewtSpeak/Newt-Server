@@ -4,14 +4,14 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
-	"github.com/owlspeak/owl-server/backend/internal/mediatoken"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/perms"
-	"github.com/owlspeak/owl-server/backend/internal/rbac"
-	"github.com/owlspeak/owl-server/backend/internal/restriction"
-	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
-	"github.com/owlspeak/owl-server/backend/internal/stage"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/mediatoken"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/perms"
+	"github.com/newtspeak/newt-server/backend/internal/rbac"
+	"github.com/newtspeak/newt-server/backend/internal/restriction"
+	"github.com/newtspeak/newt-server/backend/internal/sfuctl"
+	"github.com/newtspeak/newt-server/backend/internal/stage"
 )
 
 // errCannotJoin 表示用户已不再具备停留在该语音频道的资格（无 VIEW/CONNECT 或被禁听）。

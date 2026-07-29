@@ -8,7 +8,7 @@ package voice
 //
 // 防误杀铁律：节点心跳新鲜（≤1 周期）时无论多少用户上报都绝不判死，只记录；
 // 心跳新鲜度以内存注册表实时值为准（sfuctl.NodeInfo.LastSeenAt），
-// 无心跳记录（零值）视为证据不足同样不判死。判死权威仅 Owl-Server（BI.4）。
+// 无心跳记录（零值）视为证据不足同样不判死。判死权威仅 Newt-Server（BI.4）。
 
 import (
 	"log"
@@ -18,8 +18,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/model"
-	"github.com/owlspeak/owl-server/backend/internal/sfuctl"
+	"github.com/newtspeak/newt-server/backend/internal/model"
+	"github.com/newtspeak/newt-server/backend/internal/sfuctl"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/owlspeak/owl-server/backend/internal/eventbus"
+	"github.com/newtspeak/newt-server/backend/internal/eventbus"
 )
 
 // 配置变更事件（实时同步专项）：服级/频道级配置改动即时推送给受影响成员，

@@ -12,7 +12,7 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/appdeps"
+	"github.com/newtspeak/newt-server/backend/internal/appdeps"
 )
 
 // RegisterBotPlane 把语音会话端点挂到 bot 开放平面。

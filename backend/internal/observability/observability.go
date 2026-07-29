@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/owlspeak/owl-server/backend/internal/config"
+	"github.com/newtspeak/newt-server/backend/internal/config"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -194,7 +194,7 @@ func StartMetricsServer(addr string) func(context.Context) error {
 // GinMiddleware 返回 HTTP 请求可观测中间件：otelgin 追踪 + http.server.duration 直方图
 //（按 method / route / status_code 维度）。未 Init 时全局 provider 为 no-op，开销可忽略。
 func GinMiddleware() []gin.HandlerFunc {
-	meter := otel.Meter("github.com/owlspeak/owl-server/backend/internal/observability")
+	meter := otel.Meter("github.com/newtspeak/newt-server/backend/internal/observability")
 	duration, err := meter.Float64Histogram(
 		"http.server.duration",
 		metric.WithUnit("s"),
