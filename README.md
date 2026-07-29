@@ -1,5 +1,7 @@
 # Newt-Server
 
+**Discord 风格自托管控制面**（开源 Discord / KOOK 替代方案 NewtSpeak 的服务端）。
+
 NewtSpeak **控制面**：业务权威状态、权限裁决、实时事件、SFU 调度与机器人开放平面。  
 媒体（音频/屏幕）**不经本服务中转**，由 [Newt-SFU](https://github.com/NewtSpeak/Newt-SFU) 负责。
 
