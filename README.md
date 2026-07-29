@@ -1,26 +1,104 @@
-# Newt-Server
+# Owl-Server
 
-Newt-Server 项目仓库。
+OwlSpeak **控制面**：业务权威状态、权限裁决、实时事件、SFU 调度与机器人开放平面。  
+媒体（音频/屏幕）**不经本服务中转**，由 [Owl-SFU](https://github.com/OwlSpeak/Owl-SFU) 负责。
 
-## 许可证 / License
+```text
+Desktop / Web  ──REST + Gateway WS──►  Owl-Server  ──► PostgreSQL
+Bot            ──/bot-api/v1────────►      │
+Agent (OAuth)  ──/gapi·/api─────────►      │
+                                           │
+                                     gRPC mTLS :9443
+                                           ▲
+                                      Owl-SFU（主动外连）
+```
 
-本项目采用**双重许可（Dual Licensing）**：
+## 功能
 
-| 场景 | 是否免费 | 说明 |
-|------|----------|------|
-| 个人 / 非商业用途 | ✅ 免费 | 可使用、修改；对外分发或网络提供修改版时须**强制开源** |
-| 商业用途 | ❌ 不允许免费商用 | 须另行购买商业许可 |
+| 域 | 能力 |
+|----|------|
+| **账号与安全** | 注册/登录、JWT、限流、OAuth2（设备码 / PKCE，供 Agent） |
+| **服务器 (Guild)** | 创建/加入/邀请、外观资产、默认频道、节点池 |
+| **频道** | 文本 / 语音 / 分类 / 舞台；排序、覆盖权限、密码房 |
+| **RBAC** | 角色、权限位、频道 Overwrite、层级；无权限频道 **404** |
+| **消息** | 收发、编辑、反应、附件、搜索、已读、慢速、卡片与流式（Bot） |
+| **治理** | 踢/封、Restriction、审计与可撤销操作、管理员在场 |
+| **语音调度** | Media Token 签发、进房/迁移/级联编排、过载策略 |
+| **社交** | 好友、隐私、私信/群、通知收件箱 |
+| **贴图** | 贴图包/库、服 ban |
+| **开放平台** | `/bot-api/v1` + Bot Gateway；控制台管理机器人与 token |
+| **平台管理** | system_admin：用户、注册开关、SFU 节点、全站审计 |
+| **管理 SPA** | 生产构建打进单一 `owl-server` 二进制 |
 
-详细条款：
+开发环境可 **`EMBEDDED_SFU=true`** 自动拉起本机 SFU；生产默认关闭，使用独立节点。
 
-- [`LICENSE`](./LICENSE) — 双重许可总说明
-- [`LICENSE-NONCOMMERCIAL.md`](./LICENSE-NONCOMMERCIAL.md) — 非商业免费许可（PolyForm Noncommercial 1.0.0 + 强制开源义务）
-- [`LICENSE-COMMERCIAL.md`](./LICENSE-COMMERCIAL.md) — 商业授权说明
+## 仓库结构
 
-> 说明：该许可为 **source-available（源码可见）** 模式，不是 OSI 定义下的“完全开源”（OSI 开源通常允许免费商用）。设计目标是：**个人可用、修改须开源、商用需付费**。
+```text
+Owl-Server/
+├── backend/           # Go（Gin）主服务
+│   ├── cmd/server/    # 入口
+│   ├── internal/      # 域模块（auth/gateway/voice/botapi/…）
+│   └── Makefile
+├── frontend/          # 管理后台 SPA（React Router + Bun）
+├── proto/             # SFU 控制面 protobuf（权威源）
+├── docs/
+│   ├── 设计讨论/      # 架构与定稿（编号越大越权威）
+│   └── 协议/          # Media Token、级联、热迁移等
+├── deploy/signoz/     # 可观测示例
+├── docker-compose.yml # 开发用 PostgreSQL
+└── sdk/               # 旧镜像；权威 SDK 见 OwlBotSdk
+```
 
-商业授权请提交 GitHub Issue，标题以 `[Commercial License]` 开头。
+## 快速开始（开发）
 
-## 仓库
+```bash
+# 依赖：Go、Bun、Docker、PostgreSQL
+cd backend
+cp .env.example .env   # 配置 DATABASE_URL、JWT_SECRET 等
+docker compose -f ../docker-compose.yml up -d postgres
+make dev               # 后端 Air + 前端开发服；浏览器 http://localhost:8080
+```
 
-- GitHub：https://github.com/NewtSpeak/Newt-Server
+- Swagger：`http://localhost:8080/swagger/index.html`  
+- 空库首次注册账号 → 系统管理员；之后关闭公开注册  
+
+生产构建：
+
+```bash
+cd backend && make build   # 前端进二进制 → bin/owl-server
+APP_ENV=production DATABASE_URL=… JWT_SECRET=… ./bin/owl-server
+```
+
+## API 平面
+
+| 前缀 | 调用方 | 认证 |
+|------|--------|------|
+| `/api/v1`、管理 SPA | 平台/服管 | 用户 JWT |
+| `/gapi/v1` | Desktop、Agent | 用户 JWT / OAuth access |
+| `/bot-api/v1` | 机器人 | `Authorization: Bot <token>` |
+| `/oauth/v1` | Agent / 第三方 | OAuth2 |
+| gRPC `:9443` | SFU | mTLS（Enrollment 后） |
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [backend/README.md](./backend/README.md) | 开发启动、环境变量、OTLP |
+| [docs/deploy/server.md](./docs/deploy/server.md) | **生产部署** |
+| [docs/设计讨论/](./docs/设计讨论/) | 架构与产品定稿 |
+| [docs/协议/](./docs/协议/) | 媒体与控制协议 |
+| [OwlBotSdk](https://github.com/OwlSpeak/OwlBotSdk) | Bot 开放平面官方 SDK |
+
+## 相关仓库
+
+| 仓库 | 关系 |
+|------|------|
+| [Owl-SFU](https://github.com/OwlSpeak/Owl-SFU) | 媒体节点；proto 源在本仓 |
+| [Owl-Desktop](https://github.com/OwlSpeak/Owl-Desktop) | 用户端 |
+| [OwlBotSdk](https://github.com/OwlSpeak/OwlBotSdk) | 官方 Bot SDK |
+| [Owl-Agent](https://github.com/OwlSpeak/Owl-Agent) | OAuth CLI / MCP |
+
+## 许可证
+
+双重许可（个人非商用免费 + 分发修改版须开源；商用需授权）。见 [`LICENSE`](./LICENSE)、[`LICENSE-NONCOMMERCIAL.md`](./LICENSE-NONCOMMERCIAL.md)、[`LICENSE-COMMERCIAL.md`](./LICENSE-COMMERCIAL.md)。
