@@ -1,9 +1,9 @@
-// Package owlbot 是 NewtSpeak 机器人开放平台的官方 Go SDK。
+// Package newtbot 是 NewtSpeak 机器人开放平台的官方 Go SDK。
 //
 // 认证：Authorization: Bot <token>；基础地址自动拼接 /bot-api/v1。
 // 语音媒体层可搭配 pion/webrtc 使用（Media Token 携带 bot=true claim，
 // 机器人在音频流参与者信令中带 is_bot 独立标记）。
-package owlbot
+package newtbot
 
 import (
 	"bytes"

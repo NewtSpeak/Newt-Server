@@ -1,4 +1,4 @@
-package owlbot
+package newtbot
 
 import (
 	"encoding/json"

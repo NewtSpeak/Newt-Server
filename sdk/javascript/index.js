@@ -2,16 +2,16 @@
 // 认证：Authorization: Bot <token>；基础地址默认 /bot-api/v1。
 
 /** SDK 统一错误：携带 HTTP 状态码与服务端错误码。 */
-export class OwlBotError extends Error {
+export class NewtBotError extends Error {
   constructor(status, code, message) {
     super(message || code || `请求失败（${status}）`)
-    this.name = "OwlBotError"
+    this.name = "NewtBotError"
     this.status = status
     this.code = code
   }
 }
 
-export class OwlBotClient {
+export class NewtBotClient {
   /**
    * @param {{ baseUrl: string, token: string }} options
    *   baseUrl 形如 https://newt.example.com（自动拼接 /bot-api/v1）
@@ -34,7 +34,7 @@ export class OwlBotClient {
     if (response.status === 204) return undefined
     const data = await response.json().catch(() => ({}))
     if (!response.ok) {
-      throw new OwlBotError(response.status, data?.error?.code, data?.error?.message)
+      throw new NewtBotError(response.status, data?.error?.code, data?.error?.message)
     }
     return data
   }

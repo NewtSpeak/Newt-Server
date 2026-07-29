@@ -16,10 +16,10 @@ import urllib.parse
 import urllib.request
 from typing import Any, AsyncIterator, Callable, Dict, Iterable, List, Optional
 
-__all__ = ["OwlBotClient", "OwlBotError", "MessageStream", "Interaction", "run_gateway"]
+__all__ = ["NewtBotClient", "NewtBotError", "MessageStream", "Interaction", "run_gateway"]
 
 
-class OwlBotError(Exception):
+class NewtBotError(Exception):
     """SDK 统一错误：携带 HTTP 状态码与服务端错误码。"""
 
     def __init__(self, status: int, code: Optional[str], message: Optional[str]):
@@ -31,7 +31,7 @@ class OwlBotError(Exception):
 class MessageStream:
     """流式消息句柄：append 追加分片、end 收束（可带终态卡片）。"""
 
-    def __init__(self, client: "OwlBotClient", channel_id: str, message: Dict[str, Any]):
+    def __init__(self, client: "NewtBotClient", channel_id: str, message: Dict[str, Any]):
         self._client = client
         self.channel_id = channel_id
         self.message = message
@@ -79,7 +79,7 @@ class Interaction:
     服务端错误：404（token 不符/非本 bot）、410 INTERACTION_EXPIRED、409 ALREADY_RESPONDED。
     """
 
-    def __init__(self, client: "OwlBotClient", payload: Dict[str, Any]):
+    def __init__(self, client: "NewtBotClient", payload: Dict[str, Any]):
         self._client = client
         self.raw = payload
         self.id = str(payload.get("id", ""))
@@ -122,7 +122,7 @@ class Interaction:
         return self._callback(body)
 
 
-class OwlBotClient:
+class NewtBotClient:
     """NewtSpeak 机器人开放 API 客户端（同步 REST）。"""
 
     def __init__(self, base_url: str, token: str, timeout: float = 15.0):
@@ -151,7 +151,7 @@ class OwlBotClient:
             except Exception:
                 payload = {}
             error = payload.get("error") or {}
-            raise OwlBotError(exc.code, error.get("code"), error.get("message")) from None
+            raise NewtBotError(exc.code, error.get("code"), error.get("message")) from None
 
     # ---------- 基础资源 ----------
 
@@ -477,7 +477,7 @@ class OwlBotClient:
 
 
 async def run_gateway(
-    client: OwlBotClient,
+    client: NewtBotClient,
     on_event: Callable[[str, Any], Any],
     *,
     reconnect: bool = True,

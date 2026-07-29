@@ -90,7 +90,7 @@ export class Interaction {
   updateMessage(options?: { content?: string; card?: Record<string, unknown> }): Promise<Message>
 }
 
-export class OwlBotError extends Error {
+export class NewtBotError extends Error {
   status: number
   code?: string
 }
@@ -149,7 +149,7 @@ export interface OverwriteOptions {
   deny?: number
 }
 
-export class OwlBotClient {
+export class NewtBotClient {
   constructor(options: { baseUrl: string; token: string })
   me(): Promise<{ bot: Record<string, unknown>; user: Record<string, unknown> }>
   guilds(): Promise<Array<Record<string, unknown>>>
