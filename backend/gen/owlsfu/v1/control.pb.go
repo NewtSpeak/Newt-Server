@@ -2168,7 +2168,7 @@ const file_owlsfu_v1_control_proto_rawDesc = "" +
 	"\x06cancel\x18\x02 \x01(\bR\x06cancel2Q\n" +
 	"\x0eControlService\x12?\n" +
 	"\aChannel\x12\x16.owlsfu.v1.NodeMessage\x1a\x18.owlsfu.v1.ServerMessage(\x010\x01B\xa1\x01\n" +
-	"\rcom.owlsfu.v1B\fControlProtoP\x01Z=github.com/newtspeak/newt-server/backend/gen/owlsfu/v1;owlsfuv1\xa2\x02\x03OXX\xaa\x02\tOwlsfu.V1\xca\x02\tOwlsfu\\V1\xe2\x02\x15Owlsfu\\V1\\GPBMetadata\xea\x02\n" +
+	"\rcom.owlsfu.v1B\fControlProtoP\x01Z=github.com/owlspeak/owl-server/backend/gen/owlsfu/v1;owlsfuv1\xa2\x02\x03OXX\xaa\x02\tOwlsfu.V1\xca\x02\tOwlsfu\\V1\xe2\x02\x15Owlsfu\\V1\\GPBMetadata\xea\x02\n" +
 	"Owlsfu::V1b\x06proto3"
 
 var (
