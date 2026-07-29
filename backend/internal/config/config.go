@@ -72,10 +72,10 @@ type Config struct {
 	MetricsAddress string
 
 	// ---- 内嵌本地 SFU（启动时自动拉起，减轻心智负担）----
-	// EmbeddedSFU 是否在进程内自动创建占位并拉起本机 owl-sfu 子进程。
+	// EmbeddedSFU 是否在进程内自动创建占位并拉起本机 newt-sfu 子进程。
 	// development 默认 true；production 默认 false（可用 EMBEDDED_SFU=true 显式开启）。
 	EmbeddedSFU bool
-	// EmbeddedSFUBin owl-sfu 可执行文件路径；空则自动搜索 / 按需编译 monorepo 中的 Newt-SFU。
+	// EmbeddedSFUBin newt-sfu 可执行文件路径；空则自动搜索 / 按需编译 monorepo 中的 Newt-SFU。
 	EmbeddedSFUBin string
 	// EmbeddedSFUWSSListen 内嵌 SFU 信令监听（默认 :8445）。
 	EmbeddedSFUWSSListen string
@@ -94,7 +94,7 @@ type Config struct {
 	StickerMaxFileBytes int64
 
 	// ---- SFU 远程升级（管理后台一键更新节点二进制）----
-	// SFUReleaseDir 本地发布目录：放置 owl-sfu-<version>-linux-amd64 等工件；
+	// SFUReleaseDir 本地发布目录：放置 newt-sfu-<version>-linux-amd64 等工件；
 	// 管理端可按版本号生成下载 URL（需配合 PUBLIC_BASE_URL 可达）。
 	// 默认 DATA_DIR/sfu-releases。
 	SFUReleaseDir string

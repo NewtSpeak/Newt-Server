@@ -28,7 +28,7 @@ Agent (OAuth)  ──/gapi·/api─────────►      │
 | **贴图** | 贴图包/库、服 ban |
 | **开放平台** | `/bot-api/v1` + Bot Gateway；控制台管理机器人与 token |
 | **平台管理** | system_admin：用户、注册开关、SFU 节点、全站审计 |
-| **管理 SPA** | 生产构建打进单一 `owl-server` 二进制 |
+| **管理 SPA** | 生产构建打进单一 `newt-server` 二进制 |
 
 开发环境可 **`EMBEDDED_SFU=true`** 自动拉起本机 SFU；生产默认关闭，使用独立节点。
 

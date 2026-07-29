@@ -21,7 +21,7 @@ import {
 import { cn } from "~/lib/utils"
 
 const POLL_MS = 2000
-const SERVER_NODE_ID = "owl-server"
+const SERVER_NODE_ID = "newt-server"
 
 type Point = { x: number; y: number }
 

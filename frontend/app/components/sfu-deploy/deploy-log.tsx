@@ -210,7 +210,7 @@ export function DeployLog({ lines, running, meta, compact, className, heightClas
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
-    anchor.download = meta?.filename ?? "owl-sfu-deploy.log"
+    anchor.download = meta?.filename ?? "newt-sfu-deploy.log"
     anchor.click()
     URL.revokeObjectURL(url)
   }, [lines, meta])

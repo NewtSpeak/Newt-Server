@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NewtSpeak SFU 节点自动部署 —— 阶段一：环境依赖与二进制。
-# 幂等：可重复执行。裁剪自 deploy/prod/install.sh（去掉 docker/postgres/owl-server）。
+# 幂等：可重复执行。裁剪自 deploy/prod/install.sh（去掉 docker/postgres/newt-server）。
 set -euo pipefail
 
 INSTALL_DIR={{.InstallDir}}
@@ -19,7 +19,7 @@ case "$(uname -m)" in
 esac
 log "系统 Linux/$ARCH"
 
-command -v systemctl >/dev/null 2>&1 || err "目标机没有 systemd，无法安装 owl-sfu 服务"
+command -v systemctl >/dev/null 2>&1 || err "目标机没有 systemd，无法安装 newt-sfu 服务"
 
 # ---- 已有安装检测 ----
 if [ -f "$INSTALL_DIR/newt-sfu.env" ]; then
@@ -28,7 +28,7 @@ if [ -f "$INSTALL_DIR/newt-sfu.env" ]; then
   warn "检测到已有安装（原 node_id=${OLD_NODE:-未知}），按要求强制重装；原节点记录需在面板手动清理"
 {{- else }}
   OLD_NODE=$(grep -oP '^NEWTSFU_NODE_ID=\K.*' "$INSTALL_DIR/newt-sfu.env" 2>/dev/null || true)
-  echo "[x] 目标机已安装 owl-sfu（node_id=${OLD_NODE:-未知}）。如需覆盖请勾选「强制重装」"
+  echo "[x] 目标机已安装 newt-sfu（node_id=${OLD_NODE:-未知}）。如需覆盖请勾选「强制重装」"
   exit 23
 {{- end }}
 fi
@@ -82,13 +82,13 @@ if ! timeout 5 bash -c 'cat < /dev/null > /dev/tcp/{{.ControlHost}}/{{.ControlPo
 fi
 
 # ---- 下载二进制 ----
-log "下载 owl-sfu（{{.ReleaseName}}）..."
+log "下载 newt-sfu（{{.ReleaseName}}）..."
 curl -fSL --retry 3 --retry-delay 2 --max-time 600 \
   -o "$INSTALL_DIR/bin/newt-sfu.new" "{{.BinaryURL}}" \
-  || err "下载 owl-sfu 失败：{{.BinaryURL}}"
+  || err "下载 newt-sfu 失败：{{.BinaryURL}}"
 {{- if .BinarySHA256 }}
 echo "{{.BinarySHA256}}  $INSTALL_DIR/bin/newt-sfu.new" | sha256sum -c - \
-  || err "owl-sfu 二进制 SHA-256 校验失败"
+  || err "newt-sfu 二进制 SHA-256 校验失败"
 log "SHA-256 校验通过"
 {{- end }}
 chmod +x "$INSTALL_DIR/bin/newt-sfu.new"

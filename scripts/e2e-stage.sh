@@ -17,7 +17,7 @@
 #   5. screen/start（占坑审批）→ refresh-token 携带 publish_screen → 重推视频轨
 #      → 对端（另一节点，经级联边）recv_video 增长；ScreenSlot RESERVED→ACTIVE
 #
-# 前置：本机 PostgreSQL（docker owl-server-postgres-1）、Go 工具链、python3、psql。
+# 前置：本机 PostgreSQL（docker newt-server-postgres-1）、Go 工具链、python3、psql。
 # 每次运行新建独立数据库 owl_e2e_stage_<时间戳>，不触碰既有库。
 # =============================================================================
 set -euo pipefail
@@ -116,9 +116,9 @@ wait_user_on_node() { # wait_user_on_node <user_id> <node_id> <超时秒> <描�
 echo "==> 创建数据库 $DB_NAME"
 psql "$PG_ADMIN_URL" -qc "CREATE DATABASE ${DB_NAME}"
 
-echo "==> 编译 owl-server / owl-sfu / loadbot"
-(cd "$ROOT/backend" && go build -o "$WORK/owl-server" ./cmd/server)
-(cd "$SFU_DIR" && go build -o "$WORK/owl-sfu" ./cmd/owl-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
+echo "==> 编译 newt-server / newt-sfu / loadbot"
+(cd "$ROOT/backend" && go build -o "$WORK/newt-server" ./cmd/server)
+(cd "$SFU_DIR" && go build -o "$WORK/newt-sfu" ./cmd/newt-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
 
 # -----------------------------------------------------------------------------
 # 1. 启动 Newt-Server
@@ -134,7 +134,7 @@ env \
   SFU_GRPC_ADDRESS=":${GRPC_PORT}" \
   SFU_CONTROL_PUBLIC_ENDPOINT="127.0.0.1:${GRPC_PORT}" \
   GIN_MODE=release \
-  "$WORK/owl-server" >"$WORK/server.log" 2>&1 &
+  "$WORK/newt-server" >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
 
 for i in $(seq 1 60); do
@@ -204,7 +204,7 @@ cascade_listen: "127.0.0.1:${cas}"
 advertise_cascade_endpoint: "127.0.0.1:${cas}"
 max_users: 100
 EOF
-  "$WORK/owl-sfu" --config "$WORK/sfu$idx-config.yaml" >"$WORK/sfu$idx.log" 2>&1 &
+  "$WORK/newt-sfu" --config "$WORK/sfu$idx-config.yaml" >"$WORK/sfu$idx.log" 2>&1 &
   eval "SFU${idx}_PID=$!"
   eval "NODE${idx}_ID=$node_id"
   echo "    node$idx=${node_id} (wss:$wss udp:$udp cascade:$cas)"

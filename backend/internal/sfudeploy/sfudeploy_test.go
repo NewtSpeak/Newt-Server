@@ -120,7 +120,7 @@ func TestSplitEndpoint(t *testing.T) {
 }
 
 func TestValidateURL(t *testing.T) {
-	if err := validateURL("url", "https://newt.example.com/sfu-releases/owl-sfu-1.0-linux-amd64"); err != nil {
+	if err := validateURL("url", "https://newt.example.com/sfu-releases/newt-sfu-1.0-linux-amd64"); err != nil {
 		t.Fatalf("合法 URL 被拒: %v", err)
 	}
 	for _, bad := range []string{"file:///etc/passwd", "https://a.com/x;rm -rf /", "not-a-url", "https://a.com/`id`"} {
@@ -133,8 +133,8 @@ func TestValidateURL(t *testing.T) {
 // 渲染出的脚本必须是合法 bash，且绝不能泄漏 token 到 set -x。
 func TestRenderScripts(t *testing.T) {
 	p1, err := renderPhase1(phase1Data{
-		InstallDir: installDir, SSHHost: "1.2.3.4", ReleaseName: "owl-sfu-1.0-linux-amd64",
-		BinaryURL: "https://newt.example.com/sfu-releases/owl-sfu-1.0-linux-amd64",
+		InstallDir: installDir, SSHHost: "1.2.3.4", ReleaseName: "newt-sfu-1.0-linux-amd64",
+		BinaryURL: "https://newt.example.com/sfu-releases/newt-sfu-1.0-linux-amd64",
 		BinarySHA256: strings.Repeat("a", 64), ServerHealthURL: "https://newt.example.com/healthz",
 		ControlHost: "newt.example.com", ControlPort: "9443", MediaUDPPort: 3478,
 		InstallCaddy: true, ConfigureUFW: true, Domain: "sfu.example.com",
@@ -163,7 +163,7 @@ func TestRenderScripts(t *testing.T) {
 	}
 	for _, want := range []string{
 		"PHASE2_OK", "NEWTSFU_NODE_ID=11111111-2222-3333-4444-555555555555",
-		"NEWTSFU_ENROLL_TOKEN=deadbeef", "chmod 600", "systemctl restart owl-sfu",
+		"NEWTSFU_ENROLL_TOKEN=deadbeef", "chmod 600", "systemctl restart newt-sfu",
 		"reverse_proxy 127.0.0.1:8443", "/healthz",
 	} {
 		if !strings.Contains(p2, want) {
@@ -181,10 +181,10 @@ func TestRenderScripts(t *testing.T) {
 
 func TestCheckArchMatch(t *testing.T) {
 	m := &Manager{}
-	if err := m.checkArchMatch("owl-sfu-1.0-linux-amd64", "amd64"); err != nil {
+	if err := m.checkArchMatch("newt-sfu-1.0-linux-amd64", "amd64"); err != nil {
 		t.Fatalf("架构一致却报错: %v", err)
 	}
-	if err := m.checkArchMatch("owl-sfu-1.0-linux-amd64", "arm64"); err == nil {
+	if err := m.checkArchMatch("newt-sfu-1.0-linux-amd64", "arm64"); err == nil {
 		t.Fatal("架构不匹配应报错")
 	}
 }

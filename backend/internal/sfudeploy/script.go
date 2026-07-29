@@ -31,7 +31,7 @@ const (
 var (
 	hostPattern    = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,255}$`)
 	domainPattern  = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$`)
-	releasePattern = regexp.MustCompile(`^owl-sfu-[A-Za-z0-9._-]+-(linux|darwin|windows)-(amd64|arm64)$`)
+	releasePattern = regexp.MustCompile(`^newt-sfu-[A-Za-z0-9._-]+-(linux|darwin|windows)-(amd64|arm64)$`)
 	pathPattern    = regexp.MustCompile(`^/[A-Za-z0-9._/-]{1,255}$`)
 )
 

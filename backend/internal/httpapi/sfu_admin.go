@@ -217,7 +217,7 @@ func (a *API) listSfuTopology(c *gin.Context) {
 		s := a.sfuNodeSummary(node)
 		summaries = append(summaries, s)
 		controlLinks = append(controlLinks, sfuTopologyControlLink{
-			ServerID: "owl-server",
+			ServerID: "newt-server",
 			NodeID:   node.ID.String(),
 			Up:       s.Online,
 			Kind:     "grpc_control",
@@ -276,7 +276,7 @@ func (a *API) listSfuTopology(c *gin.Context) {
 	c.JSON(http.StatusOK, sfuTopologyResponse{
 		GeneratedAt: time.Now().UTC(),
 		Server: sfuTopologyServerInfo{
-			ID:                 "owl-server",
+			ID:                 "newt-server",
 			DisplayName:        "Newt-Server",
 			Role:               "control_plane",
 			HTTPAddress:        httpAddr,
@@ -465,7 +465,7 @@ type updateSfuBinaryRequest struct {
 	// TargetVersion 目标版本号；若留空且使用本地发布目录，必须显式填写。
 	TargetVersion string `json:"target_version"`
 	// DownloadURL 二进制直链；为空时从 SFU_RELEASE_DIR 按
-	// owl-sfu-<version>-linux-amd64 查找并生成 /sfu-releases/... 链接。
+	// newt-sfu-<version>-linux-amd64 查找并生成 /sfu-releases/... 链接。
 	DownloadURL string `json:"download_url"`
 	// SHA256Hex 可选；本地发布文件会自动计算。
 	SHA256Hex string `json:"sha256_hex"`
@@ -620,7 +620,7 @@ func (a *API) updateSfuBinary(c *gin.Context) {
 	// 旧版 SFU 不认识 UpdateBinary 时会回 BAD_COMMAND：给出可操作提示。
 	if resp.ErrorCode == "BAD_COMMAND" || strings.Contains(strings.ToLower(resp.ErrorMessage), "unknown") {
 		resp.ErrorMessage = fmt.Sprintf(
-			"%s（节点当前版本 %q 可能过旧，不支持远程升级；请先手动替换该节点 owl-sfu 为含 UpdateBinary 的版本，再点升级。本机内嵌 SFU 请重编 data/embedded-sfu/bin/newt-sfu）",
+			"%s（节点当前版本 %q 可能过旧，不支持远程升级；请先手动替换该节点 newt-sfu 为含 UpdateBinary 的版本，再点升级。本机内嵌 SFU 请重编 data/embedded-sfu/bin/newt-sfu）",
 			resp.ErrorMessage, node.NodeVersion,
 		)
 	}
@@ -663,8 +663,8 @@ func (a *API) listSfuReleases(c *gin.Context) {
 		Size     int64  `json:"size"`
 		URL      string `json:"url"`
 	}
-	// 文件名约定：owl-sfu-<version>-<goos>-<goarch>
-	re := regexp.MustCompile(`^owl-sfu-(.+)-(linux|darwin|windows)-(amd64|arm64)$`)
+	// 文件名约定：newt-sfu-<version>-<goos>-<goarch>
+	re := regexp.MustCompile(`^newt-sfu-(.+)-(linux|darwin|windows)-(amd64|arm64)$`)
 	out := make([]release, 0)
 	base := a.publicBaseURL(c)
 	for _, e := range entries {
@@ -725,12 +725,12 @@ func (a *API) resolveLocalRelease(c *gin.Context, version, goos, goarch string) 
 		goos, goarch, name, path string
 	}
 	var matches []cand
-	prefix := "owl-sfu-" + version + "-"
+	prefix := "newt-sfu-" + version + "-"
 	entries, readErr := os.ReadDir(dir)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return "", "", "", "", fmt.Errorf("读取发布目录失败: %w", readErr)
 	}
-	re := regexp.MustCompile(`^owl-sfu-` + regexp.QuoteMeta(version) + `-(linux|darwin|windows)-(amd64|arm64)$`)
+	re := regexp.MustCompile(`^newt-sfu-` + regexp.QuoteMeta(version) + `-(linux|darwin|windows)-(amd64|arm64)$`)
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -780,7 +780,7 @@ func (a *API) resolveLocalRelease(c *gin.Context, version, goos, goarch string) 
 		}
 		if chosen == nil {
 			return "", "", "", "", fmt.Errorf(
-				"本地无版本 %s 的发布文件（目录 %s）。请放入 owl-sfu-%s-<goos>-<goarch>，例如本机用 owl-sfu-%s-%s-%s",
+				"本地无版本 %s 的发布文件（目录 %s）。请放入 newt-sfu-%s-<goos>-<goarch>，例如本机用 newt-sfu-%s-%s-%s",
 				version, dir, version, version, hostOS, hostArch,
 			)
 		}

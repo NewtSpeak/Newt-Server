@@ -106,7 +106,7 @@ export function DeployProgress({
     ]
       .filter(Boolean)
       .join("\n")
-    return { filename: `owl-sfu-deploy-${deployment.host}-${stamp}.log`, header }
+    return { filename: `newt-sfu-deploy-${deployment.host}-${stamp}.log`, header }
   }, [deployment, displayName])
 
   function downloadLog() {

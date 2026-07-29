@@ -57,7 +57,7 @@ func (h *adminHandlers) createGuildBot(c *gin.Context) {
 	botUser := model.User{
 		ID:           uuid.New(),
 		Username:     username,
-		Email:        strings.ToLower(username) + "@bots.owlspeak.internal",
+		Email:        strings.ToLower(username) + "@bots.newtspeak.internal",
 		PasswordHash: "!bot-no-password",
 		IsBot:        true,
 	}

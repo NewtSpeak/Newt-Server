@@ -110,7 +110,7 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Build owl-server
+      - name: Build newt-server
         working-directory: backend
         env:
           GOOS: ${{ matrix.goos }}
@@ -119,13 +119,13 @@ jobs:
         run: |
           test -f internal/web/dist/index.html
           mkdir -p dist
-          OUT="dist/owl-server-${VERSION}-${GOOS}-${GOARCH}"
+          OUT="dist/newt-server-${VERSION}-${GOOS}-${GOARCH}"
           go build -trimpath -ldflags "-s -w" -o "${OUT}" ./cmd/server
           sha256sum "${OUT}" | tee "${OUT}.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: owl-server-${{ needs.resolve-version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: newt-server-${{ needs.resolve-version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: backend/dist/*
           if-no-files-found: error
           retention-days: 14
@@ -143,7 +143,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
-          pattern: owl-server-*
+          pattern: newt-server-*
           merge-multiple: true
 
       - name: Prepare checksums
@@ -152,10 +152,10 @@ jobs:
           ls -lah
           {
             if ls *.sha256 >/dev/null 2>&1; then cat *.sha256
-            else sha256sum owl-server-*
+            else sha256sum newt-server-*
             fi
-          } > "SHA256SUMS-owl-server-${{ needs.resolve-version.outputs.version }}.txt"
-          cat "SHA256SUMS-owl-server-${{ needs.resolve-version.outputs.version }}.txt"
+          } > "SHA256SUMS-newt-server-${{ needs.resolve-version.outputs.version }}.txt"
+          cat "SHA256SUMS-newt-server-${{ needs.resolve-version.outputs.version }}.txt"
 
       - name: Write extra notes
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.extra_notes != '' }}
@@ -180,8 +180,8 @@ jobs:
           name: Newt-Server ${{ needs.resolve-version.outputs.tag }}
           body_path: RELEASE_BODY.md
           files: |
-            release-assets/owl-server-*
-            release-assets/SHA256SUMS-owl-server-*
+            release-assets/newt-server-*
+            release-assets/SHA256SUMS-newt-server-*
           fail_on_unmatched_files: true
           make_latest: true
         env:
@@ -195,7 +195,7 @@ jobs:
           COMPONENT_KEY: Newt-Server
           COMPONENT_TITLE: Newt-Server（控制面）
           RELEASE_BODY_PATH: RELEASE_BODY.md
-          ASSET_GLOBS: "release-assets/owl-server-* release-assets/SHA256SUMS-owl-server-*"
+          ASSET_GLOBS: "release-assets/newt-server-* release-assets/SHA256SUMS-newt-server-*"
         run: |
           chmod +x scripts/ci/sync-release-hub.sh
           scripts/ci/sync-release-hub.sh

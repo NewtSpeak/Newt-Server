@@ -247,7 +247,7 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 	}
 
 	// SFU 发布工件公开下载（节点 UpdateBinary 拉取）：仅暴露文件名，路径限制在 SFUReleaseDir。
-	// 文件名约定 owl-sfu-<version>-<goos>-<goarch>；生产建议前置鉴权/CDN。
+	// 文件名约定 newt-sfu-<version>-<goos>-<goarch>；生产建议前置鉴权/CDN。
 	// 测试/手工构造 Config 时可能未走 config.Load 默认值，空路径回落到 DataDir。
 	sfuReleaseDir := cfg.SFUReleaseDir
 	if sfuReleaseDir == "" {
@@ -266,8 +266,8 @@ func New(cfg config.Config, db *gorm.DB, bus *eventbus.Bus, sfu ...httpapi.SFUOp
 			c.Status(http.StatusNotFound)
 			return
 		}
-		// 仅允许 owl-sfu- 前缀，避免目录被用作通用静态文件站。
-		if !strings.HasPrefix(name, "owl-sfu-") {
+		// 仅允许 newt-sfu- 前缀，避免目录被用作通用静态文件站。
+		if !strings.HasPrefix(name, "newt-sfu-") {
 			c.Status(http.StatusNotFound)
 			return
 		}

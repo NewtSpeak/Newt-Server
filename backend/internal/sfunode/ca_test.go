@@ -81,7 +81,7 @@ func TestSignNodeCSRForcesNodeIdentity(t *testing.T) {
 	if cert.Subject.CommonName != nodeID.String() {
 		t.Fatalf("证书 CN 应为 node_id %s，实际 %s", nodeID, cert.Subject.CommonName)
 	}
-	wantURI := "spiffe://owlspeak/sfu/" + nodeID.String()
+	wantURI := "spiffe://newtspeak/sfu/" + nodeID.String()
 	if len(cert.URIs) != 1 || cert.URIs[0].String() != wantURI {
 		t.Fatalf("证书 URI SAN 应为 %s，实际 %v", wantURI, cert.URIs)
 	}

@@ -123,7 +123,7 @@ export default function VoiceDeployPage() {
             <PreflightChip data={preflight.data} onClick={() => setPreflightOpen(true)} />
           ) : undefined
         }
-        description="通过 SSH 在目标 Linux 服务器上安装 owl-sfu 并自动接入本 Server。"
+        description="通过 SSH 在目标 Linux 服务器上安装 newt-sfu 并自动接入本 Server。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {mode !== "form" && (

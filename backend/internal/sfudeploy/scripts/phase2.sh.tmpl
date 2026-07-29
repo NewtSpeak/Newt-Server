@@ -9,7 +9,7 @@ log()  { echo "[+] $*"; }
 warn() { echo "[!] $*"; }
 err()  { echo "[x] $*"; exit 1; }
 
-systemctl stop owl-sfu >/dev/null 2>&1 || true
+systemctl stop newt-sfu >/dev/null 2>&1 || true
 {{- if .ForceReinstall }}
 log "强制重装：清空节点身份目录（原证书作废，节点将重新 enroll）"
 rm -rf "$INSTALL_DIR/data/sfu"
@@ -71,8 +71,8 @@ log "已写入 /etc/systemd/system/newt-sfu.service"
 {{- if .InstallCaddy }}
 
 # ---- Caddy 反向代理（自动申请 Let's Encrypt 证书）----
-mkdir -p /etc/caddy/owlspeak.d
-cat > /etc/caddy/owlspeak.d/newt-sfu.caddy <<'NEWTSFU_CADDY_EOF'
+mkdir -p /etc/caddy/newtspeak.d
+cat > /etc/caddy/newtspeak.d/newt-sfu.caddy <<'NEWTSFU_CADDY_EOF'
 {{.Domain}} {
 	encode gzip zstd
 	reverse_proxy 127.0.0.1:{{.LocalWSSPort}} {
@@ -87,8 +87,8 @@ cat > /etc/caddy/owlspeak.d/newt-sfu.caddy <<'NEWTSFU_CADDY_EOF'
 }
 NEWTSFU_CADDY_EOF
 touch /etc/caddy/Caddyfile
-if ! grep -q 'owlspeak.d' /etc/caddy/Caddyfile 2>/dev/null; then
-  printf '\nimport /etc/caddy/owlspeak.d/*.caddy\n' >> /etc/caddy/Caddyfile
+if ! grep -q 'newtspeak.d' /etc/caddy/Caddyfile 2>/dev/null; then
+  printf '\nimport /etc/caddy/newtspeak.d/*.caddy\n' >> /etc/caddy/Caddyfile
 fi
 log "已写入 Caddy 站点 {{.Domain}} → 127.0.0.1:{{.LocalWSSPort}}"
 systemctl enable caddy >/dev/null 2>&1 || true
@@ -102,15 +102,15 @@ fi
 
 # ---- 启动 ----
 systemctl daemon-reload
-systemctl reset-failed owl-sfu >/dev/null 2>&1 || true
-systemctl enable owl-sfu >/dev/null 2>&1 || true
+systemctl reset-failed newt-sfu >/dev/null 2>&1 || true
+systemctl enable newt-sfu >/dev/null 2>&1 || true
 log "启动 newt-sfu..."
-systemctl restart owl-sfu
+systemctl restart newt-sfu
 
 HEALTHY=0
 for i in $(seq 1 20); do
   sleep 2
-  if ! systemctl is-active --quiet owl-sfu; then
+  if ! systemctl is-active --quiet newt-sfu; then
     continue
   fi
   if curl -fsS --max-time 3 "http://127.0.0.1:{{.LocalWSSPort}}/healthz" >/dev/null 2>&1; then
@@ -120,11 +120,11 @@ for i in $(seq 1 20); do
 done
 
 if [ "$HEALTHY" -ne 1 ]; then
-  warn "owl-sfu 健康检查未通过，最近日志："
-  journalctl -u owl-sfu -n 60 --no-pager || true
-  err "owl-sfu 启动失败或未在 40 秒内就绪"
+  warn "newt-sfu 健康检查未通过，最近日志："
+  journalctl -u newt-sfu -n 60 --no-pager || true
+  err "newt-sfu 启动失败或未在 40 秒内就绪"
 fi
-log "owl-sfu 已启动并通过本机健康检查"
+log "newt-sfu 已启动并通过本机健康检查"
 
 {{- if .InstallCaddy }}
 if curl -skI --max-time 8 "https://{{.Domain}}/healthz" >/dev/null 2>&1; then

@@ -133,7 +133,7 @@ func main() {
 	// 错开控制面冷启动，避免内嵌 SFU enroll 打到尚未监听的 gRPC。
 	time.Sleep(400 * time.Millisecond)
 
-	// 内嵌本地 SFU：开发环境默认开启，创建占位 + 拉起 owl-sfu 子进程 + 纳入平台默认池。
+	// 内嵌本地 SFU：开发环境默认开启，创建占位 + 拉起 newt-sfu 子进程 + 纳入平台默认池。
 	var embedded *embeddedsfu.Process
 	if cfg.EmbeddedSFU {
 		proc, err := embeddedsfu.Start(rootCtx, db, cfg)

@@ -65,7 +65,7 @@ func (m *TokenManager) AccessTokenWithClaims(userID uuid.UUID, audience, session
 	now := time.Now().UTC()
 	expiresAt := now.Add(m.accessTTL)
 	claims := Claims{RegisteredClaims: jwt.RegisteredClaims{
-		Subject: userID.String(), Issuer: "owl-server", ID: uuid.NewString(),
+		Subject: userID.String(), Issuer: "newt-server", ID: uuid.NewString(),
 		Audience: jwt.ClaimStrings{audience},
 		IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(expiresAt),
 	}, SessionID: sessionID, Scope: scope, ClientID: clientID}
@@ -89,7 +89,7 @@ func (m *TokenManager) ParseAccess(raw string) (ParsedAccess, error) {
 			return nil, errors.New("无效签名算法")
 		}
 		return m.secret, nil
-	}, jwt.WithIssuer("owl-server"), jwt.WithExpirationRequired())
+	}, jwt.WithIssuer("newt-server"), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
 		return ParsedAccess{}, errors.New("无效或已过期的访问令牌")
 	}
@@ -161,7 +161,7 @@ func (m *TokenManager) TokenSessionID(raw string) string {
 			return nil, errors.New("无效签名算法")
 		}
 		return m.secret, nil
-	}, jwt.WithIssuer("owl-server"), jwt.WithExpirationRequired())
+	}, jwt.WithIssuer("newt-server"), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
 		return ""
 	}
@@ -188,7 +188,7 @@ func (m *TokenManager) ParseAccessTokenWithAudience(raw, audience string) (uuid.
 			return nil, errors.New("无效签名算法")
 		}
 		return m.secret, nil
-	}, jwt.WithIssuer("owl-server"), jwt.WithExpirationRequired())
+	}, jwt.WithIssuer("newt-server"), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
 		return uuid.Nil, errors.New("无效或已过期的访问令牌")
 	}

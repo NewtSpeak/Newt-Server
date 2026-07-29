@@ -12,7 +12,7 @@ export type StepDef = { key: SfuDeploymentStep; label: string; hint: string }
 export const STEPS: StepDef[] = [
   { key: "CONNECTING", label: "连接服务器", hint: "建立 SSH 连接并校验主机指纹" },
   { key: "PRECHECK", label: "环境检查", hint: "确认系统架构、权限与到本 Server 的连通性" },
-  { key: "INSTALL_DEPS", label: "安装依赖与程序", hint: "安装系统依赖并下载 owl-sfu 二进制" },
+  { key: "INSTALL_DEPS", label: "安装依赖与程序", hint: "安装系统依赖并下载 newt-sfu 二进制" },
   { key: "CREATE_NODE", label: "签发接入凭证", hint: "创建节点占位并签发一次性 enrollment token" },
   { key: "CONFIGURE", label: "写入配置并启动", hint: "写 env 与 systemd 单元，启动服务" },
   { key: "WAIT_ONLINE", label: "等待节点上线", hint: "等待节点自行接入并建立控制通道" },
@@ -164,7 +164,7 @@ export function collectRisks(input: RiskInput): Risk[] {
     risks.push({
       key: "force_reinstall",
       tone: "danger",
-      text: "覆盖目标机上已有的 owl-sfu 安装与配置，原节点将被弃用且需在节点列表手动吊销",
+      text: "覆盖目标机上已有的 newt-sfu 安装与配置，原节点将被弃用且需在节点列表手动吊销",
     })
   }
   if (input.tlsMode === "none") {
@@ -272,8 +272,8 @@ export const DIAGNOSIS_RULES: DiagnosisRule[] = [
     ],
   },
   {
-    keywords: ["已安装 owl-sfu", "已安装", "newt-sfu.env"],
-    cause: "目标机上已经存在一份 owl-sfu 安装。",
+    keywords: ["已安装 newt-sfu", "已安装", "newt-sfu.env"],
+    cause: "目标机上已经存在一份 newt-sfu 安装。",
     actions: [
       "若要覆盖，在高级选项勾选「强制重装」后重试（原节点需手动吊销）",
       "若这台机器已在正常服务，请换一台目标机",
@@ -284,16 +284,16 @@ export const DIAGNOSIS_RULES: DiagnosisRule[] = [
     cause: "目标机的操作系统或 CPU 架构不受支持。",
     actions: [
       "自动部署仅支持 Linux（amd64 或 arm64）",
-      "若为 arm64 机器，确认发布目录中存在对应架构的 owl-sfu 工件",
+      "若为 arm64 机器，确认发布目录中存在对应架构的 newt-sfu 工件",
     ],
   },
   {
     step: "INSTALL_DEPS",
     keywords: ["下载", "curl", "404", "sha256", "校验"],
-    cause: "目标机无法下载 owl-sfu 二进制，或下载内容校验失败。",
+    cause: "目标机无法下载 newt-sfu 二进制，或下载内容校验失败。",
     actions: [
       "确认目标机能访问本 Server 的 PUBLIC_BASE_URL（可在目标机上手动 curl 验证）",
-      "检查发布目录中是否存在对应架构的 owl-sfu 工件",
+      "检查发布目录中是否存在对应架构的 newt-sfu 工件",
       "若走了代理或 CDN，确认未缓存到损坏的文件",
     ],
   },
@@ -309,7 +309,7 @@ export const DIAGNOSIS_RULES: DiagnosisRule[] = [
   {
     step: "CONFIGURE",
     keywords: ["systemd", "启动失败", "healthz"],
-    cause: "owl-sfu 服务已安装但未能正常启动。",
+    cause: "newt-sfu 服务已安装但未能正常启动。",
     actions: [
       "查看下方日志中的 journalctl 输出定位崩溃原因",
       "确认媒体 UDP 端口未被其他进程占用",
@@ -322,7 +322,7 @@ export const DIAGNOSIS_RULES: DiagnosisRule[] = [
     actions: [
       "确认 SFU_CONTROL_PUBLIC_ENDPOINT 是远程可达的公网地址，而不是回环地址",
       "检查目标机的出站防火墙是否放行到该地址的连接",
-      "在目标机执行 journalctl -u owl-sfu -n 100 查看 enroll 失败原因",
+      "在目标机执行 journalctl -u newt-sfu -n 100 查看 enroll 失败原因",
     ],
   },
 ]

@@ -72,7 +72,7 @@ SfuNode {
 |------|------|
 | **Cluster CA** | 仅 Server（或独立 vault）持有签发权；根/中间证书分发给 SFU 用于校验 Server |
 | **Server 证书** | 控制通道服务端身份；SAN 含控制面域名/内网名 |
-| **Node 证书** | 每个 SFU 一张；SAN/URI 含 `spiffe://owlspeak/sfu/<node_id>` 或 CN=`node_id` |
+| **Node 证书** | 每个 SFU 一张；SAN/URI 含 `spiffe://newtspeak/sfu/<node_id>` 或 CN=`node_id` |
 | **有效期** | 节点证书建议 30–90 天；支持续期；CA 更长 |
 
 ### 3.2 备选（小型自托管）

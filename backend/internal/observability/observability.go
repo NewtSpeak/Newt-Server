@@ -4,7 +4,7 @@
 // 环境变量：
 //   - OTEL_EXPORTER_OTLP_ENDPOINT：OTLP 接收端地址（如 http://127.0.0.1:4317）；为空则不启用导出
 //   - OTEL_EXPORTER_OTLP_PROTOCOL：grpc（默认）或 http/protobuf
-//   - OTEL_SERVICE_NAME：服务名，默认 owl-server
+//   - OTEL_SERVICE_NAME：服务名，默认 newt-server
 //   - OTLP_INSECURE：true 时强制明文连接（本地 SigNoz 常用）
 package observability
 
@@ -43,7 +43,7 @@ import (
 )
 
 // serviceName Init 后生效的服务名；GinMiddleware 与 slog 桥共用。
-var serviceName = "owl-server"
+var serviceName = "newt-server"
 
 // Init 初始化 OTLP 导出器与全局 provider（TracerProvider + MeterProvider + LoggerProvider），
 // 返回优雅关闭函数。未配置 OTEL_EXPORTER_OTLP_ENDPOINT 时保持 no-op。

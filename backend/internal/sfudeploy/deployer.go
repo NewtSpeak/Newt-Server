@@ -267,7 +267,7 @@ func (s *runState) execute(ctx context.Context, req Request) error {
 
 	// ---- INSTALL_DEPS（含二进制下载）----
 	s.setStep(model.SfuDeployStepInstallDeps)
-	s.logf("开始安装运行环境与下载 owl-sfu（%s）...", releaseName)
+	s.logf("开始安装运行环境与下载 newt-sfu（%s）...", releaseName)
 	phase1, err := renderPhase1(phase1Data{
 		InstallDir:      installDir,
 		SSHHost:         req.Target.Host,
@@ -368,13 +368,13 @@ func (s *runState) execute(ctx context.Context, req Request) error {
 	})
 	if err != nil {
 		s.disableRemoteService(client)
-		return fmt.Errorf("配置并启动 owl-sfu 失败: %w", err)
+		return fmt.Errorf("配置并启动 newt-sfu 失败: %w", err)
 	}
 	if !sawPhase2OK {
 		s.disableRemoteService(client)
-		return fmt.Errorf("owl-sfu 启动脚本未正常结束")
+		return fmt.Errorf("newt-sfu 启动脚本未正常结束")
 	}
-	s.logf("owl-sfu 已在目标机启动，等待其接入本 Server ...")
+	s.logf("newt-sfu 已在目标机启动，等待其接入本 Server ...")
 
 	// ---- WAIT_ONLINE ----
 	s.setStep(model.SfuDeployStepWaitOnline)
@@ -458,7 +458,7 @@ func (s *runState) waitOnline(ctx context.Context, nodeID uuid.UUID) error {
 		return fmt.Errorf("节点已 enroll 但控制通道未在 %.0f 秒内建立；请检查目标机到 %s 的出站连通性",
 			waitOnlineTimeout.Seconds(), s.manager.cfg.SFUControlPublicEndpoint)
 	}
-	return fmt.Errorf("节点未在 %.0f 秒内完成接入；请检查目标机 journalctl -u owl-sfu 日志与到控制面 %s 的连通性",
+	return fmt.Errorf("节点未在 %.0f 秒内完成接入；请检查目标机 journalctl -u newt-sfu 日志与到控制面 %s 的连通性",
 		waitOnlineTimeout.Seconds(), s.manager.cfg.SFUControlPublicEndpoint)
 }
 
@@ -466,12 +466,12 @@ func (s *runState) waitOnline(ctx context.Context, nodeID uuid.UUID) error {
 func (s *runState) disableRemoteService(client *Client) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := "systemctl disable --now owl-sfu"
+	cmd := "systemctl disable --now newt-sfu"
 	if client.useSudo {
 		cmd = "sudo -S -p '' " + cmd
 	}
 	if _, err := client.Run(ctx, cmd); err == nil {
-		s.logf("已停用目标机上启动失败的 owl-sfu 服务")
+		s.logf("已停用目标机上启动失败的 newt-sfu 服务")
 	}
 }
 
@@ -616,7 +616,7 @@ func pickDefaultRelease(dir string) (string, error) {
 		}
 	}
 	if best == "" {
-		return "", fmt.Errorf("发布目录 %s 中没有 linux 平台的 owl-sfu 工件；请先构建并放入（文件名如 owl-sfu-0.1.0-linux-amd64）", dir)
+		return "", fmt.Errorf("发布目录 %s 中没有 linux 平台的 newt-sfu 工件；请先构建并放入（文件名如 newt-sfu-0.1.0-linux-amd64）", dir)
 	}
 	return best, nil
 }

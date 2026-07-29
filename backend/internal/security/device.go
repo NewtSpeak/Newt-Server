@@ -9,7 +9,7 @@ func DeviceInfo(userAgent string) (device, platform string) {
 	switch {
 	case ua == "":
 		return "未知设备", "unknown"
-	case strings.Contains(ua, "owl-desktop") || strings.Contains(ua, "tauri"):
+	case strings.Contains(ua, "newt-desktop") || strings.Contains(ua, "tauri"):
 		device = "Owl 桌面客户端"
 	case strings.Contains(ua, "electron"):
 		device = "桌面应用"

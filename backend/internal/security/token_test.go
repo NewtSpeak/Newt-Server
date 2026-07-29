@@ -64,7 +64,7 @@ func TestLegacyTokenWithoutAudience(t *testing.T) {
 	now := time.Now().UTC()
 	// 按旧版 AccessToken 的 claims 结构手工签发（无 Audience 字段）。
 	legacy := Claims{RegisteredClaims: jwt.RegisteredClaims{
-		Subject: userID.String(), Issuer: "owl-server", ID: uuid.NewString(),
+		Subject: userID.String(), Issuer: "newt-server", ID: uuid.NewString(),
 		IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(time.Minute)),
 	}}
 	raw, err := jwt.NewWithClaims(jwt.SigningMethodHS256, legacy).SignedString([]byte(testSecret))

@@ -16,7 +16,7 @@ import (
 
 const authCodeTTL = 5 * time.Minute
 
-// 允许的 redirect_uri：仅 loopback 与 owlspeak 深链（public client）。
+// 允许的 redirect_uri：仅 loopback 与 newtspeak 深链（public client）。
 func allowedRedirectURI(uri string) bool {
 	u, err := url.Parse(uri)
 	if err != nil || u.Scheme == "" {

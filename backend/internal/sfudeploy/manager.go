@@ -102,7 +102,7 @@ func (m *Manager) PreflightReport() PreflightReport {
 	case baseURL == "":
 		download.Status = "error"
 		download.Detail = "未配置"
-		download.Hint = "目标节点需要通过 PUBLIC_BASE_URL 下载 owl-sfu 二进制，请先设置该环境变量。"
+		download.Hint = "目标节点需要通过 PUBLIC_BASE_URL 下载 newt-sfu 二进制，请先设置该环境变量。"
 	case strings.Contains(baseURL, "127.0.0.1"), strings.Contains(baseURL, "localhost"):
 		download.Status = "error"
 		download.Hint = "当前是回环地址，远程服务器无法访问；请改为本 Server 的公网地址。"
@@ -128,7 +128,7 @@ func (m *Manager) PreflightReport() PreflightReport {
 	if linux == 0 {
 		releases.Status = "error"
 		releases.Detail = "无"
-		releases.Hint = fmt.Sprintf("发布目录 %s 中没有 linux 平台的 owl-sfu 工件，请先构建并放入（文件名如 owl-sfu-0.1.0-linux-amd64）。", m.cfg.SFUReleaseDir)
+		releases.Hint = fmt.Sprintf("发布目录 %s 中没有 linux 平台的 newt-sfu 工件，请先构建并放入（文件名如 newt-sfu-0.1.0-linux-amd64）。", m.cfg.SFUReleaseDir)
 	} else {
 		releases.Detail = fmt.Sprintf("%d 个（%s）", linux, strings.Join(arches, " / "))
 	}

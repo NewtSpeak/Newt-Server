@@ -74,7 +74,7 @@ export function SfuDeployDialog({ open, onOpenChange, resumeDeploymentID, onNode
             <DialogHeader>
               <DialogTitle>自动部署到服务器</DialogTitle>
               <DialogDescription>
-                通过 SSH 在目标 Linux 服务器上自动安装 owl-sfu，并让它自动接入本 Server。
+                通过 SSH 在目标 Linux 服务器上自动安装 newt-sfu，并让它自动接入本 Server。
               </DialogDescription>
             </DialogHeader>
             <DeployWizard

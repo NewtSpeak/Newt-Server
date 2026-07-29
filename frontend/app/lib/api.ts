@@ -484,7 +484,7 @@ export const getSfuTopology = () =>
   api<RawSfuTopology>("/admin/sfu/topology").then((raw): SfuTopology => ({
     generated_at: raw.generated_at,
     server: raw.server ?? {
-      id: "owl-server",
+      id: "newt-server",
       display_name: "Newt-Server",
       role: "control_plane",
       online: true,

@@ -59,7 +59,7 @@ func (h *adminHandlers) createBot(c *gin.Context) {
 	botUser := model.User{
 		ID:       uuid.New(),
 		Username: username,
-		Email:    strings.ToLower(username) + "@bots.owlspeak.internal",
+		Email:    strings.ToLower(username) + "@bots.newtspeak.internal",
 		// bot 不走密码登录：占位哈希对任何输入校验失败（bcrypt 格式不匹配）。
 		PasswordHash: "!bot-no-password",
 		IsBot:        true,

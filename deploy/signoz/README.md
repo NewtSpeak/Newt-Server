@@ -27,13 +27,13 @@ docker compose up -d
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
 # grpc（默认）或 http/protobuf（对应 4318 端口）
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-# 上报服务名，默认 owl-server
-OTEL_SERVICE_NAME=owl-server
+# 上报服务名，默认 newt-server
+OTEL_SERVICE_NAME=newt-server
 # 本地 SigNoz 无 TLS，强制明文连接
 OTLP_INSECURE=true
 ```
 
-重启 owl-server 后，SigNoz 中可看到：
+重启 newt-server 后，SigNoz 中可看到：
 
 | 信号 | 内容 |
 | --- | --- |

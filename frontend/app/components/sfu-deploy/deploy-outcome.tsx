@@ -186,7 +186,7 @@ export function DeployOutcome({
             <p className="font-medium">部署已取消</p>
             <p className="mt-1 text-sm text-muted-foreground">
               目标服务器上可能残留半成品配置，建议登录后检查 <code className="rounded bg-muted px-1">/opt/newtspeak</code>{" "}
-              与 owl-sfu 服务状态。
+              与 newt-sfu 服务状态。
             </p>
           </div>
         </div>

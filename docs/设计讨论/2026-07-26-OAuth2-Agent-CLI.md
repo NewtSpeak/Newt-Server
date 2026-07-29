@@ -56,4 +56,4 @@
 ## 客户端
 
 - Desktop 路由：`/oauth/device`
-- CLI：`Newt-Agent` 仓 `owl login --server …`
+- CLI：`Newt-Agent` 仓 `newt login --server …`

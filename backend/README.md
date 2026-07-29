@@ -12,7 +12,7 @@ make dev
 
 `make dev` 同时启动 React Router（Bun）与 Air。浏览器访问 `http://localhost:8080/`，Gin 会代理前端开发端口；Swagger UI 位于 `http://localhost:8080/swagger/index.html`。
 
-开发环境默认 **自动拉起本机 SFU**（`EMBEDDED_SFU=true`）：创建「本地内嵌 SFU」节点占位、编译/查找 `owl-sfu`、完成 enrollment，并设为平台默认调度池。无需再单独启动 Newt-SFU。日志与证书目录在 `DATA_DIR/embedded-sfu/`。生产环境默认关闭，需要时设置 `EMBEDDED_SFU=true`。
+开发环境默认 **自动拉起本机 SFU**（`EMBEDDED_SFU=true`）：创建「本地内嵌 SFU」节点占位、编译/查找 `newt-sfu`、完成 enrollment，并设为平台默认调度池。无需再单独启动 Newt-SFU。日志与证书目录在 `DATA_DIR/embedded-sfu/`。生产环境默认关闭，需要时设置 `EMBEDDED_SFU=true`。
 
 也可以在仓库根目录直接执行 `air`，此时只启动后端热重载；根目录 `.air.toml` 会将监听范围限制在 `backend`，不会扫描 `frontend/node_modules`。
 
@@ -38,13 +38,13 @@ make build
 | --- | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 空（不启用） | OTLP 接收端地址，如 `http://127.0.0.1:4317` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` 或 `http/protobuf` |
-| `OTEL_SERVICE_NAME` | `owl-server` | 上报的服务名 |
+| `OTEL_SERVICE_NAME` | `newt-server` | 上报的服务名 |
 | `OTLP_INSECURE` | `false` | `true` 时强制明文连接（本地 SigNoz 常用） |
 | `AUDIT_RETENTION_DAYS` | `0`（永久） | 审计日志保留天数，>0 时每小时清理过期记录 |
 | `AUDIT_INGEST_TOKEN` | 开发环境自动派生 / 生产必填才开启 | SFU 上传音频审计录音的共享密钥；经 RegisterAck 下发 |
 | `PUBLIC_BASE_URL` | 开发默认 `http://127.0.0.1{APP_ADDRESS}` | 对外根地址；用于邀请链接与 SFU 审计上传 URL |
-| `EMBEDDED_SFU` | development 默认 `true` / production 默认 `false` | 启动时自动创建本机 SFU 占位并拉起 `owl-sfu` 子进程 |
-| `EMBEDDED_SFU_BIN` | 自动搜索 / 按需编译 monorepo `Newt-SFU` | 指定 `owl-sfu` 可执行文件路径 |
+| `EMBEDDED_SFU` | development 默认 `true` / production 默认 `false` | 启动时自动创建本机 SFU 占位并拉起 `newt-sfu` 子进程 |
+| `EMBEDDED_SFU_BIN` | 自动搜索 / 按需编译 monorepo `Newt-SFU` | 指定 `newt-sfu` 可执行文件路径 |
 | `EMBEDDED_SFU_WSS_LISTEN` | `:8445` | 内嵌 SFU 信令监听地址 |
 | `EMBEDDED_SFU_MEDIA_UDP` | `3478` | 内嵌 SFU 媒体 UDP 端口 |
 | `EMBEDDED_SFU_PUBLIC_IP` | `127.0.0.1` | 上报给客户端的媒体 IP |

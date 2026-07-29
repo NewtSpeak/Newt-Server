@@ -201,7 +201,7 @@ func (a *api) listTopology(c *gin.Context) {
 		}
 		views = append(views, v)
 		controlLinks = append(controlLinks, topologyControlLink{
-			ServerID: "owl-server",
+			ServerID: "newt-server",
 			NodeID:   node.ID.String(),
 			Up:       v.Online,
 			Kind:     "grpc_control",
@@ -254,7 +254,7 @@ func (a *api) listTopology(c *gin.Context) {
 	}
 
 	serverInfo := topologyServerInfo{
-		ID:                 "owl-server",
+		ID:                 "newt-server",
 		DisplayName:        "Newt-Server",
 		Role:               "control_plane",
 		HTTPAddress:        a.deps.Cfg.Address,

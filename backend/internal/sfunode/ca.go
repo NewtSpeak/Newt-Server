@@ -190,13 +190,13 @@ func (ca *ClusterCA) generateServerCert(certPath, keyPath string) error {
 		return err
 	}
 	now := time.Now().UTC()
-	dnsNames := []string{"localhost", "owl-server"}
+	dnsNames := []string{"localhost", "newt-server"}
 	if hostname, err := os.Hostname(); err == nil && hostname != "" {
 		dnsNames = append(dnsNames, hostname)
 	}
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "owl-server-control", Organization: []string{"NewtSpeak"}},
+		Subject:      pkix.Name{CommonName: "newt-server-control", Organization: []string{"NewtSpeak"}},
 		DNSNames:     dnsNames,
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 		NotBefore:    now.Add(-5 * time.Minute),

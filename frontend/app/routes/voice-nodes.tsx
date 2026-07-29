@@ -436,7 +436,7 @@ export default function VoiceNodesPage() {
                 maxLength={64}
               />
               <p className="text-xs text-muted-foreground">
-                使用本地发布目录时填版本号即可（文件名 owl-sfu-&lt;version&gt;-linux-amd64）。
+                使用本地发布目录时填版本号即可（文件名 newt-sfu-&lt;version&gt;-linux-amd64）。
               </p>
             </div>
             <div className="grid gap-2">
@@ -445,7 +445,7 @@ export default function VoiceNodesPage() {
                 id="upgrade-url"
                 value={upgradeURL}
                 onChange={e => setUpgradeURL(e.target.value)}
-                placeholder="https://…/owl-sfu"
+                placeholder="https://…/newt-sfu"
               />
             </div>
             <div className="grid gap-2">
@@ -500,7 +500,7 @@ export default function VoiceNodesPage() {
           <EmptyState
             icon={ServerIcon}
             title="还没有 SFU 节点"
-            description="点「自动部署到服务器」填写目标机 SSH 信息，系统会自动安装 owl-sfu 并接入集群；也可创建占位后手动下发 Enrollment Token。"
+            description="点「自动部署到服务器」填写目标机 SSH 信息，系统会自动安装 newt-sfu 并接入集群；也可创建占位后手动下发 Enrollment Token。"
           />
         )}
         {list.length > 0 && (

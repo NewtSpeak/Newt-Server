@@ -179,7 +179,7 @@ func (c *CA) ServerCert(sans []string) (tls.Certificate, error) {
 	now := time.Now().UTC()
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "owl-server-control"},
+		Subject:      pkix.Name{CommonName: "newt-server-control"},
 		NotBefore:    now.Add(-5 * time.Minute),
 		NotAfter:     now.Add(serverCertValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature,

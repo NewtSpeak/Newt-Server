@@ -66,9 +66,9 @@ jget() { python3 -c "import sys, json; d = json.loads(sys.argv[1]); print($2)" "
 echo "==> 创建数据库 $DB_NAME"
 psql "$PG_ADMIN_URL" -qc "CREATE DATABASE ${DB_NAME}"
 
-echo "==> 编译 owl-server / owl-sfu / loadbot"
-(cd "$ROOT/backend" && go build -o "$WORK/owl-server" ./cmd/server)
-(cd "$SFU_DIR" && go build -o "$WORK/owl-sfu" ./cmd/owl-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
+echo "==> 编译 newt-server / newt-sfu / loadbot"
+(cd "$ROOT/backend" && go build -o "$WORK/newt-server" ./cmd/server)
+(cd "$SFU_DIR" && go build -o "$WORK/newt-sfu" ./cmd/newt-sfu && go build -o "$WORK/loadbot" ./cmd/loadbot)
 
 # -----------------------------------------------------------------------------
 # 1. 启动 Newt-Server（业务 API :18080 + SFU 控制面 gRPC :19443）
@@ -84,7 +84,7 @@ env \
   SFU_CONTROL_PUBLIC_ENDPOINT="127.0.0.1:${GRPC_PORT}" \
   CONTROL_ADDRESS=":18444" \
   GIN_MODE=release \
-  "$WORK/owl-server" >"$WORK/server.log" 2>&1 &
+  "$WORK/newt-server" >"$WORK/server.log" 2>&1 &
 SERVER_PID=$!
 
 for i in $(seq 1 60); do
@@ -129,7 +129,7 @@ psql "$DB_URL" -qc "INSERT INTO members (id, guild_id, user_id, nickname, create
 echo "    guild=$GID channel=$CID"
 
 # -----------------------------------------------------------------------------
-# 4. SFU 节点占位 + enroll token → 启动 owl-sfu（dev：no_tls + enroll_insecure）
+# 4. SFU 节点占位 + enroll token → 启动 newt-sfu（dev：no_tls + enroll_insecure）
 # -----------------------------------------------------------------------------
 echo "==> 创建 SFU 节点占位"
 NODE=$(curl -sf -X POST "$API/admin/sfu/nodes" -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -153,8 +153,8 @@ advertise_wss_url: "ws://127.0.0.1:${SFU_WSS_PORT}/ws"
 max_users: 100
 EOF
 
-echo "==> 启动 owl-sfu"
-"$WORK/owl-sfu" --config "$WORK/sfu-config.yaml" >"$WORK/sfu.log" 2>&1 &
+echo "==> 启动 newt-sfu"
+"$WORK/newt-sfu" --config "$WORK/sfu-config.yaml" >"$WORK/sfu.log" 2>&1 &
 SFU_PID=$!
 
 echo "==> 等待节点 ONLINE（enroll + 控制通道注册 + 心跳）"

@@ -162,7 +162,7 @@ func (c *Client) RunScript(ctx context.Context, script string, sink LogSink) err
 	if !c.useSudo {
 		return c.runStdinScript(ctx, "bash -s", script, "", sink)
 	}
-	remotePath := fmt.Sprintf("/tmp/.owl-sfu-deploy-%d.sh", time.Now().UnixNano())
+	remotePath := fmt.Sprintf("/tmp/.newt-sfu-deploy-%d.sh", time.Now().UnixNano())
 	writeCmd := fmt.Sprintf("umask 077 && cat > %s", remotePath)
 	if err := c.runStdinScript(ctx, writeCmd, script, "", nil); err != nil {
 		return fmt.Errorf("上传部署脚本失败: %w", err)

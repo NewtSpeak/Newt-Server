@@ -1,4 +1,4 @@
-// Package embeddedsfu 在 Newt-Server 启动时自动创建本机 SFU 占位并拉起 owl-sfu 子进程，
+// Package embeddedsfu 在 Newt-Server 启动时自动创建本机 SFU 占位并拉起 newt-sfu 子进程，
 // 纳入平台默认调度池，使用户无需单独启动/接入 SFU 即可语音通话。
 package embeddedsfu
 
@@ -70,7 +70,7 @@ type Process struct {
 	stopOnce sync.Once
 }
 
-// Start 确保节点占位 + 调度开关，解析/编译 owl-sfu，拉起并后台监督。
+// Start 确保节点占位 + 调度开关，解析/编译 newt-sfu，拉起并后台监督。
 // 失败时返回 error（调用方应记日志但不宜阻断主 API 启动）。
 func Start(parent context.Context, db *gorm.DB, cfg config.Config) (*Process, error) {
 	if !cfg.EmbeddedSFU {
@@ -311,7 +311,7 @@ func (p *Process) runOnce(ctx context.Context, enrollToken string) error {
 	setChildProcGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("启动 owl-sfu 失败: %w", err)
+		return fmt.Errorf("启动 newt-sfu 失败: %w", err)
 	}
 	p.mu.Lock()
 	p.cmd = cmd
@@ -381,10 +381,10 @@ func resolveBinary(log *slog.Logger, configured, workDir string) (string, error)
 		candidates = append(candidates, v)
 	}
 	// 固定落盘位置：优先使用已编译缓存。
-	cached := filepath.Join(workDir, "bin", "owl-sfu")
+	cached := filepath.Join(workDir, "bin", "newt-sfu")
 	candidates = append(candidates, cached)
 	// PATH
-	if p, err := exec.LookPath("owl-sfu"); err == nil {
+	if p, err := exec.LookPath("newt-sfu"); err == nil {
 		candidates = append(candidates, p)
 	}
 	// monorepo 相对路径（从 cwd / 可执行文件旁推断）。
@@ -402,19 +402,19 @@ func resolveBinary(log *slog.Logger, configured, workDir string) (string, error)
 	// 尝试从 monorepo 源码编译到 workDir/bin/newt-sfu。
 	src := findSFUModuleRoot()
 	if src == "" {
-		return "", fmt.Errorf("未找到 owl-sfu 可执行文件；请设置 EMBEDDED_SFU_BIN 或将 Newt-SFU 放在 monorepo 中")
+		return "", fmt.Errorf("未找到 newt-sfu 可执行文件；请设置 EMBEDDED_SFU_BIN 或将 Newt-SFU 放在 monorepo 中")
 	}
 	out := cached
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return "", err
 	}
-	log.Info("正在编译内嵌 owl-sfu", "module", src, "out", out)
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/owl-sfu")
+	log.Info("正在编译内嵌 newt-sfu", "module", src, "out", out)
+	cmd := exec.Command("go", "build", "-o", out, "./cmd/newt-sfu")
 	cmd.Dir = src
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("编译 owl-sfu 失败: %w\n%s", err, truncate(string(output), 2000))
+		return "", fmt.Errorf("编译 newt-sfu 失败: %w\n%s", err, truncate(string(output), 2000))
 	}
 	return out, nil
 }
@@ -431,10 +431,10 @@ func monorepoSFUBinCandidates() []string {
 		cur := root
 		for i := 0; i < 6; i++ {
 			out = append(out,
-				filepath.Join(cur, "Newt-SFU", "owl-sfu"),
-				filepath.Join(cur, "Newt-SFU", "bin", "owl-sfu"),
-				filepath.Join(cur, "..", "Newt-SFU", "owl-sfu"),
-				filepath.Join(cur, "..", "Newt-SFU", "bin", "owl-sfu"),
+				filepath.Join(cur, "Newt-SFU", "newt-sfu"),
+				filepath.Join(cur, "Newt-SFU", "bin", "newt-sfu"),
+				filepath.Join(cur, "..", "Newt-SFU", "newt-sfu"),
+				filepath.Join(cur, "..", "Newt-SFU", "bin", "newt-sfu"),
 			)
 			parent := filepath.Dir(cur)
 			if parent == cur {
@@ -456,12 +456,12 @@ func findSFUModuleRoot() string {
 		cur := root
 		for i := 0; i < 6; i++ {
 			candidate := filepath.Join(cur, "Newt-SFU")
-			if fileExists(filepath.Join(candidate, "go.mod")) && fileExists(filepath.Join(candidate, "cmd", "owl-sfu", "main.go")) {
+			if fileExists(filepath.Join(candidate, "go.mod")) && fileExists(filepath.Join(candidate, "cmd", "newt-sfu", "main.go")) {
 				return candidate
 			}
 			candidate = filepath.Join(cur, "..", "Newt-SFU")
 			if abs, err := filepath.Abs(candidate); err == nil {
-				if fileExists(filepath.Join(abs, "go.mod")) && fileExists(filepath.Join(abs, "cmd", "owl-sfu", "main.go")) {
+				if fileExists(filepath.Join(abs, "go.mod")) && fileExists(filepath.Join(abs, "cmd", "newt-sfu", "main.go")) {
 					return abs
 				}
 			}

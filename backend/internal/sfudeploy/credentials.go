@@ -1,4 +1,4 @@
-// Package sfudeploy 通过 SSH 把 owl-sfu 节点自动部署到远程 Linux 服务器：
+// Package sfudeploy 通过 SSH 把 newt-sfu 节点自动部署到远程 Linux 服务器：
 // 安装依赖 → 下载二进制 → 创建占位节点并签发 enrollment token → 写配置与 systemd → 启动 →
 // 等待节点 enroll 上线。部署过程以 Gateway 事件实时回传日志（见 deployer.go）。
 package sfudeploy
