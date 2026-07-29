@@ -12,11 +12,11 @@ import type { Route } from "./+types/root"
 import { Toaster } from "~/components/ui/sonner"
 import "./app.css"
 
-/** 管理后台图标：来自 Newt-assets/logo.png 生成 */
+/** 管理后台图标：来自 Newt-assets/logo.png（links + 下方 head 双写，避免 SPA 壳漏掉） */
 export const links: Route.LinksFunction = () => [
-  { rel: "icon", href: "/favicon.ico", sizes: "any" },
-  { rel: "icon", type: "image/png", href: "/favicon.png" },
-  { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+  { rel: "icon", href: "/favicon.ico?v=newt2", sizes: "any" },
+  { rel: "icon", type: "image/png", href: "/favicon.png?v=newt2" },
+  { rel: "apple-touch-icon", href: "/apple-touch-icon.png?v=newt2" },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -25,6 +25,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/* 显式写入，防止 SPA 预渲染不带 links、浏览器继续用 React Router 默认图标缓存 */}
+        <link rel="icon" href="/favicon.ico?v=newt2" sizes="any" />
+        <link rel="icon" type="image/png" href="/favicon.png?v=newt2" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=newt2" />
         <Meta />
         <Links />
       </head>
