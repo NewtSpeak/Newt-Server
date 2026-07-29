@@ -19,12 +19,25 @@ export const links: Route.LinksFunction = () => [
   { rel: "apple-touch-icon", href: "/apple-touch-icon.png?v=newt2" },
 ]
 
+/** 默认标签页标题 */
+export function meta(): Route.MetaDescriptors {
+  return [
+    { title: "NewtSpeak 管理控制台" },
+    {
+      name: "description",
+      content: "NewtSpeak 平台管理后台 — 服务器、语音节点、治理与开放平台",
+    },
+    { name: "application-name", content: "NewtSpeak" },
+  ]
+}
+
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>NewtSpeak 管理控制台</title>
         {/* 显式写入，防止 SPA 预渲染不带 links、浏览器继续用 React Router 默认图标缓存 */}
         <link rel="icon" href="/favicon.ico?v=newt2" sizes="any" />
         <link rel="icon" type="image/png" href="/favicon.png?v=newt2" />

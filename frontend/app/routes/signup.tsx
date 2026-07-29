@@ -7,6 +7,9 @@ import { api, type RegistrationStatus } from "~/lib/api"
 
 export default function SignupPage() {
   const [open, setOpen] = useState<boolean | null>(null)
+  useEffect(() => {
+    document.title = "注册 · NewtSpeak"
+  }, [])
   useEffect(() => { api<RegistrationStatus>("/auth/registration-status").then(status => setOpen(status.registration_open)).catch(() => setOpen(false)) }, [])
   if (open === false) return <Navigate to="/login" replace />
   if (open === null) return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">正在检查初始化状态…</div>

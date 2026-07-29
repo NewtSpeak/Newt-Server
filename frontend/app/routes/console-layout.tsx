@@ -34,6 +34,12 @@ export default function ConsoleLayout() {
       })
   }, [navigate])
 
+  // 标签页标题：页面名 · NewtSpeak
+  useEffect(() => {
+    const page = pageTitle(location.pathname)
+    document.title = page ? `${page} · NewtSpeak` : "NewtSpeak 管理控制台"
+  }, [location.pathname])
+
   // 服务器结构实时同步：GUILD_UPDATE 事件载荷内嵌完整 guild 实体，本地就地合并；
   // GUILD_CREATE / GUILD_DELETE 重拉列表兜底（成员关系变化本地无法推导）。
   // guilds 经 ConsoleContext 下发全部页面，名称/图标/治理开关等基本信息随事件即时更新。
