@@ -14,11 +14,10 @@ export default function LoginPage() {
       <div className="flex w-full max-w-sm flex-col gap-6">
         <a href="/" className="flex items-center gap-2 self-center font-medium">
           <img
-            src="/logo.png"
+            src="/icon.svg"
             alt="NewtSpeak"
-            className="size-8 rounded-md object-cover"
-            width={32}
-            height={32}
+            className="h-8 w-auto object-contain dark:invert"
+            draggable={false}
           />
           NewtSpeak
         </a>

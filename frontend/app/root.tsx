@@ -12,7 +12,7 @@ import type { Route } from "./+types/root"
 import { Toaster } from "~/components/ui/sonner"
 import "./app.css"
 
-/** 管理后台图标：来自 Newt-assets/logo.png（links + 下方 head 双写，避免 SPA 壳漏掉） */
+/** 管理后台 favicon；登录页品牌字标用 /icon.svg（links + 下方 head 双写，避免 SPA 壳漏掉） */
 export const links: Route.LinksFunction = () => [
   { rel: "icon", href: "/favicon.ico?v=newt2", sizes: "any" },
   { rel: "icon", type: "image/png", href: "/favicon.png?v=newt2" },
