@@ -112,7 +112,12 @@ type Message struct {
 	VisibleTo UUIDList `gorm:"type:jsonb;not null;default:'[]'" json:"visible_to,omitempty"`
 	// VisibleRoleIDs 消息限定可见身份组（空 = 公开，频道 VIEW 即可）。
 	// 非空时仅：作者 ∪ 持有任一指定角色的成员 ∪ 频道最终 MANAGE_MESSAGES ∪ 服主/系统管可见。
-	VisibleRoleIDs UUIDList  `gorm:"type:jsonb;not null;default:'[]'" json:"visible_role_ids"`
+	// 与 VisibleUserIDs 取并集：任一命中即可见。
+	VisibleRoleIDs UUIDList `gorm:"type:jsonb;not null;default:'[]'" json:"visible_role_ids"`
+	// VisibleUserIDs 消息限定可见用户（服内成员 user_id）。
+	// 与 VisibleRoleIDs 一起构成「限定可见」；任一非空即启用过滤。
+	// 作者始终可见；MANAGE_MESSAGES / 服主 / 系统管仍可审核。
+	VisibleUserIDs UUIDList  `gorm:"type:jsonb;not null;default:'[]'" json:"visible_user_ids"`
 	CreatedAt      time.Time `gorm:"index:idx_message_created" json:"created_at"`
 	DeletedAt      *time.Time `gorm:"index:idx_message_deleted" json:"deleted_at,omitempty"`
 }

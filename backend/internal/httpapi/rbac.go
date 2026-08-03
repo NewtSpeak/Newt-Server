@@ -47,7 +47,10 @@ func (a *API) createGuild(c *gin.Context) {
 			return err
 		}
 		// 默认角色种子（@everyone + 内置管理员）与用户端建服共用同一实现。
-		return guildseed.SeedDefaultRoles(tx, guild.ID)
+		if err := guildseed.SeedDefaultRoles(tx, guild.ID); err != nil {
+			return err
+		}
+		return guildseed.BindOwnerToManagedAdmin(tx, guild.ID, member.ID)
 	})
 	if err != nil {
 		fail(c, 500, "DATABASE_ERROR", "创建服务器失败")

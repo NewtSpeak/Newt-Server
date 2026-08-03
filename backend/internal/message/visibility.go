@@ -8,9 +8,9 @@ import (
 	"github.com/newtspeak/newt-server/backend/internal/snapshot"
 )
 
-// isMessageRestricted 消息是否启用了限定可见范围。
+// isMessageRestricted 消息是否启用了限定可见范围（角色和/或用户名单）。
 func isMessageRestricted(msg model.Message) bool {
-	return len(msg.VisibleRoleIDs) > 0
+	return len(msg.VisibleRoleIDs) > 0 || len(msg.VisibleUserIDs) > 0
 }
 
 // roleIDsFromCtx 从权限上下文提取角色 ID（含 @everyone）。
@@ -30,7 +30,7 @@ func roleIDsFromCtx(ctx *perms.GuildContext) []uuid.UUID {
 }
 
 // canViewMessage 判定 viewer 是否可见该消息。
-// 公开消息恒 true；限定消息：作者 / 角色交集 / MANAGE_MESSAGES / 服主·系统管。
+// 公开消息恒 true；限定消息：作者 / 用户名单 / 角色交集 / MANAGE_MESSAGES / 服主·系统管。
 // bits 为观众在该频道的最终权限位；viewerRoleIDs 为其当前角色集合。
 func canViewMessage(
 	viewerID uuid.UUID,
@@ -48,7 +48,12 @@ func canViewMessage(
 	if ownerOrSysAdmin || rbac.Has(bits, rbac.ManageMessages) {
 		return true
 	}
-	if len(viewerRoleIDs) == 0 {
+	for _, id := range msg.VisibleUserIDs {
+		if id == viewerID {
+			return true
+		}
+	}
+	if len(msg.VisibleRoleIDs) == 0 || len(viewerRoleIDs) == 0 {
 		return false
 	}
 	have := make(map[uuid.UUID]struct{}, len(viewerRoleIDs))
@@ -178,14 +183,22 @@ func (s *service) userCanViewMessage(userID uuid.UUID, msg model.Message) bool {
 	if msg.GuildID == uuid.Nil {
 		return true
 	}
+	// 快速路径：用户在可见名单
+	for _, id := range msg.VisibleUserIDs {
+		if id == userID {
+			return true
+		}
+	}
 	// 快速路径：持有任一可见角色
-	var n int64
-	err := s.db.Raw(`SELECT COUNT(*) FROM members m
-		JOIN member_roles mr ON mr.member_id = m.id
-		WHERE m.guild_id = ? AND m.user_id = ? AND mr.role_id IN ?`,
-		msg.GuildID, userID, []uuid.UUID(msg.VisibleRoleIDs)).Scan(&n).Error
-	if err == nil && n > 0 {
-		return true
+	if len(msg.VisibleRoleIDs) > 0 {
+		var n int64
+		err := s.db.Raw(`SELECT COUNT(*) FROM members m
+			JOIN member_roles mr ON mr.member_id = m.id
+			WHERE m.guild_id = ? AND m.user_id = ? AND mr.role_id IN ?`,
+			msg.GuildID, userID, []uuid.UUID(msg.VisibleRoleIDs)).Scan(&n).Error
+		if err == nil && n > 0 {
+			return true
+		}
 	}
 	var user model.User
 	if err := s.db.First(&user, "id = ?", userID).Error; err != nil {
@@ -203,6 +216,69 @@ func (s *service) userCanViewMessage(userID uuid.UUID, msg model.Message) bool {
 		return false
 	}
 	return rbac.Has(bits, rbac.ManageMessages)
+}
+
+// validateVisibleUserIDs 校验并归一化发送时的可见用户名单（须为本服成员）。
+func (s *service) validateVisibleUserIDs(guildID uuid.UUID, channelType model.ChannelType, raw []uuid.UUID) (model.UUIDList, error) {
+	if channelType.IsPrivate() || len(raw) == 0 {
+		return model.UUIDList{}, nil
+	}
+	if channelType != model.ChannelText {
+		return model.UUIDList{}, errVisibleRolesTextOnly
+	}
+	seen := make(map[uuid.UUID]struct{}, len(raw))
+	ids := make([]uuid.UUID, 0, len(raw))
+	for _, id := range raw {
+		if id == uuid.Nil {
+			return nil, errVisibleUserInvalid
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return model.UUIDList{}, nil
+	}
+	if len(ids) > maxVisibleUsers {
+		return nil, errVisibleUsersTooMany
+	}
+	var count int64
+	if err := s.db.Model(&model.Member{}).
+		Where("guild_id = ? AND user_id IN ?", guildID, ids).
+		Count(&count).Error; err != nil {
+		return nil, err
+	}
+	if int(count) != len(ids) {
+		return nil, errVisibleUserInvalid
+	}
+	return model.UUIDList(ids), nil
+}
+
+// resolveEffectiveVisibleUsers 合成客户端可见用户名单（频道 ForceDefault 时忽略客户端用户）。
+func (s *service) resolveEffectiveVisibleUsers(
+	channel model.Channel,
+	clientUsers []uuid.UUID,
+	clientSpecified bool,
+) (model.UUIDList, error) {
+	if channel.Type.IsPrivate() || channel.Type != model.ChannelText {
+		if clientSpecified && len(clientUsers) > 0 {
+			return nil, errVisibleRolesTextOnly
+		}
+		return model.UUIDList{}, nil
+	}
+	// 强制默认可见范围时不允许额外指定用户（与角色策略一致）
+	if channel.ForceDefaultVisibility {
+		return model.UUIDList{}, nil
+	}
+	if !clientSpecified {
+		return model.UUIDList{}, nil
+	}
+	if len(clientUsers) > 0 && !channel.AllowRestrictedVisibility {
+		return nil, errVisibleRolesDisabled
+	}
+	return s.validateVisibleUserIDs(channel.GuildID, channel.Type, clientUsers)
 }
 
 // resolveAudienceUserIDs 限定可见消息的推送受众：

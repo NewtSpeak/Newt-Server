@@ -44,6 +44,10 @@ type createMessageRequest struct {
 	// VisibleRoleIDs 限定可见身份组；省略 = 跟随频道默认；显式 [] = 公开；非空 = 限定。
 	// 用指针区分「未携带」与「携带空数组」。与 ephemeral 互斥语义上独立（bot ephemeral 优先）。
 	VisibleRoleIDs *[]string `json:"visible_role_ids"`
+	// VisibleUserIDs 限定可见用户（服内成员）；省略 = 不额外限定用户；
+	// 显式 [] = 清空用户名单；非空 = 指定用户可见（与角色名单取并集）。
+	// 与 VisibleRoleIDs 任一非空即启用限定可见；频道 ForceDefaultVisibility 时忽略。
+	VisibleUserIDs *[]string `json:"visible_user_ids"`
 }
 
 // maxEphemeralTargets ephemeral 可见名单人数上限。
@@ -127,13 +131,19 @@ func (s *service) createMessage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// 限定可见身份组：频道策略 + 客户端请求合成（仅服内 TEXT；私信忽略）。
-	// ephemeral 消息不套用角色可见（名单已足够窄）。
+	// 限定可见（角色 + 用户）：频道策略 + 客户端请求合成（仅服内 TEXT；私信忽略）。
+	// ephemeral 消息不套用（名单已足够窄）。
 	var visibleRoleIDs model.UUIDList
+	var visibleUserIDs model.UUIDList
 	if len(visibleTo) == 0 {
-		clientSpecified := input.VisibleRoleIDs != nil
+		clientRolesSpecified := input.VisibleRoleIDs != nil
 		var visErr error
-		visibleRoleIDs, visErr = s.parseAndValidateVisibleRoles(c, channel, input.VisibleRoleIDs, clientSpecified)
+		visibleRoleIDs, visErr = s.parseAndValidateVisibleRoles(c, channel, input.VisibleRoleIDs, clientRolesSpecified)
+		if visErr != nil {
+			return
+		}
+		clientUsersSpecified := input.VisibleUserIDs != nil
+		visibleUserIDs, visErr = s.parseAndValidateVisibleUsers(c, channel, input.VisibleUserIDs, clientUsersSpecified)
 		if visErr != nil {
 			return
 		}
@@ -264,9 +274,10 @@ func (s *service) createMessage(c *gin.Context) {
 		MentionRoles:    mentions.Roles,
 		MentionEveryone: mentions.Everyone,
 		StickerItems:    stickerItemsJSON,
-		VisibleTo:       visibleTo,
-		VisibleRoleIDs:  visibleRoleIDs,
-		CreatedAt:       now,
+		VisibleTo:      visibleTo,
+		VisibleRoleIDs: visibleRoleIDs,
+		VisibleUserIDs: visibleUserIDs,
+		CreatedAt:      now,
 	}
 	if card != "" {
 		message.Card = &card
@@ -529,6 +540,33 @@ func (s *service) parseAndValidateVisibleRoles(c *gin.Context, channel model.Cha
 	return list, nil
 }
 
+// parseAndValidateVisibleUsers 解析请求中的 visible_user_ids；失败时已写响应。
+func (s *service) parseAndValidateVisibleUsers(c *gin.Context, channel model.Channel, raw *[]string, clientSpecified bool) (model.UUIDList, error) {
+	var ids []uuid.UUID
+	if raw != nil {
+		ids = make([]uuid.UUID, 0, len(*raw))
+		for _, item := range *raw {
+			id, err := uuid.Parse(item)
+			if err != nil {
+				fail(c, http.StatusBadRequest, "INVALID_VISIBLE_USERS", "visible_user_ids 含非法 ID")
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+	}
+	list, err := s.resolveEffectiveVisibleUsers(channel, ids, clientSpecified)
+	if err != nil {
+		switch err {
+		case errVisibleRolesTextOnly, errVisibleUserInvalid, errVisibleRolesDisabled, errVisibleUsersTooMany:
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_USERS", err.Error())
+		default:
+			fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "校验可见用户失败")
+		}
+		return nil, err
+	}
+	return list, nil
+}
+
 // getMessage GET /channels/{id}/messages/{mid}；读取单条同样属于历史读取，需 READ_MESSAGE_HISTORY。
 // 软删消息对用户侧一律 404（AQ.3 墓碑语义）。
 func (s *service) getMessage(c *gin.Context) {
@@ -568,11 +606,13 @@ func (s *service) getMessage(c *gin.Context) {
 }
 
 type editMessageRequest struct {
-	// Content 正文；与 VisibleRoleIDs 至少提供一项（兼容仅改可见范围）。
+	// Content 正文；与 VisibleRoleIDs / VisibleUserIDs 至少提供一项。
 	Content *string `json:"content"`
-	// VisibleRoleIDs 修改可见范围（仅作者）；指针区分未携带 / 公开 / 限定。
+	// VisibleRoleIDs 修改可见角色范围（仅作者）；指针区分未携带 / 公开 / 限定。
 	// 频道 ForceDefaultVisibility 时禁止修改。
 	VisibleRoleIDs *[]string `json:"visible_role_ids"`
+	// VisibleUserIDs 修改可见用户名单（仅作者）；指针区分未携带 / 清空 / 限定。
+	VisibleUserIDs *[]string `json:"visible_user_ids"`
 }
 
 // editMessage PATCH /channels/{id}/messages/{mid}（AS.1–AS.5）。
@@ -614,8 +654,8 @@ func (s *service) editMessage(c *gin.Context) {
 	if !bind(c, &input) {
 		return
 	}
-	if input.Content == nil && input.VisibleRoleIDs == nil {
-		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "content 与 visible_role_ids 至少提供一项")
+	if input.Content == nil && input.VisibleRoleIDs == nil && input.VisibleUserIDs == nil {
+		fail(c, http.StatusBadRequest, "INVALID_REQUEST", "content 与 visible_role_ids / visible_user_ids 至少提供一项")
 		return
 	}
 
@@ -624,7 +664,8 @@ func (s *service) editMessage(c *gin.Context) {
 	contentChanged := false
 	visibilityChanged := false
 	newContent := message.Content
-	newVisible := message.VisibleRoleIDs
+	newVisibleRoles := message.VisibleRoleIDs
+	newVisibleUsers := message.VisibleUserIDs
 	var mentions resolvedMentions
 	mentions.Users = message.Mentions
 	mentions.Roles = message.MentionRoles
@@ -645,7 +686,25 @@ func (s *service) editMessage(c *gin.Context) {
 		}
 		if !uuidListEqual(message.VisibleRoleIDs, list) {
 			visibilityChanged = true
-			newVisible = list
+			newVisibleRoles = list
+		}
+	}
+	if input.VisibleUserIDs != nil {
+		if message.IsEphemeral() {
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_USERS", "定向可见消息不可修改用户可见名单")
+			return
+		}
+		if channel.ForceDefaultVisibility {
+			fail(c, http.StatusBadRequest, "INVALID_VISIBLE_USERS", "本频道强制默认可见范围，不可单独修改")
+			return
+		}
+		list, visErr := s.parseAndValidateVisibleUsers(c, channel, input.VisibleUserIDs, true)
+		if visErr != nil {
+			return
+		}
+		if !uuidListEqual(message.VisibleUserIDs, list) {
+			visibilityChanged = true
+			newVisibleUsers = list
 		}
 	}
 
@@ -707,7 +766,8 @@ func (s *service) editMessage(c *gin.Context) {
 			updates["mention_everyone"] = mentions.Everyone
 		}
 		if visibilityChanged {
-			updates["visible_role_ids"] = newVisible
+			updates["visible_role_ids"] = newVisibleRoles
+			updates["visible_user_ids"] = newVisibleUsers
 		}
 		return tx.Model(&model.Message{}).Where("id = ?", message.ID).Updates(updates).Error
 	})
@@ -724,7 +784,8 @@ func (s *service) editMessage(c *gin.Context) {
 		message.MentionEveryone = mentions.Everyone
 	}
 	if visibilityChanged {
-		message.VisibleRoleIDs = newVisible
+		message.VisibleRoleIDs = newVisibleRoles
+		message.VisibleUserIDs = newVisibleUsers
 	}
 	view, err := s.messageViewOne(message, user.ID)
 	if err != nil {

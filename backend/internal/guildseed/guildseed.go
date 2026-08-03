@@ -12,6 +12,7 @@
 package guildseed
 
 import (
+	"errors"
 	"log"
 
 	"github.com/google/uuid"
@@ -66,6 +67,22 @@ func adminRole(guildID uuid.UUID) model.Role {
 	}
 }
 
+// BindOwnerToManagedAdmin 将所有者成员绑定到 guild 的 managed 管理员角色。
+// 建服时调用；失败（无 managed 角色）返回 nil 不阻断建服。
+func BindOwnerToManagedAdmin(tx *gorm.DB, guildID, memberID uuid.UUID) error {
+	var admin model.Role
+	err := tx.Where("guild_id = ? AND managed = true", guildID).
+		Order("position DESC").First(&admin).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	binding := model.MemberRole{MemberID: memberID, RoleID: admin.ID}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&binding).Error
+}
+
 // EnsureManagedAdminRoles 存量回填：对没有 managed 管理员角色的既有 guild 逐一
 // 创建之，并把既有 managed 角色对齐当前默认值（仍叫旧默认名「管理员」且无同名
 // 冲突的更名为 @admin；未配置颜色/样式的补默认渐变红——所有者自定义过的名称与
@@ -96,8 +113,50 @@ func EnsureManagedAdminRoles(db *gorm.DB) error {
 				log.Printf("guildseed: guild %s 已存在名为 %q 的角色，跳过内置管理员回填", guildID, AdminRoleName)
 			}
 		}
-		return upgradeManagedAdminRoles(tx)
+		if err := upgradeManagedAdminRoles(tx); err != nil {
+			return err
+		}
+		// 存量：所有者绑定 managed 管理员，修复用户名样式/角色列表缺失
+		return bindOwnersToManagedAdmin(tx)
 	})
+}
+
+// bindOwnersToManagedAdmin 把各服 Owner 的 member 绑到 managed @admin（幂等）。
+func bindOwnersToManagedAdmin(tx *gorm.DB) error {
+	type row struct {
+		MemberID uuid.UUID
+		RoleID   uuid.UUID
+	}
+	var rows []row
+	// 每个 guild 取 position 最高的 managed 角色，并找 owner 的 member 行
+	err := tx.Raw(`
+		SELECT m.id AS member_id, r.id AS role_id
+		FROM guilds g
+		JOIN members m ON m.guild_id = g.id AND m.user_id = g.owner_user_id
+		JOIN LATERAL (
+			SELECT id FROM roles
+			WHERE guild_id = g.id AND managed = true
+			ORDER BY position DESC
+			LIMIT 1
+		) r ON true
+		WHERE NOT EXISTS (
+			SELECT 1 FROM member_roles mr
+			WHERE mr.member_id = m.id AND mr.role_id = r.id
+		)
+	`).Scan(&rows).Error
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		binding := model.MemberRole{MemberID: row.MemberID, RoleID: row.RoleID}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&binding).Error; err != nil {
+			return err
+		}
+	}
+	if len(rows) > 0 {
+		log.Printf("guildseed: 已为 %d 个服主补绑 managed 管理员角色", len(rows))
+	}
+	return nil
 }
 
 // upgradeManagedAdminRoles 把既有 managed 角色对齐当前默认值（见 EnsureManagedAdminRoles 注释）。

@@ -108,7 +108,11 @@ func (h *api) createGuild(c *gin.Context) {
 		if err := tx.Create(&member).Error; err != nil {
 			return err
 		}
-		return guildseed.SeedDefaultRoles(tx, guild.ID)
+		if err := guildseed.SeedDefaultRoles(tx, guild.ID); err != nil {
+			return err
+		}
+		// 所有者绑定内置 @admin，用户名样式/角色徽章才能正确命中 managed 角色
+		return guildseed.BindOwnerToManagedAdmin(tx, guild.ID, member.ID)
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "DATABASE_ERROR", "创建服务器失败")

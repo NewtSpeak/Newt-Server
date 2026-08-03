@@ -75,10 +75,28 @@ func TestFilterVisibleMessages(t *testing.T) {
 
 func TestIsMessageRestricted(t *testing.T) {
 	if isMessageRestricted(model.Message{}) {
-		t.Fatal("空 visible_role_ids 应视为公开")
+		t.Fatal("空 visible_role_ids / visible_user_ids 应视为公开")
 	}
 	if !isMessageRestricted(model.Message{VisibleRoleIDs: model.UUIDList{uuid.New()}}) {
-		t.Fatal("非空应视为限定")
+		t.Fatal("非空角色应视为限定")
+	}
+	if !isMessageRestricted(model.Message{VisibleUserIDs: model.UUIDList{uuid.New()}}) {
+		t.Fatal("非空用户应视为限定")
+	}
+}
+
+func TestCanViewMessageListedUser(t *testing.T) {
+	author := uuid.New()
+	viewer := uuid.New()
+	msg := model.Message{
+		AuthorID:       author,
+		VisibleUserIDs: model.UUIDList{viewer},
+	}
+	if !canViewMessage(viewer, 0, nil, false, msg) {
+		t.Fatal("名单内用户应可见")
+	}
+	if canViewMessage(uuid.New(), 0, nil, false, msg) {
+		t.Fatal("名单外用户不应可见")
 	}
 }
 
