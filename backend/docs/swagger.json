@@ -4,7 +4,7 @@
         "description": "NewtSpeak 账号、Guild RBAC 与权限管理 API。",
         "title": "Newt-Server API",
         "contact": {},
-        "version": "0.1.0"
+        "version": "0.2.0"
     },
     "basePath": "/api/v1",
     "paths": {
